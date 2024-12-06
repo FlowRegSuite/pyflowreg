@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61", "scikit-build", "pybind11", "cmake"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyflowreg"
+version = "0.1.0"
+description = "Optical flow computations with bioformats, TIFF, and HDF5 support"
+authors = [
+  { name="Philipp Flotho", email="Philipp.Flotho@uni-saarland.de" }
+]
+license = "CC BY-NC-SA 1.0"
+dependencies = [
+  "numpy",
+  "scipy",
+  "scikit-image",
+  "opencv-contrib-python",
+  "h5py",
+  "python-bioformats",
+  "tifffile"
+]
+
+[tool.setuptools.packages.find]
+where = ["pyflowreg"]

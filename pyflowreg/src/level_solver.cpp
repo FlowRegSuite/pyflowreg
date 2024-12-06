@@ -1,5 +1,5 @@
 // Author   : Philipp Flotho
-// Copyright 2021 by Philipp Flotho, All rights reserved.
+// Copyright 2024 by Philipp Flotho, All rights reserved.
 //
 // This is a refactored version of the original MEX code for the optical flow level solver,
 // adapted to be called from Python using pybind11.
