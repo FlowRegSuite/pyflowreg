@@ -51,8 +51,6 @@ VS2015/hs_warp/x64
 .vs/
 *.vspx
 
-data/
-
 init.m
 
 *.asv
@@ -72,7 +70,6 @@ init.m
 *.avi
 .idea/
 venv/
-data/
 __pycache__/
 
 

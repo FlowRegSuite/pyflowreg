@@ -6,5 +6,4 @@ cmake
 pybind11
 opencv-contrib-python
 h5py
-python-bioformats
 tifffile

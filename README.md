@@ -5,15 +5,25 @@ Toolbox for the compensation and stabilization of multichannel microscopy videos
 ![Fig1](img/bg.jpg)
 
 
-## Installation
-
-To install the toolbox clone the repo or download the most recent release and run the ```set_path.m``` script. With ```savepath``` the toolbox will be permanently available in MATLAB.
-
-Please [contact us](mailto:Philipp.Flotho@uni-saarland.de) for more details.
-
 ## Requirements
 
-To run this toolbox, MATLAB 2018b onwards with configured C++ compiler (check [here](https://www.mathworks.com/support/requirements/supported-compilers.html) for supported compilers) is required.
+This code requires python 3.10 and cuda 11.8 for the gpu version. 
+
+Initialize the environment with
+
+```bash
+conda create --name raft2p python=3.10
+conda activate raft2p
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements.txt
+```
+
+## Installation via pip and conda
+
+```bash
+conda create --name pyflowreg python=3.10
+pip install pyflowreg
+```
 
 ## Getting started
 
@@ -21,26 +31,6 @@ This repository contains the demo scripts ```demos/jupiter.m``` and ```demos/jup
 
 The plugin supports most of the commonly used file types such as HDF5, tiff stacks and matlab mat files. To run the motion compensation, the options need to be defined into a ```OF_options``` object such as
 
-```
-options = OF_options(...
-    'input_file', 'input.hdf', ... % input path
-    'output_path', results_folder, ... % results folder
-    'output_format', 'MAT', ...
-    'alpha', [0.5, 0.5], ... % smoothness parameter
-    'sigma', [0.5, 0.5, 0.1; ... % gauss kernel size channel 1
-              0.5, 0.5, 0.1], ... % gauss kernel size channel 2
-    'weight', [1, 1], ...
-    'levels', 15, ... % solver levels
-    'eta', 0.86, ... % pyramid stepsize
-    'iterations', 25, ... % outer iterations (the larger the better the result, but slower)
-    'bin_size', 5, ... % binning over 5 frames from the 30 hz data
-    'buffer_size', 500, ... % size of blocks for the parallel evaluation (larger takes more memory)
-    'output_typename', [], ...
-    'reference_frames', 1:5 ...
-    );
-```
-
-The object is then passed to ```compensate_recording(options)``` to run the motion compensation on ```input.hdf``` into ```results_folder```. To run ```compensate_recording``` with default parameters, only the input file and output path need to be specified.
 
 ## Dataset
 
@@ -51,7 +41,22 @@ The dataset which we used for our evaluations is available as [2-Photon Movies w
 Details on the method and video results can be found [here](https://www.snnu.uni-saarland.de/flow-registration/).
 
 If you use parts of this code or the plugin for your work, please cite
-  
+
+> P. Flotho, S. Nomura, D. J. Strauss and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos,” arxiv, 2024. [doi:https://]()
+
+BibTeX entry
+```
+@article{flotea2024c,
+    author = {Flotho, P. and Nomura, S. and Strauss, D. J. and Kuhn, B.},
+    title = {Software for Non-Parametric Image Registration of 2-Photon Imaging Data},
+    year = {2022},
+  journal = {J Biophotonics},
+  doi = {https://doi.org/}
+}
+```
+
+and with the Flow-Registration model additionally
+
 > P. Flotho, S. Nomura, B. Kuhn and D. J. Strauss, “Software for Non-Parametric Image Registration of 2-Photon Imaging Data,” J Biophotonics, 2022. [doi:https://doi.org/10.1002/jbio.202100330](https://doi.org/10.1002/jbio.202100330)
 
 BibTeX entry
@@ -64,3 +69,4 @@ BibTeX entry
   doi = {https://doi.org/10.1002/jbio.202100330}
 }
 ```
+
