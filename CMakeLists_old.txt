@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.13)
+cmake_policy(SET CMP0148 NEW)
+
+project(pyflowreg LANGUAGES CXX)
+
+find_package(pybind11 CONFIG REQUIRED)
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+include_directories(${Python3_INCLUDE_DIRS})
+
+pybind11_add_module(_level_solver pyflowreg/src/level_solver.cpp)
+
+if (CMAKE_COMPILER_IS_GNUCXX)
+    set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+endif()
+
+install(TARGETS _level_solver
+    LIBRARY DESTINATION src
+)
