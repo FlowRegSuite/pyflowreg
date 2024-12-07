@@ -75,3 +75,8 @@ __pycache__/
 
 checkpoints/
 datasets/
+
+build/
+_skbuild
+
+*.pyd

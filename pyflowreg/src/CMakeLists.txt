@@ -1,13 +1,19 @@
 cmake_minimum_required(VERSION 3.13)
-project(my_package LANGUAGES CXX)
+project(pyflowreg LANGUAGES CXX)
 
+set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
-find_package(PythonLibs REQUIRED)
-include_directories(${PYTHON_INCLUDE_DIRS})
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+include_directories(${Python3_INCLUDE_DIRS})
 
-add_library(_level_solver SHARED level_solver.cpp)
-target_link_libraries(_level_solver PRIVATE pybind11::module)
+add_library(_level_solver MODULE level_solver.cpp)
+target_link_libraries(_level_solve  r PRIVATE pybind11::module Python3::Python)
 
 set_target_properties(_level_solver PROPERTIES
     PREFIX ""
-    SUFFIX "${PYTHON_EXTENSION_MODULE_SUFFIX}")
+    SUFFIX "${PYTHON_EXTENSION_MODULE_SUFFIX}"
+)
+
+install(TARGETS _level_solver
+    LIBRARY DESTINATION pyflowreg
+)

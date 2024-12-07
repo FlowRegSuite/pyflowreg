@@ -1,7 +1,32 @@
 import numpy as np
-from my_package import get_displacement  # Assuming get_displacement is implemented as discussed
+import h5py
+import cv2
+import pyflowreg as pfr
+from os.path import join, dirname
+import os
 
-def main():
+
+if __name__ == "__main__":
+    input_folder = join(dirname(dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
+    with h5py.File(join(input_folder, "synth_frames.h5"), "r") as f:
+        clean = f["clean"][:]
+        noisy30db = f["noisy30db"][:]
+        noisy35db = f["noisy35db"][:]
+        w = f["w"][:]
+
+    print(clean.shape)
+
+    frame1 = np.permute_dims(clean[0], (1, 2, 0))
+    frame2 = np.permute_dims(clean[1], (1, 2, 0))
+
+    u, v = pfr.get_displacement(
+        frame1, frame2, alpha=(2, 2),
+        iterations=20, update_lag=10, a_data=0.45, a_smooth=0.5)
+
+    print(frame1.shape)
+
+    pass
+
     # Create or load two frames as numpy arrays
     # For this example, let's just create synthetic frames.
     # Suppose m=64, n=64, single channel
@@ -32,6 +57,3 @@ def main():
     print("Displacement magnitude:", magnitude.mean())
     print("U-field mean:", du.mean())
     print("V-field mean:", dv.mean())
-
-if __name__ == "__main__":
-    main()

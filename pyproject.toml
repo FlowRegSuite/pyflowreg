@@ -7,18 +7,17 @@ name = "pyflowreg"
 version = "0.1.0"
 description = "Optical flow computations with bioformats, TIFF, and HDF5 support"
 authors = [
-  { name="Philipp Flotho", email="Philipp.Flotho@uni-saarland.de" }
+    { name="Philipp Flotho", email="Philipp.Flotho@uni-saarland.de" }
 ]
 license = { text = "CC BY-NC-SA 1.0" }
 dependencies = [
-  "numpy",
-  "scipy",
-  "scikit-image",
-  "opencv-contrib-python",
-  "h5py",
-  "tifffile",
-  "pillow"
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "opencv-contrib-python",
+    "h5py",
+    "tifffile",
+    "pillow",
+    "scikit-build",
+    "pybind11"
 ]
-
-[tool.setuptools.packages.find]
-where = ["pyflowreg"]

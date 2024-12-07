@@ -7,3 +7,5 @@ pybind11
 opencv-contrib-python
 h5py
 tifffile
+scikit-build
+pybind11
