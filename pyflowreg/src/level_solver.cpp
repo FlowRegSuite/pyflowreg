@@ -50,20 +50,20 @@ static void nonlinearity_smoothness(double* psi_smooth,
     // gradient w.r.t x
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < m; j++) {
-            int idx = j + i*m;
-            int idx_r = j + (i == n-1 ? i : i+1)*m;
-            ux[idx] = (u_full[idx_r] - u_full[idx]) / ( (i == n-1) ? hx : hx );
-            vx[idx] = (v_full[idx_r] - v_full[idx]) / ( (i == n-1) ? hx : hx );
+            int idx = j * n + i;
+            int idx_r = j * n + ((i == n - 1) ? i : i + 1);
+            ux[idx] = (u_full[idx_r] - u_full[idx]) / hx;
+            vx[idx] = (v_full[idx_r] - v_full[idx]) / hx;
         }
     }
 
     // gradient w.r.t y
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < m; j++) {
-            int idx = j + i*m;
-            int idx_b = (j == m-1 ? j : j+1) + i*m;
-            uy[idx] = (u_full[idx_b] - u_full[idx]) / ( (j == m-1) ? hy : hy );
-            vy[idx] = (v_full[idx_b] - v_full[idx]) / ( (j == m-1) ? hy : hy );
+            int idx = j * n + i;
+            int idx_b = ((j == m - 1) ? j : j + 1) * n + i;
+            uy[idx] = (u_full[idx_b] - u_full[idx]) / hy;
+            vy[idx] = (v_full[idx_b] - v_full[idx]) / hy;
         }
     }
 
@@ -194,13 +194,13 @@ py::array_t<double> compute_flow(
         for (int i = 1; i < n-1; i++) {
             for (int j = 1; j < m-1; j++) {
 
-                int idx = j + i*m;
+                int idx = j * n + i;
 
                 int s_idx[4];
-                s_idx[0] = j + (i-1)*m;
-                s_idx[1] = j + (i+1)*m;
-                s_idx[2] = (j+1) + i*m;
-                s_idx[3] = (j-1) + i*m;
+                s_idx[0] = (j - 1) * n + i; // Up
+                s_idx[1] = (j + 1) * n + i; // Down
+                s_idx[2] = j * n + (i + 1); // Right
+                s_idx[3] = j * n + (i - 1); // Left
 
                 double denom_u = 0;
                 double denom_v = 0;
@@ -252,9 +252,17 @@ py::array_t<double> compute_flow(
     // For convenience, we return a 3D array with shape (m,n,2).
     py::array_t<double> result_( { (size_t)m, (size_t)n, (size_t)2 } );
     double* result = (double*)result_.request().ptr;
-    for (int i = 0; i < m*n; i++) {
-        result[i] = du[i];
-        result[i + m*n] = dv[i];
+    //for (int i = 0; i < m*n; i++) {
+    //    result[i] = du[i];
+    //    result[i + m*n] = dv[i];
+    //}
+    for (int i = 0; i < m; i++) {
+        for (int j = 0; j < n; j++) {
+            size_t idx = i * n + j;
+            size_t out_idx = (i * n + j) * 2;
+            result[out_idx] = du[idx];
+            result[out_idx + 1] = dv[idx];
+        }
     }
 
     return result_;

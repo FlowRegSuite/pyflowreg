@@ -1,8 +1,9 @@
 import numpy as np
 from skimage.transform import resize
 from scipy.ndimage import median_filter
+import cv2
 from concurrent.futures import ProcessPoolExecutor
-
+from pyflowreg.src import compute_flow
 
 
 def get_displacements(c, c_ref, alpha=(2, 2), iterations=20, update_lag=10, a_data=0.45, a_smooth=0.5, hx=1.0, hy=1.0, weight=None):
@@ -40,20 +41,29 @@ def get_displacements(c, c_ref, alpha=(2, 2), iterations=20, update_lag=10, a_da
         return np.stack(results, axis=-1)
 
 
-def warpingDepth(eta, levels, dim, dim_ref):
+def warpingDepth(eta, levels, m, n):
     """
-    Compute the warping depth level for pyramid construction.
+    Compute the warping depth level for pyramid construction, mirroring MATLAB's implementation.
 
     Args:
         eta (float): Scaling factor per level.
         levels (int): Maximum number of levels.
-        dim (int): Dimension of the current image size.
-        dim_ref (int): Reference dimension.
+        m (int): Height of the image.
+        n (int): Width of the image.
 
     Returns:
         int: Computed warping depth.
     """
-    return int(np.floor(np.log(dim/dim_ref) / np.log(1/eta))) if dim != dim_ref else 0
+    min_dim = min(m, n)
+    warpingdepth = 0
+
+    for _ in range(levels):
+        warpingdepth += 1
+        min_dim *= eta
+        if round(min_dim) < 10:
+            break
+
+    return warpingdepth
 
 
 def add_boundary(f):
@@ -74,35 +84,77 @@ def add_boundary(f):
     return g
 
 
-def imregister_wrapper(f2_level, u, v, f1_level):
+def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
     """
-    Warp one image (f2_level) toward another (f1_level) using displacement fields (u, v).
+    Warp one image (f2_level) toward another (f1_level) using displacement fields (u, v),
+    mimicking MATLAB's imregister_wrapper_w function.
 
     Args:
-        f2_level (numpy.ndarray): Image to be warped.
-        u (numpy.ndarray): Displacements in y-direction.
-        v (numpy.ndarray): Displacements in x-direction.
-        f1_level (numpy.ndarray): Reference image.
+        f2_level (numpy.ndarray): Image to be warped, shape (H, W, C) or (H, W).
+        u (numpy.ndarray): Displacements in y-direction, shape (H, W).
+        v (numpy.ndarray): Displacements in x-direction, shape (H, W).
+        f1_level (numpy.ndarray): Reference image to fill in invalid regions, same shape as f2_level.
+        interpolation_method (str, optional): Interpolation method ('linear', 'cubic'). Defaults to 'cubic'.
 
     Returns:
-        numpy.ndarray: Warped image.
+        numpy.ndarray: Warped image, same shape as f2_level.
     """
-    coords_y, coords_x = np.indices(f2_level.shape[:2])
-    coords_x_warp = coords_x + v
-    coords_y_warp = coords_y + u
-    coords_x_warp[coords_x_warp < 0] = 0
-    coords_y_warp[coords_y_warp < 0] = 0
-    coords_x_warp[coords_x_warp >= f2_level.shape[1]] = f2_level.shape[1] - 1
-    coords_y_warp[coords_y_warp >= f2_level.shape[0]] = f2_level.shape[0] - 1
-    coords_x_warp = coords_x_warp.astype(int)
-    coords_y_warp = coords_y_warp.astype(int)
-    if f2_level.ndim == 3:
-        tmp = np.zeros_like(f2_level)
-        for c in range(f2_level.shape[2]):
-            tmp[:, :, c] = f2_level[coords_y_warp, coords_x_warp, c]
+    if f2_level.ndim not in [2, 3]:
+        raise ValueError("f2_level must be a 2D or 3D array.")
+    if f1_level.ndim != f2_level.ndim:
+        raise ValueError("f1_level must have the same number of dimensions as f2_level.")
+    if u.shape != f2_level.shape[:2] or v.shape != f2_level.shape[:2]:
+        raise ValueError("u and v must have the same height and width as f2_level.")
+
+    f2_level = f2_level.astype(np.float32)
+    f1_level = f1_level.astype(np.float32)
+    u = u.astype(np.float32)
+    v = v.astype(np.float32)
+
+    single_channel = False
+    if f2_level.ndim == 2:
+        f2_level = f2_level[:, :, np.newaxis]
+        f1_level = f1_level[:, :, np.newaxis]
+        single_channel = True
+
+    H, W, C = f2_level.shape
+
+    grid_y, grid_x = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+
+    map_x = (grid_x + v).astype(np.float32)
+    map_y = (grid_y + u).astype(np.float32)
+
+    out_of_bounds = (map_x < 0) | (map_x >= W) | (map_y < 0) | (map_y >= H)
+
+    map_x_clipped = np.clip(map_x, 0, W - 1).astype(np.float32)
+    map_y_clipped = np.clip(map_y, 0, H - 1).astype(np.float32)
+
+    if interpolation_method.lower() == 'cubic':
+        interp = cv2.INTER_CUBIC
+    elif interpolation_method.lower() == 'linear':
+        interp = cv2.INTER_LINEAR
     else:
-        tmp = f2_level[coords_y_warp, coords_x_warp]
-    return tmp
+        raise ValueError("Unsupported interpolation method. Use 'linear' or 'cubic'.")
+
+    warped = np.empty_like(f2_level, dtype=np.float32)
+
+    for c in range(C):
+        warped[:, :, c] = cv2.remap(
+            f2_level[:, :, c],
+            map_x_clipped,
+            map_y_clipped,
+            interpolation=interp,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0
+        )
+
+    for c in range(C):
+        warped[:, :, c][out_of_bounds] = f1_level[:, :, c][out_of_bounds]
+
+    if single_channel:
+        warped = warped[:, :, 0]
+
+    return warped
 
 
 def get_motion_tensor_gc(f1, f2, hx, hy):
@@ -157,7 +209,7 @@ def get_motion_tensor_gc(f1, f2, hx, hy):
     return J11[1:-1, 1:-1], J22[1:-1, 1:-1], J33[1:-1, 1:-1], J12[1:-1, 1:-1], J13[1:-1, 1:-1], J23[1:-1, 1:-1]
 
 
-def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, update_lag, verbose, a_data, a_smooth, hx, hy, compute_flow_func):
+def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, update_lag, verbose, a_data, a_smooth, hx, hy):
     """
     Solve the optical flow problem at a given pyramid level.
 
@@ -179,7 +231,7 @@ def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, 
     Returns:
         tuple: (du, dv) displacement increments.
     """
-    result = compute_flow_func(J11, J22, J33, J12, J13, J23, weight, u[1:-1, 1:-1], v[1:-1, 1:-1],
+    result = compute_flow(J11, J22, J33, J12, J13, J23, weight, u[1:-1, 1:-1], v[1:-1, 1:-1],
                                alpha[0], alpha[1], iterations, update_lag, a_data, a_smooth, hx, hy)
     du = np.zeros_like(u)
     dv = np.zeros_like(v)
@@ -189,7 +241,7 @@ def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, 
 
 
 def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.75,
-                     a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None, compute_flow_func=None):
+                     a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
     """
     Compute the displacement field between a fixed and a moving image using a coarse-to-fine approach.
 
@@ -239,14 +291,21 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, 
     f2_low = moving
 
     method = 'bicubic'
-    max_level_y = warpingDepth(eta, levels, m, m)
-    max_level_x = warpingDepth(eta, levels, n, n)
-    max_level = min(max_level_x, max_level_y) * 4
+    max_level_y = warpingDepth(eta, levels, m, n)
+    max_level_x = warpingDepth(eta, levels, m, n)
+
+    max_level = min(max_level_x, max_level_y) * 4;
+    max_level_y = min(max_level_y, max_level);
+    max_level_x = min(max_level_x, max_level);
 
     if max(max_level_x, max_level_y) <= min_level:
         min_level = max(max_level_x, max_level_y) - 1
     if min_level < 0:
         min_level = 0
+
+    print("Max level: ", max_level)
+    print("Min level: ", min_level)
+    print("pyramid levels: ", len(range(max(max_level_x, max_level_y), min_level - 1, -1)))
 
     for i in range(max(max_level_x, max_level_y), min_level - 1, -1):
         level_size = (int(round(m * eta**(min(i, max_level_y)))), int(round(n * eta**(min(i, max_level_x)))))
@@ -287,7 +346,13 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, 
         weight_level = resize(weight, (f1_level.shape[0], f1_level.shape[1], n_channels), order=3, mode='edge', anti_aliasing=True)
 
         du, dv = level_solver(J11, J22, J33, J12, J13, J23, weight_level, u, v, alpha, iterations, update_lag, 0,
-                              a_data_arr, a_smooth, hx, hy, compute_flow_func)
+                              a_data_arr, a_smooth, hx, hy)
+
+        # du_viz = du.copy()
+        # import cv2
+        # du_viz = cv2.normalize(du_viz, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        # cv2.imshow("du", du_viz)
+        # cv2.waitKey()
 
         if min(level_size) > 5:
             du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode='reflect')

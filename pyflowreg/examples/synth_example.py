@@ -4,6 +4,7 @@ import cv2
 import pyflowreg as pfr
 from os.path import join, dirname
 import os
+from pyflowreg.optical_flow import imregister_wrapper
 
 
 if __name__ == "__main__":
@@ -14,46 +15,39 @@ if __name__ == "__main__":
         noisy35db = f["noisy35db"][:]
         w = f["w"][:]
 
-    print(clean.shape)
-
     frame1 = np.permute_dims(clean[0], (1, 2, 0))
     frame2 = np.permute_dims(clean[1], (1, 2, 0))
+    frame1 = cv2.GaussianBlur(frame1, (5, 5), 1)
+    frame1 = cv2.normalize(frame1, None, 0, 1, cv2.NORM_MINMAX).astype(np.float64)
+    frame2 = cv2.GaussianBlur(frame2, (5, 5), 1)
+    frame2 = cv2.normalize(frame2, None, 0, 1, cv2.NORM_MINMAX).astype(np.float64)
+    w = np.permute_dims(w, (1, 2, 0))
 
-    u, v = pfr.get_displacement(
-        frame1, frame2, alpha=(2, 2),
-        iterations=20, update_lag=10, a_data=0.45, a_smooth=0.5)
+    w = pfr.get_displacement(
+        frame1, frame2, alpha=(250, 250), levels=1,
+        iterations=50, update_lag=10, a_data=0.45, a_smooth=1)
+
+    print(w.shape)
+
+    img1 = w[..., 0]
+    img2 = w[..., 1]
+    img1 = cv2.normalize(img1, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    img2 = cv2.normalize(img2, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    cv2.imshow("img1", img1)
+    cv2.imshow("img2", img2)
 
     print(frame1.shape)
 
-    pass
+    warped_frame2 = imregister_wrapper(frame2, w[..., 0], w[..., 1], frame1, interpolation_method='cubic')
 
-    # Create or load two frames as numpy arrays
-    # For this example, let's just create synthetic frames.
-    # Suppose m=64, n=64, single channel
-    m, n = 64, 64
-    fixed = np.zeros((m, n), dtype=np.float64)
-    moving = np.zeros((m, n), dtype=np.float64)
+    warped_display = cv2.normalize(warped_frame2[..., 1], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # Introduce a simple synthetic shift in 'moving' frame
-    # e.g., shift one pixel to the right
-    moving[:, 1:] = 1.0
+    frame1_display = cv2.normalize(frame1[..., 1], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    frame2_display = cv2.normalize(frame2[..., 1], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    # Compute displacement field
-    du, dv = get_displacement(
-        fixed,
-        moving,
-        alpha=(2,2),
-        iterations=20,
-        update_lag=10,
-        a_data=0.45,
-        a_smooth=0.5,
-        hx=1.0,
-        hy=1.0
-    )
+    cv2.imshow("Frame1 (Reference)", frame1_display)
+    cv2.imshow("Frame2 (Original)", frame2_display)
+    cv2.imshow("Warped Frame2", warped_display)
 
-    # Print or analyze the results
-    # du, dv are displacement fields in the vertical (u) and horizontal (v) directions respectively
-    magnitude = np.sqrt(du**2 + dv**2)
-    print("Displacement magnitude:", magnitude.mean())
-    print("U-field mean:", du.mean())
-    print("V-field mean:", dv.mean())
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
