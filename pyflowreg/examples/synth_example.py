@@ -5,27 +5,32 @@ import pyflowreg as pfr
 from os.path import join, dirname
 import os
 from pyflowreg.optical_flow import imregister_wrapper
+from time import time
 
 
 if __name__ == "__main__":
     input_folder = join(dirname(dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
     with h5py.File(join(input_folder, "synth_frames.h5"), "r") as f:
-        clean = f["clean"][:]
-        noisy30db = f["noisy30db"][:]
+        #clean = f["clean"][:]
+        clean = f["noisy30db"][:]
         noisy35db = f["noisy35db"][:]
         w = f["w"][:]
 
-    frame1 = np.permute_dims(clean[0], (1, 2, 0))
-    frame2 = np.permute_dims(clean[1], (1, 2, 0))
-    frame1 = cv2.GaussianBlur(frame1, (5, 5), 1)
-    frame1 = cv2.normalize(frame1, None, 0, 1, cv2.NORM_MINMAX).astype(np.float64)
-    frame2 = cv2.GaussianBlur(frame2, (5, 5), 1)
-    frame2 = cv2.normalize(frame2, None, 0, 1, cv2.NORM_MINMAX).astype(np.float64)
+    frame1 = np.permute_dims(clean[0], (1, 2, 0)).astype(float)
+    frame2 = np.permute_dims(clean[1], (1, 2, 0)).astype(float)
+    frame1 = cv2.GaussianBlur(frame1, (25, 25), 4)
+    frame2 = cv2.GaussianBlur(frame2, (25, 25), 4)
+
+    for i in range(2):
+        frame1[:, :, i] = cv2.normalize(frame1[..., i], None, 0, 1, cv2.NORM_MINMAX)
+        frame2[:, :, i] = cv2.normalize(frame2[..., i], None, 0, 1, cv2.NORM_MINMAX)
     w = np.permute_dims(w, (1, 2, 0))
 
+    start = time()
     w = pfr.get_displacement(
-        frame1, frame2, alpha=(250, 250), levels=1,
-        iterations=50, update_lag=10, a_data=0.45, a_smooth=1)
+        frame1[..., :], frame2[..., :], alpha=(1.5, 1.5), levels=100,
+        iterations=100, update_lag=5, a_data=0.45, a_smooth=1)
+    print("Elapsed time:", time() - start)
 
     print(w.shape)
 

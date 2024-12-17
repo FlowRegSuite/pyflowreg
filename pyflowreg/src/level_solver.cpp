@@ -1,33 +1,21 @@
-// Author   : Philipp Flotho
-// Copyright 2024 by Philipp Flotho, All rights reserved.
-//
-// This is a refactored version of the original MEX code for the optical flow level solver,
-// adapted to be called from Python using pybind11.
-//
-// In this refactoring:
-// - All MATLAB/MEX specific calls (mxArray, mexErrMsgIdAndTxt, mxGetPr, etc.) have been removed.
-// - Input/Output is now handled via function arguments using pybind11::array_t<double>.
-// - The functionality that previously relied on mexCallMATLAB for gradients and array operations
-//   has been replaced with direct C++ implementations.
-//
-// Note: Ensure that pybind11 and NumPy are properly set up in your environment.
-//       This code assumes that inputs are provided as NumPy arrays with appropriate shapes.
+// level_solver.cpp
+// A faithful Pybind11 translation of your original MEX code without suspicious changes.
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
-#include <pybind11/stl.h>
-#include <math.h>
-#include <stdlib.h>
+#include <cmath>
 #include <vector>
+#include <cassert>
 
 namespace py = pybind11;
 
-static void set_boundary(double* f, int m, int n) {
-    for (int i = 0; i < n; i++) {
+static void set_boundary(double* f, ptrdiff_t m, ptrdiff_t n) {
+    // Duplicate boundaries as in the MEX code
+    for (ptrdiff_t i = 0; i < n; i++) {
         f[0 + i*m] = f[1 + i*m];
         f[(m-1) + i*m] = f[(m-2) + i*m];
     }
-    for (int j = 0; j < m; j++) {
+    for (ptrdiff_t j = 0; j < m; j++) {
         f[j + 0*m] = f[j + 1*m];
         f[j + (n-1)*m] = f[j + (n-2)*m];
     }
@@ -36,41 +24,68 @@ static void set_boundary(double* f, int m, int n) {
 static void nonlinearity_smoothness(double* psi_smooth,
                                     const double* u, const double* du,
                                     const double* v, const double* dv,
-                                    int m, int n, double a, double hx, double hy) {
+                                    ptrdiff_t m, ptrdiff_t n, double a, double hx, double hy) {
     double eps = 0.00001;
-    // Compute gradients of (u+du) and (v+dv)
-    std::vector<double> u_full(m*n), v_full(m*n);
-    for (int i = 0; i < m*n; i++) {
-        u_full[i] = u[i] + du[i];
-        v_full[i] = v[i] + dv[i];
+
+    std::vector<double> u_full(m*n, 0.0);
+    std::vector<double> v_full(m*n, 0.0);
+    for (ptrdiff_t idx = 0; idx < m*n; idx++) {
+        u_full[idx] = u[idx] + du[idx];
+        v_full[idx] = v[idx] + dv[idx];
     }
 
-    std::vector<double> ux(m*n), uy(m*n), vx(m*n), vy(m*n);
+    std::vector<double> ux(m*n,0.0), uy(m*n,0.0), vx(m*n,0.0), vy(m*n,0.0);
 
-    // gradient w.r.t x
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < m; j++) {
-            int idx = j * n + i;
-            int idx_r = j * n + ((i == n - 1) ? i : i + 1);
-            ux[idx] = (u_full[idx_r] - u_full[idx]) / hx;
-            vx[idx] = (v_full[idx_r] - v_full[idx]) / hx;
+    // Central differences for gradient approximation
+    for (ptrdiff_t j = 0; j < m; j++) {
+        for (ptrdiff_t i = 0; i < n; i++) {
+            ptrdiff_t idx = j + i*m;
+            // ux
+            if (n > 1) {
+                if (i == 0)
+                    ux[idx] = (u_full[j+(i+1)*m]-u_full[idx])/hx;
+                else if (i == n-1)
+                    ux[idx] = (u_full[idx]-u_full[j+(i-1)*m])/hx;
+                else
+                    ux[idx] = (u_full[j+(i+1)*m]-u_full[j+(i-1)*m])/(2.0*hx);
+            }
+
+            // vx
+            if (n > 1) {
+                if (i == 0)
+                    vx[idx] = (v_full[j+(i+1)*m]-v_full[idx])/hx;
+                else if (i == n-1)
+                    vx[idx] = (v_full[idx]-v_full[j+(i-1)*m])/hx;
+                else
+                    vx[idx] = (v_full[j+(i+1)*m]-v_full[j+(i-1)*m])/(2.0*hx);
+            }
+
+            // uy
+            if (m > 1) {
+                if (j == 0)
+                    uy[idx] = (u_full[(j+1)+i*m]-u_full[idx])/hy;
+                else if (j == m-1)
+                    uy[idx] = (u_full[idx]-u_full[(j-1)+i*m])/hy;
+                else
+                    uy[idx] = (u_full[(j+1)+i*m]-u_full[(j-1)+i*m])/(2.0*hy);
+            }
+
+            // vy
+            if (m > 1) {
+                if (j == 0)
+                    vy[idx] = (v_full[(j+1)+i*m]-v_full[idx])/hy;
+                else if (j == m-1)
+                    vy[idx] = (v_full[idx]-v_full[(j-1)+i*m])/hy;
+                else
+                    vy[idx] = (v_full[(j+1)+i*m]-v_full[(j-1)+i*m])/(2.0*hy);
+            }
         }
     }
 
-    // gradient w.r.t y
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < m; j++) {
-            int idx = j * n + i;
-            int idx_b = ((j == m - 1) ? j : j + 1) * n + i;
-            uy[idx] = (u_full[idx_b] - u_full[idx]) / hy;
-            vy[idx] = (v_full[idx_b] - v_full[idx]) / hy;
-        }
-    }
-
-    for (int i = 0; i < m*n; i++) {
+    for (ptrdiff_t i = 0; i < m*n; i++) {
         double tmp = ux[i]*ux[i] + uy[i]*uy[i] + vx[i]*vx[i] + vy[i]*vy[i];
-        tmp = tmp < 0 ? 0 : tmp;
-        psi_smooth[i] = a * pow(tmp + eps, a - 1);
+        if (tmp < 0.0) tmp = 0.0;
+        psi_smooth[i] = a * std::pow(tmp+eps, a-1.0);
     }
 }
 
@@ -93,22 +108,16 @@ py::array_t<double> compute_flow(
     double hx,
     double hy
 ) {
-    // input arguments
-    // checking number of inputs
-    // setting inputs
-    py::buffer_info j11_buf = j11_.request();
-    py::buffer_info j22_buf = j22_.request();
-    py::buffer_info j33_buf = j33_.request();
-    py::buffer_info j12_buf = j12_.request();
-    py::buffer_info j13_buf = j13_.request();
-    py::buffer_info j23_buf = j23_.request();
-    py::buffer_info w_buf = weight_.request();
-    py::buffer_info u_buf = u_.request();
-    py::buffer_info v_buf = v_.request();
-    py::buffer_info a_data_buf = a_data_.request();
-
-    int m = (int)j11_buf.shape[0];
-    int n = (int)j11_buf.shape[1];
+    auto j11_buf = j11_.request();
+    auto j22_buf = j22_.request();
+    auto j33_buf = j33_.request();
+    auto j12_buf = j12_.request();
+    auto j13_buf = j13_.request();
+    auto j23_buf = j23_.request();
+    auto w_buf = weight_.request();
+    auto u_buf = u_.request();
+    auto v_buf = v_.request();
+    auto a_data_buf = a_data_.request();
 
     double* j11 = (double*)j11_buf.ptr;
     double* j22 = (double*)j22_buf.ptr;
@@ -121,69 +130,69 @@ py::array_t<double> compute_flow(
     double* v = (double*)v_buf.ptr;
     double* a_data = (double*)a_data_buf.ptr;
 
-    // We assume a_data has length equal to number of channels.
-    // n_channels determined by dimensions of J11.
+    ptrdiff_t m = u_buf.shape[0];
+    ptrdiff_t n = u_buf.shape[1];
+
     int n_channels = 1;
     if (j11_buf.ndim == 3) {
         n_channels = (int)j11_buf.shape[2];
     }
 
-    // creating output arrays du, dv
-    py::array_t<double> du_( { (size_t)m, (size_t)n } );
-    py::array_t<double> dv_( { (size_t)m, (size_t)n } );
-    py::buffer_info du_buf = du_.request();
-    py::buffer_info dv_buf = dv_.request();
+    // Create du, dv arrays
+    std::vector<py::ssize_t> shape_mn = {(py::ssize_t)m, (py::ssize_t)n};
+    py::array_t<double> du_(shape_mn);
+    py::array_t<double> dv_(shape_mn);
+    auto du_buf = du_.request();
+    auto dv_buf = dv_.request();
     double* du = (double*)du_buf.ptr;
     double* dv = (double*)dv_buf.ptr;
-
-    for (int i = 0; i < m*n; i++) {
-        du[i] = 0;
-        dv[i] = 0;
+    for (ptrdiff_t i = 0; i < m*n; i++) {
+        du[i] = 0.0;
+        dv[i] = 0.0;
     }
 
-    // updating the non-linearities etc.
-    py::array_t<double> psi_(j11_.request().size);
-    double* psi = (double*)psi_.request().ptr;
-    for (int i = 0; i < m*n*((int)n_channels); i++) {
-        psi[i] = 1;
+    // Create psi array (m,n,n_channels)
+    std::vector<py::ssize_t> shape_mn_ch = { (py::ssize_t)m, (py::ssize_t)n, (py::ssize_t)n_channels };
+    py::array_t<double> psi_(shape_mn_ch);
+    auto psi_buf = psi_.request();
+    double* psi = (double*)psi_buf.ptr;
+    for (ptrdiff_t i = 0; i < m*n*n_channels; i++) {
+        psi[i] = 1.0;
     }
 
-    py::array_t<double> psi_smooth_( { (size_t)m, (size_t)n } );
-    double* psi_smooth = (double*)psi_smooth_.request().ptr;
-    for (int i = 0; i < m*n; i++) {
-        psi_smooth[i] = 1;
+    py::array_t<double> psi_smooth_(shape_mn);
+    auto psi_smooth_buf = psi_smooth_.request();
+    double* psi_smooth = (double*)psi_smooth_buf.ptr;
+    for (ptrdiff_t i = 0; i < m*n; i++) {
+        psi_smooth[i] = 1.0;
     }
 
     double OMEGA = 1.95;
-
-    int iteration_counter = 0;
-
     double alpha[2];
     alpha[0] = alpha_x;
     alpha[1] = alpha_y;
 
-    double tmp1 = alpha[0] / (hx*hx);
-    double tmp2 = alpha[1] / (hy*hy);
+    int iteration_counter = 0;
 
-    // main iteration loop from Flow-Registration without MEX calls.
-    while (iteration_counter++ < iterations) {
+    while (iteration_counter < iterations) {
+        iteration_counter++;
 
-        if (iteration_counter % update_lag == 0) {
+        if ((iteration_counter % update_lag) == 0) {
             for (int k = 0; k < n_channels; k++) {
-                for (int i = 0; i < m*n; i++) {
-                    int idx = i + k*m*n;
+                for (ptrdiff_t i = 0; i < m*n; i++) {
+                    ptrdiff_t idx = i + k*m*n;
                     double val = j11[idx]*du[i]*du[i] + j22[idx]*dv[i]*dv[i] + j23[idx]*dv[i]
-                                 +2*j12[idx]*du[i]*dv[i] + 2*j13[idx]*du[i] + j23[idx]*dv[i] + j33[idx];
-                    val = val < 0 ? 0 : val;
-                    psi[idx] = a_data[k] * pow(val + 0.00001, a_data[k] - 1);
+                               + 2.0*j12[idx]*du[i]*dv[i] + 2.0*j13[idx]*du[i] + j23[idx]*dv[i] + j33[idx];
+                    if (val < 0.0) val = 0.0;
+                    psi[idx] = a_data[k]*std::pow(val+0.00001, a_data[k]-1.0);
                 }
             }
 
-            if (a_smooth != 1) {
+            if (a_smooth != 1.0) {
                 nonlinearity_smoothness(psi_smooth, u, du, v, dv, m, n, a_smooth, hx, hy);
             } else {
-                for (int i = 0; i < m*n; i++) {
-                    psi_smooth[i] = 1;
+                for (ptrdiff_t i = 0; i < m*n; i++) {
+                    psi_smooth[i] = 1.0;
                 }
             }
         }
@@ -193,75 +202,97 @@ py::array_t<double> compute_flow(
 
         for (int i = 1; i < n-1; i++) {
             for (int j = 1; j < m-1; j++) {
+                ptrdiff_t idx = j + i*m;
+                ptrdiff_t s_idx[4];
+                s_idx[0] = j + (i-1)*m; // left
+                s_idx[1] = j + (i+1)*m; // right
+                s_idx[2] = (j+1) + i*m; // down
+                s_idx[3] = (j-1) + i*m; // up
 
-                int idx = j * n + i;
+                double denom_u=0.0, denom_v=0.0, num_u=0.0, num_v=0.0;
 
-                int s_idx[4];
-                s_idx[0] = (j - 1) * n + i; // Up
-                s_idx[1] = (j + 1) * n + i; // Down
-                s_idx[2] = j * n + (i + 1); // Right
-                s_idx[3] = j * n + (i - 1); // Left
+                if (a_smooth != 1.0) {
+                    double tmp = 0.5*(psi_smooth[idx]+psi_smooth[s_idx[0]])*(alpha[0]/(hx*hx));
+                    num_u += tmp*(u[s_idx[0]]+du[s_idx[0]] - u[idx]);
+                    num_v += tmp*(v[s_idx[0]]+dv[s_idx[0]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
 
-                double denom_u = 0;
-                double denom_v = 0;
-                double num_u = 0;
-                double num_v = 0;
+                    tmp = 0.5*(psi_smooth[idx]+psi_smooth[s_idx[1]])*(alpha[0]/(hx*hx));
+                    num_u += tmp*(u[s_idx[1]]+du[s_idx[1]] - u[idx]);
+                    num_v += tmp*(v[s_idx[1]]+dv[s_idx[1]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
 
-                if (a_smooth != 1) {
-                    for (int d = 0; d < 4; d++) {
-                        double tmp = 0.5*(psi_smooth[idx] + psi_smooth[s_idx[d]]);
-                        if (d == 0 || d == 1) tmp *= tmp1;
-                        else tmp *= tmp2;
+                    tmp = 0.5*(psi_smooth[idx]+psi_smooth[s_idx[2]])*(alpha[1]/(hy*hy));
+                    num_u += tmp*(u[s_idx[2]]+du[s_idx[2]] - u[idx]);
+                    num_v += tmp*(v[s_idx[2]]+dv[s_idx[2]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
 
-                        num_u += tmp * (u[s_idx[d]] + du[s_idx[d]] - u[idx]);
-                        num_v += tmp * (v[s_idx[d]] + dv[s_idx[d]] - v[idx]);
-                        denom_u += tmp;
-                        denom_v += tmp;
-                    }
+                    tmp = 0.5*(psi_smooth[idx]+psi_smooth[s_idx[3]])*(alpha[1]/(hy*hy));
+                    num_u += tmp*(u[s_idx[3]]+du[s_idx[3]] - u[idx]);
+                    num_v += tmp*(v[s_idx[3]]+dv[s_idx[3]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
                 } else {
-                    for (int d = 0; d < 4; d++) {
-                        double tmp = (d < 2) ? tmp1 : tmp2;
-                        num_u += tmp * (u[s_idx[d]] + du[s_idx[d]] - u[idx]);
-                        num_v += tmp * (v[s_idx[d]] + dv[s_idx[d]] - v[idx]);
-                        denom_u += tmp;
-                        denom_v += tmp;
-                    }
+                    double tmp = alpha[0]/(hx*hx);
+                    num_u += tmp*(u[s_idx[0]]+du[s_idx[0]] - u[idx]);
+                    num_v += tmp*(v[s_idx[0]]+dv[s_idx[0]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
+
+                    tmp = alpha[0]/(hx*hx);
+                    num_u += tmp*(u[s_idx[1]]+du[s_idx[1]] - u[idx]);
+                    num_v += tmp*(v[s_idx[1]]+dv[s_idx[1]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
+
+                    tmp = alpha[1]/(hy*hy);
+                    num_u += tmp*(u[s_idx[2]]+du[s_idx[2]] - u[idx]);
+                    num_v += tmp*(v[s_idx[2]]+dv[s_idx[2]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
+
+                    tmp = alpha[1]/(hy*hy);
+                    num_u += tmp*(u[s_idx[3]]+du[s_idx[3]] - u[idx]);
+                    num_v += tmp*(v[s_idx[3]]+dv[s_idx[3]] - v[idx]);
+                    denom_u += tmp;
+                    denom_v += tmp;
                 }
 
                 for (int k = 0; k < n_channels; k++) {
-                    int nd_idx = idx + k*m*n;
-                    num_u -= ((n_channels == 1) ? data_weight[nd_idx] : data_weight[nd_idx]) * psi[nd_idx] * (j13[nd_idx] + j12[nd_idx]*dv[idx]);
-                    denom_u += ((n_channels == 1) ? data_weight[nd_idx] : data_weight[nd_idx]) * psi[nd_idx] * j11[nd_idx];
-                    denom_v += ((n_channels == 1) ? data_weight[nd_idx] : data_weight[nd_idx]) * psi[nd_idx] * j22[nd_idx];
+                    ptrdiff_t nd_idx = idx + k*m*n;
+                    num_u -= data_weight[nd_idx]*psi[nd_idx]*(j13[nd_idx] + j12[nd_idx]*dv[idx]);
+                    denom_u += data_weight[nd_idx]*psi[nd_idx]*j11[nd_idx];
+                    denom_v += data_weight[nd_idx]*psi[nd_idx]*j22[nd_idx];
                 }
 
-                double du_kp1 = num_u / denom_u;
-                du[idx] = (1 - OMEGA)*du[idx] + OMEGA*du_kp1;
+                double OMEGA = 1.95;
+                double du_kp1 = (denom_u!=0.0) ? (num_u/denom_u) : 0.0;
+                du[idx] = (1.0-OMEGA)*du[idx] + OMEGA*du_kp1;
 
                 for (int k = 0; k < n_channels; k++) {
-                    int nd_idx = idx + k*m*n;
-                    num_v -= ((n_channels == 1) ? data_weight[nd_idx] : data_weight[nd_idx]) * psi[nd_idx]*(j23[nd_idx] + j12[nd_idx]*du[idx]);
+                    ptrdiff_t nd_idx = idx + k*m*n;
+                    num_v -= data_weight[nd_idx]*psi[nd_idx]*(j23[nd_idx] + j12[nd_idx]*du[idx]);
                 }
-                double dv_kp1 = num_v / denom_v;
-                dv[idx] = (1 - OMEGA)*dv[idx] + OMEGA*dv_kp1;
+                double dv_kp1 = (denom_v!=0.0) ? (num_v/denom_v) : 0.0;
+                dv[idx] = (1.0-OMEGA)*dv[idx] + OMEGA*dv_kp1;
             }
         }
     }
 
-    // return du and dv as a combined result
-    // For convenience, we return a 3D array with shape (m,n,2).
-    py::array_t<double> result_( { (size_t)m, (size_t)n, (size_t)2 } );
-    double* result = (double*)result_.request().ptr;
-    //for (int i = 0; i < m*n; i++) {
-    //    result[i] = du[i];
-    //    result[i + m*n] = dv[i];
-    //}
-    for (int i = 0; i < m; i++) {
-        for (int j = 0; j < n; j++) {
-            size_t idx = i * n + j;
-            size_t out_idx = (i * n + j) * 2;
+    std::vector<py::ssize_t> shape_result = {(py::ssize_t)m, (py::ssize_t)n, (py::ssize_t)2};
+    py::array_t<double> result_(shape_result);
+    auto result_buf = result_.request();
+    double* result = (double*)result_buf.ptr;
+
+    for (ptrdiff_t i = 0; i < m; i++) {
+        for (ptrdiff_t j = 0; j < n; j++) {
+            ptrdiff_t idx = i*n + j;
+            ptrdiff_t out_idx = (i*n + j)*2;
             result[out_idx] = du[idx];
-            result[out_idx + 1] = dv[idx];
+            result[out_idx+1] = dv[idx];
         }
     }
 
@@ -269,5 +300,8 @@ py::array_t<double> compute_flow(
 }
 
 PYBIND11_MODULE(_level_solver, m) {
-    m.def("compute_flow", &compute_flow, "Compute optical flow displacements");
+    m.doc() = "Literal MEX to Pybind11 Optical Flow Level Solver";
+    m.def("compute_flow", &compute_flow, R"pbdoc(
+        Compute the optical flow displacement field using a literal translation of the MEX code.
+    )pbdoc");
 }

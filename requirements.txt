@@ -9,3 +9,4 @@ h5py
 tifffile
 scikit-build
 pybind11
+numba
