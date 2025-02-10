@@ -12,24 +12,31 @@ if __name__ == "__main__":
     input_folder = join(dirname(dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
     with h5py.File(join(input_folder, "synth_frames.h5"), "r") as f:
         #clean = f["clean"][:]
-        clean = f["noisy30db"][:]
+        clean = f[("clean")][:]
         noisy35db = f["noisy35db"][:]
         w = f["w"][:]
 
     frame1 = np.permute_dims(clean[0], (1, 2, 0)).astype(float)
     frame2 = np.permute_dims(clean[1], (1, 2, 0)).astype(float)
-    frame1 = cv2.GaussianBlur(frame1, (25, 25), 4)
-    frame2 = cv2.GaussianBlur(frame2, (25, 25), 4)
+    frame1 = cv2.GaussianBlur(frame1, (25, 25), 1.5)
+    frame2 = cv2.GaussianBlur(frame2, (25, 25), 1.5)
+    min_ref = frame1.min((0, 1))[None, None]
+    max_ref = frame1.max((0, 1))[None, None]
 
-    for i in range(2):
-        frame1[:, :, i] = cv2.normalize(frame1[..., i], None, 0, 1, cv2.NORM_MINMAX)
-        frame2[:, :, i] = cv2.normalize(frame2[..., i], None, 0, 1, cv2.NORM_MINMAX)
+    frame1 = (frame1 - min_ref) / (max_ref - min_ref)
+    frame2 = (frame2 - min_ref) / (max_ref - min_ref)
+
+    #for i in range(2):
+    #    frame1[:, :, i] = cv2.normalize(frame1[..., i], None, 0, 1, cv2.NORM_MINMAX)
+    #    frame2[:, :, i] = cv2.normalize(frame2[..., i], None, 0, 1, cv2.NORM_MINMAX)
     w = np.permute_dims(w, (1, 2, 0))
+
+    print(frame1.shape)
 
     start = time()
     w = pfr.get_displacement(
-        frame1[..., :], frame2[..., :], alpha=(1.5, 1.5), levels=100,
-        iterations=100, update_lag=5, a_data=0.45, a_smooth=1)
+        frame1[..., :], frame2[..., :], alpha=(8, 8), levels=100,
+        iterations=50, a_data=0.45, a_smooth=1, weight=np.array([0.6, 0.4]))
     print("Elapsed time:", time() - start)
 
     print(w.shape)
