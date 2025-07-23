@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 
 
-@njit
+@njit(fastmath=True)
 def set_boundary_2d(f):
     m, n = f.shape
     for i in range(n):
@@ -13,7 +13,7 @@ def set_boundary_2d(f):
         f[j, n-1] = f[j, n-2]
 
 
-@njit
+@njit(fastmath=True)
 def nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a, hx, hy):
     eps = 0.00001
     u_full = u + du
@@ -23,8 +23,8 @@ def nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a, hx, hy):
     vx = np.zeros((m,n))
     vy = np.zeros((m,n))
 
-    for j in range(m):
-        for i in range(n):
+    for i in range(n):
+        for j in range(m):
             # ux
             if n > 1:
                 if i == 0:
@@ -58,14 +58,14 @@ def nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a, hx, hy):
                 else:
                     vy[j,i] = (v_full[j+1,i]-v_full[j-1,i])/(2.0*hy)
 
-    for j in range(m):
-        for i in range(n):
+    for i in range(n):
+        for j in range(m):
             tmp = ux[j,i]*ux[j,i] + uy[j,i]*uy[j,i] + vx[j,i]*vx[j,i] + vy[j,i]*vy[j,i]
             if tmp < 0.0:
                 tmp = 0.0
             psi_smooth[j,i] = a * (tmp+eps)**(a-1.0)
 
-@njit
+@njit(fastmath=True)
 def compute_flow(
     J11, J22, J33, J12, J13, J23,
     weight, u, v,
@@ -86,8 +86,8 @@ def compute_flow(
         if (iteration_counter+1) % update_lag == 0:
             # Update psi (non-linearities for data term)
             for k in range(n_channels):
-                for j in range(m):
-                    for i in range(n):
+                for i in range(n):
+                    for j in range(m):
                         val = (J11[j,i,k]*du[j,i]*du[j,i] +
                                J22[j,i,k]*dv[j,i]*dv[j,i] +
                                J23[j,i,k]*dv[j,i] +
@@ -102,15 +102,15 @@ def compute_flow(
             if a_smooth != 1.0:
                 nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a_smooth, hx, hy)
             else:
-                for j in range(m):
-                    for i in range(n):
+                for i in range(n):
+                    for j in range(m):
                         psi_smooth[j,i] = 1.0
 
         set_boundary_2d(du)
         set_boundary_2d(dv)
 
-        for j in range(1, m - 1):
-            for i in range(1, n - 1):
+        for i in range(1, n - 1):
+            for j in range(1, m - 1):
                 denom_u=0.0
                 denom_v=0.0
                 num_u=0.0

@@ -18,8 +18,8 @@ if __name__ == "__main__":
 
     frame1 = np.permute_dims(clean[0], (1, 2, 0)).astype(float)
     frame2 = np.permute_dims(clean[1], (1, 2, 0)).astype(float)
-    frame1 = cv2.GaussianBlur(frame1, (25, 25), 1.5)
-    frame2 = cv2.GaussianBlur(frame2, (25, 25), 1.5)
+    frame1 = cv2.GaussianBlur(frame1, (25, 25), 1)
+    frame2 = cv2.GaussianBlur(frame2, (25, 25), 1)
     min_ref = frame1.min((0, 1))[None, None]
     max_ref = frame1.max((0, 1))[None, None]
 
@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     start = time()
     w = pfr.get_displacement(
-        frame1[..., :], frame2[..., :], alpha=(8, 8), levels=100,
+        frame1[..., :], frame2[..., :], alpha=(2, 2), levels=50,
         iterations=50, a_data=0.45, a_smooth=1, weight=np.array([0.6, 0.4]))
     print("Elapsed time:", time() - start)
 

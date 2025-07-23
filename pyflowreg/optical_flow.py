@@ -12,14 +12,14 @@ def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
     if f2_level.ndim == 2:
         f2_level = f2_level[:, :, None]
         f1_level = f1_level[:, :, None]
-    f2_level = f2_level[1:-1, 1:-1]
-    f1_level = f1_level[1:-1, 1:-1]
-    u = u[1:-1, 1:-1]
-    v = v[1:-1, 1:-1]
+    #f2_level = f2_level[1:-1, 1:-1]
+    #f1_level = f1_level[1:-1, 1:-1]
+    #u = u[1:-1, 1:-1]
+    #v = v[1:-1, 1:-1]
     H, W, C = f2_level.shape
     grid_y, grid_x = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
-    map_x = (grid_x + v).astype(np.float32)
-    map_y = (grid_y + u).astype(np.float32)
+    map_x = (grid_x + u).astype(np.float32)
+    map_y = (grid_y + v).astype(np.float32)
     out_of_bounds = (map_x < 0) | (map_x >= W) | (map_y < 0) | (map_y >= H)
     map_x_clipped = np.clip(map_x, 0, W - 1).astype(np.float32)
     map_y_clipped = np.clip(map_y, 0, H - 1).astype(np.float32)
@@ -326,6 +326,9 @@ def get_displacement_old(fixed, moving, alpha=(2,2), update_lag=10, iterations=2
         weight_level = weight
         if weight.shape[:2] != f1_level.shape[:2]:
             weight_level = cv2.resize(weight, (f1_level.shape[1], f1_level.shape[0]), interpolation=cv2.INTER_CUBIC)
+        weight_level = cv2.copyMakeBorder(
+            weight_level, 1, 1, 1, 1,
+            borderType=cv2.BORDER_CONSTANT, value=0.0)
         du, dv = level_solver(np.ascontiguousarray(J11), np.ascontiguousarray(J22), np.ascontiguousarray(J33), np.ascontiguousarray(J12), np.ascontiguousarray(J13), np.ascontiguousarray(J23), np.ascontiguousarray(weight_level), u, v, alpha, iterations, update_lag, 0, a_data_arr, a_smooth, current_hx, current_hy)
         if min(level_size) > 5:
             du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode='reflect')
@@ -340,7 +343,7 @@ def get_displacement_old(fixed, moving, alpha=(2,2), update_lag=10, iterations=2
     return w
 
 
-def get_displacement(fixed, moving, alpha=(2,2), update_lag=5, iterations=20, min_level=0, levels=50, eta=0.8, a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
+def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8, a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
     fixed = fixed.astype(np.float64)
     moving = moving.astype(np.float64)
     if fixed.ndim == 3:
@@ -409,6 +412,9 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=5, iterations=20, mi
         weight_level = weight
         if weight.shape[:2] != f1_level.shape[:2]:
             weight_level = cv2.resize(weight, (f1_level.shape[1], f1_level.shape[0]), interpolation=cv2.INTER_CUBIC)
+        weight_level = cv2.copyMakeBorder(
+            weight_level, 1, 1, 1, 1,
+            borderType=cv2.BORDER_CONSTANT, value=0.0)
 
         if i == min_level:
             alpha_scaling = 1
