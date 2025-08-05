@@ -14,17 +14,30 @@ if __name__ == "__main__":
         #clean = f["clean"][:]
         clean = f[("clean")][:]
         noisy35db = f["noisy35db"][:]
+
         w = f["w"][:]
 
     frame1 = np.permute_dims(clean[0], (1, 2, 0)).astype(float)
     frame2 = np.permute_dims(clean[1], (1, 2, 0)).astype(float)
-    frame1 = cv2.GaussianBlur(frame1, (25, 25), 1)
-    frame2 = cv2.GaussianBlur(frame2, (25, 25), 1)
-    min_ref = frame1.min((0, 1))[None, None]
-    max_ref = frame1.max((0, 1))[None, None]
+    frame1 = cv2.GaussianBlur(frame1, None, 2)
+    frame2 = cv2.GaussianBlur(frame2, None, 2)
 
-    frame1 = (frame1 - min_ref) / (max_ref - min_ref)
-    frame2 = (frame2 - min_ref) / (max_ref - min_ref)
+    eps = 1e-6
+    mins = frame1.min(axis=(0, 1))[None, None, :]  # shape (1,1,C)
+    maxs = frame1.max(axis=(0, 1))[None, None, :]  # shape (1,1,C)
+
+    ranges = maxs - mins
+    ranges[ranges < eps] = 1.0
+
+    frame1 = (frame1 - mins) / ranges
+    frame2 = (frame2 - mins) / ranges
+
+
+    #min_ref = frame1.min((0, 1))[None, None]
+    #max_ref = frame1.max((0, 1))[None, None]
+
+    #frame1 = (frame1 - min_ref) / (max_ref - min_ref)
+    #frame2 = (frame2 - min_ref) / (max_ref - min_ref)
 
     #for i in range(2):
     #    frame1[:, :, i] = cv2.normalize(frame1[..., i], None, 0, 1, cv2.NORM_MINMAX)

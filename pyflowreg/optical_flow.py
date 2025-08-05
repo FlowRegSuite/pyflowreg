@@ -31,11 +31,11 @@ def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
         raise ValueError("Unsupported interpolation method. Use 'linear' or 'cubic'.")
     warped = np.empty_like(f2_level, dtype=np.float32)
     for c in range(C):
-        warped[:, :, c] = cv2.remap(f2_level[:, :, c], map_x_clipped, map_y_clipped, interpolation=interp, borderMode=cv2.BORDER_CONSTANT, borderValue=-1)
-    idx = warped == -1
-    warped[idx] = f1_level[idx]
-    #for c in range(C):
-    #    warped[:, :, c][out_of_bounds] = f1_level[:, :, c][out_of_bounds]
+        warped[:, :, c] = cv2.remap(f2_level[:, :, c], map_x_clipped, map_y_clipped, interpolation=interp, borderMode=cv2.BORDER_REPLICATE)
+    #idx = warped == -1
+    #warped[idx] = f1_level[idx]
+    for c in range(C):
+        warped[:, :, c][out_of_bounds] = f1_level[:, :, c][out_of_bounds]
     if warped.shape[2] == 1:
         warped = warped[:, :, 0]
     return warped
@@ -61,7 +61,7 @@ def add_boundary_old(f):
     return g
 
 def add_boundary(f):
-    return cv2.copyMakeBorder(f, 1, 1, 1, 1, borderType=cv2.BORDER_REPLICATE)
+    return cv2.copyMakeBorder(f, 1, 1, 1, 1, borderType=cv2.BORDER_REFLECT_101)
 
 def imregister_wrapper_opencv(f2_level, u, v, f1_level, interpolation_method='cubic'):
     # Warp image f2_level towards f1_level using displacement fields u,v
@@ -218,8 +218,8 @@ def get_motion_tensor_gc(f1, f2, hx, hy):
     tmp_grad = np.gradient(fx, hx, hy)
     fxy = tmp_grad[1]
     ft_grad = np.gradient(ft, hx, hy)
-    fxt = ft_grad[0]
-    fyt = ft_grad[1]
+    fxt = ft_grad[1]
+    fyt = ft_grad[0]
     def gradient2(f, hx_, hy_):
         fxx = np.zeros_like(f)
         fyy = np.zeros_like(f)
@@ -240,7 +240,7 @@ def get_motion_tensor_gc(f1, f2, hx, hy):
     J23 = reg_x * fxy * fxt + reg_y * fyy * fyt
     for arr in [J11, J22, J33, J12, J13, J23]:
         arr[:, 0] = 0; arr[:, -1] = 0; arr[0, :] = 0; arr[-1, :] = 0
-    return J11[1:-1, 1:-1], J22[1:-1, 1:-1], J33[1:-1, 1:-1], J12[1:-1, 1:-1], J13[1:-1, 1:-1], J23[1:-1, 1:-1]
+    return J11, J22, J33, J12, J13, J23
 
 
 
@@ -251,10 +251,10 @@ def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, 
                           alpha[0], alpha[1], iterations, update_lag,
                           a_data, a_smooth, hx, hy)
 
-    du = np.zeros_like(u)
-    dv = np.zeros_like(v)
-    du[1:-1, 1:-1] = result[:, :, 0]
-    dv[1:-1, 1:-1] = result[:, :, 1]
+    # du = np.zeros_like(u)
+    # dv = np.zeros_like(v)
+    du = result[:, :, 0]
+    dv = result[:, :, 1]
     return du, dv
 
 def get_displacement_old(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8, a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
@@ -395,12 +395,13 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
             tmp = imregister_wrapper(f2_level, u[1:-1,1:-1]/current_hy, v[1:-1,1:-1]/current_hx, f1_level)
         u = np.ascontiguousarray(u)
         v = np.ascontiguousarray(v)
-        J11 = np.zeros_like(f1_level, dtype=np.float64)
-        J22 = np.zeros_like(f1_level, dtype=np.float64)
-        J33 = np.zeros_like(f1_level, dtype=np.float64)
-        J12 = np.zeros_like(f1_level, dtype=np.float64)
-        J13 = np.zeros_like(f1_level, dtype=np.float64)
-        J23 = np.zeros_like(f1_level, dtype=np.float64)
+        J_size = (f1_level.shape[0] + 2, f1_level.shape[1] + 2, n_channels)
+        J11 = np.zeros(J_size, dtype=np.float64)
+        J22 = np.zeros(J_size, dtype=np.float64)
+        J33 = np.zeros(J_size, dtype=np.float64)
+        J12 = np.zeros(J_size, dtype=np.float64)
+        J13 = np.zeros(J_size, dtype=np.float64)
+        J23 = np.zeros(J_size, dtype=np.float64)
         for ch in range(n_channels):
             J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy)
             J11[:, :, ch] = J11_ch

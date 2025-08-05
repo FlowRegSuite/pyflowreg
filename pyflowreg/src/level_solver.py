@@ -1,8 +1,10 @@
+from linecache import cache
+
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def set_boundary_2d(f):
     m, n = f.shape
     for i in range(n):
@@ -13,7 +15,7 @@ def set_boundary_2d(f):
         f[j, n-1] = f[j, n-2]
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a, hx, hy):
     eps = 0.00001
     u_full = u + du
@@ -65,7 +67,7 @@ def nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a, hx, hy):
                 tmp = 0.0
             psi_smooth[j,i] = a * (tmp+eps)**(a-1.0)
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def compute_flow(
     J11, J22, J33, J12, J13, J23,
     weight, u, v,
@@ -109,8 +111,8 @@ def compute_flow(
         set_boundary_2d(du)
         set_boundary_2d(dv)
 
-        for i in range(1, n - 1):
-            for j in range(1, m - 1):
+        for i in range(1, n-2):
+            for j in range(1, m-2):
                 denom_u=0.0
                 denom_v=0.0
                 num_u=0.0
