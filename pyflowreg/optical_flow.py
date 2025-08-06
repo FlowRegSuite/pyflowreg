@@ -383,6 +383,9 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
         level_size = (int(round(m * eta**(min(i, max_level_y)))), int(round(n * eta**(min(i, max_level_x)))))
         f1_level = cv2.resize(f1_low, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC)
         f2_level = cv2.resize(f2_low, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC)
+        if f1_level.ndim == 2:
+            f1_level = f1_level[:, :, np.newaxis]
+            f2_level = f2_level[:, :, np.newaxis]
         current_hx = float(m) / f1_level.shape[0]
         current_hy = float(n) / f1_level.shape[1]
         if i == max(max_level_x, max_level_y):
@@ -393,6 +396,8 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
             u = add_boundary(cv2.resize(u[1:-1, 1:-1], (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
             v = add_boundary(cv2.resize(v[1:-1, 1:-1], (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
             tmp = imregister_wrapper(f2_level, u[1:-1,1:-1]/current_hy, v[1:-1,1:-1]/current_hx, f1_level)
+        if tmp.ndim == 2:
+            tmp = tmp[:, :, np.newaxis]
         u = np.ascontiguousarray(u)
         v = np.ascontiguousarray(v)
         J_size = (f1_level.shape[0] + 2, f1_level.shape[1] + 2, n_channels)

@@ -48,9 +48,28 @@ if __name__ == "__main__":
 
     start = time()
     w = pfr.get_displacement(
-        frame1[..., :], frame2[..., :], alpha=(2, 2), levels=50,
+        frame1[..., :], frame2[..., :], alpha=(2, 2), levels=50, min_level=5,
         iterations=50, a_data=0.45, a_smooth=1, weight=np.array([0.6, 0.4]))
     print("Elapsed time:", time() - start)
+
+    times = []
+    for i in range(6):
+        start = time()
+        w = pfr.get_displacement(
+            frame1[..., :], frame2[..., :],
+            alpha=(2, 2),
+            levels=50,
+            min_level=5,
+            iterations=50,
+            a_data=0.45,
+            a_smooth=1,
+            weight=np.array([0.6, 0.4])
+        )
+        elapsed = time() - start
+        if i > 0:
+            times.append(elapsed)
+
+    print("Average elapsed time over 5 runs:", sum(times) / len(times))
 
     print(w.shape)
 
