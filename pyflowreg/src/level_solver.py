@@ -111,8 +111,8 @@ def compute_flow(
         set_boundary_2d(du)
         set_boundary_2d(dv)
 
-        for i in range(1, n-2):
-            for j in range(1, m-2):
+        for i in range(1, n-1):
+            for j in range(1, m-1):
                 denom_u=0.0
                 denom_v=0.0
                 num_u=0.0

@@ -19,8 +19,8 @@ def preprocess(frame):
 
     ranges = maxs - mins
 
-    frame1 = (frame1 - mins) / ranges
-    frame2 = (frame2 - mins) / ranges
+    #frame1 = (frame1 - mins) / ranges
+    #frame2 = (frame2 - mins) / ranges
 
     return frame1, frame2
 
@@ -61,7 +61,7 @@ pfr.get_displacement(cold_f1, cold_f1, alpha=(2, 2),
         )
 
 base_params = dict(
-    alpha=(5, 5),
+    alpha=(8, 8),
     iterations=50,
     a_data=0.45,
     a_smooth=1.0,
