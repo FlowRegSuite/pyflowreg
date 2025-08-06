@@ -208,16 +208,19 @@ def get_motion_tensor_gc_old(f1, f2, hx, hy):
            J12[1:-1, 1:-1], J13[1:-1, 1:-1], J23[1:-1, 1:-1]
 
 
-def get_motion_tensor_gc(f1, f2, hx, hy):
+def get_motion_tensor_gc(f1, f2, hy, hx):
     f1p = np.pad(f1, ((1,1),(1,1)), mode='symmetric')
     f2p = np.pad(f2, ((1,1),(1,1)), mode='symmetric')
-    fy1p, fx1p = np.gradient(f1p, hx, hy)
-    fy2p, fx2p = np.gradient(f2p, hx, hy)
+    _, fx1p = np.gradient(f1p, hy, hx)
+    _, fx2p = np.gradient(f2p, hy, hx)
     fx = 0.5*(fx1p + fx2p)
     ft = f2p - f1p
-    tmp_grad = np.gradient(fx, hx, hy)
-    fxy = tmp_grad[1]
-    ft_grad = np.gradient(ft, hx, hy)
+    #fx = np.pad(fx[1:-1, 1:-1], 1, mode='symmetric')
+    #ft = np.pad(ft[1:-1, 1:-1], 1, mode='symmetric')
+
+    tmp_grad = np.gradient(fx, hy, hx)
+    fxy = tmp_grad[0]
+    ft_grad = np.gradient(ft, hy, hx)
     fxt = ft_grad[1]
     fyt = ft_grad[0]
     def gradient2(f, hx_, hy_):
@@ -226,8 +229,8 @@ def get_motion_tensor_gc(f1, f2, hx, hy):
         fxx[1:-1, 1:-1] = (f[1:-1, 0:-2] - 2*f[1:-1, 1:-1] + f[1:-1, 2:]) / (hx_**2)
         fyy[1:-1, 1:-1] = (f[0:-2, 1:-1] - 2*f[1:-1, 1:-1] + f[2:, 1:-1]) / (hy_**2)
         return fxx, fyy
-    fxx1, fyy1 = gradient2(f1p, hx, hy)
-    fxx2, fyy2 = gradient2(f2p, hx, hy)
+    fxx1, fyy1 = gradient2(f1p, hy, hx)
+    fxx2, fyy2 = gradient2(f2p, hy, hx)
     fxx = 0.5*(fxx1 + fxx2)
     fyy = 0.5*(fyy1 + fyy2)
     reg_x = 1.0 / ((np.sqrt(fxx**2 + fxy**2)**2) + 1e-6)

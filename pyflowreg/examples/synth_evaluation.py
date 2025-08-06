@@ -9,11 +9,20 @@ from scipy.ndimage import gaussian_filter
 
 
 def preprocess(frame):
-    frame = np.permute_dims(frame, (1, 2, 0)).astype(np.float32)
-    mn = frame.min(axis=(0, 1))[None, None, :]
-    mx = frame.max(axis=(0, 1))[None, None, :]
-    rng = np.maximum(mx - mn, 1e-6)
-    return (frame - mn) / rng
+    frame1 = frame[0]
+    frame2 = frame[1]
+    frame1 = np.permute_dims(frame1, (1, 2, 0)).astype(float)
+    frame2 = np.permute_dims(frame2, (1, 2, 0)).astype(float)
+
+    mins = frame1.min(axis=(0, 1))[None, None, :]  # shape (1,1,C)
+    maxs = frame1.max(axis=(0, 1))[None, None, :]  # shape (1,1,C)
+
+    ranges = maxs - mins
+
+    frame1 = (frame1 - mins) / ranges
+    frame2 = (frame2 - mins) / ranges
+
+    return frame1, frame2
 
 
 def epe(gt, est, b=25):
@@ -52,7 +61,7 @@ pfr.get_displacement(cold_f1, cold_f1, alpha=(2, 2),
         )
 
 base_params = dict(
-    alpha=(8, 8),
+    alpha=(5, 5),
     iterations=50,
     a_data=0.45,
     a_smooth=1.0,
@@ -63,8 +72,8 @@ base_params = dict(
 )
 
 for name, data in datasets:
-    data = gaussian_filter(data, (0, 1.5, 1.5, 0.1))
-    f1, f2 = preprocess(data[0]), preprocess(data[1])
+    data = gaussian_filter(data, (0.1, 0, 1.5, 1.5))
+    f1, f2 = preprocess(data)
 
     w = run({**base_params, "min_level": 0}, f1, f2)
     print(f"{epe(w_ref, w, b):.2f} for {name}, default, ch 1 + 2")

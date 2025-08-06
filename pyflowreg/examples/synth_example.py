@@ -53,13 +53,13 @@ if __name__ == "__main__":
     print("Elapsed time:", time() - start)
 
     times = []
-    for i in range(6):
+    for i in range(2):
         start = time()
         w = pfr.get_displacement(
             frame1[..., :], frame2[..., :],
-            alpha=(2, 2),
+            alpha=(15, 15),
             levels=50,
-            min_level=5,
+            min_level=0,
             iterations=50,
             a_data=0.45,
             a_smooth=1,
