@@ -72,7 +72,13 @@ base_params = dict(
 )
 
 for name, data in datasets:
-    data = gaussian_filter(data, (0.1, 0, 1.5, 1.5))
+    #data = gaussian_filter(data, (0.1, 0.01, 1.5, 1.5),
+    #                       truncate=10, mode='constant')
+    for i in range(data.shape[1]):
+        data[:, i, :, :] = gaussian_filter(data[:, i, :, :],
+                                           (0.1, 1.5, 1.5),  # 3D sigmas only
+                                           truncate=10,
+                                           mode='constant')
     f1, f2 = preprocess(data)
 
     w = run({**base_params, "min_level": 0}, f1, f2)

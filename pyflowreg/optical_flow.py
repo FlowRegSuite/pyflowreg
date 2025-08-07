@@ -6,6 +6,94 @@ from pyflowreg.src import compute_flow
 import numpy as np
 from skimage.transform import warp
 from scipy.ndimage import map_coordinates
+from skimage.transform import resize as ski_resize
+from numba import njit
+
+
+def matlab_gradient(f, spacing):
+    """Match MATLAB's gradient exactly"""
+    grad = np.zeros_like(f)
+    # Interior: central differences
+    grad[1:-1] = (f[2:] - f[:-2]) / (2 * spacing)
+    # Boundaries: one-sided (MATLAB style)
+    grad[0] = (f[1] - f[0]) / spacing
+    grad[-1] = (f[-1] - f[-2]) / spacing
+    return grad
+
+
+def resize_image_skimage(image, size):
+    """
+    Resize an image to the specified size using the given interpolation method.
+
+    Parameters:
+    - image: Input image to be resized.
+    - size: Tuple (width, height) specifying the new size.
+    - interpolation: Interpolation method to use for resizing.
+
+    Returns:
+    - Resized image.
+    """
+    img = ski_resize(image, (size[1], size[0]), order=3, mode='edge', anti_aliasing=True)
+    return img
+
+
+def resize_image_cv2(image, size):
+    """
+    Resize an image to the specified size using the given interpolation method.
+
+    Parameters:
+    - image: Input image to be resized.
+    - size: Tuple (width, height) specifying the new size.
+    - interpolation: Interpolation method to use for resizing.
+
+    Returns:
+    - Resized image.
+    """
+    img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_LANCZOS4)
+    return img
+
+
+def resize_image_cv2_aa_gauss(image, size):
+    h_orig, w_orig = image.shape[:2]
+    h_new, w_new = size[:2]
+    scale = min(h_new / h_orig, w_new / w_orig)
+
+    if scale < 1:
+        sigma = 0.6 / scale
+        ksize = int(2 * np.ceil(2 * sigma) + 1)
+        image = cv2.GaussianBlur(image, (ksize, ksize), sigma)
+    img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_CUBIC)
+    return img
+
+
+def imresize_cv_exact(img, size):
+    h, w = img.shape[:2]
+    sx, sy = size[1] / w, size[0] / h
+    scale = min(sx, sy)
+    if scale < 1:
+        sigma = 0.6 / scale
+        k = int(2 * np.ceil(2 * sigma) + 1)
+        g = cv2.getGaussianKernel(k, sigma)
+        img = cv2.sepFilter2D(img, -1, g, g, borderType=cv2.BORDER_REFLECT101)
+    return cv2.resize(img, size[1::-1], interpolation=cv2.INTER_CUBIC)
+
+
+def resize_image_cv2_aa_blur(image, size):
+    h_orig, w_orig = image.shape[:2]
+    h_new, w_new = size[:2]
+
+    if h_new < h_orig or w_new < w_orig:
+        # Box filter - much faster than Gaussian, still removes aliasing
+        scale = max(h_orig/h_new, w_orig/w_new)
+        ksize = int(scale) | 1  # Ensure odd
+        if ksize > 1:
+            image = cv2.blur(image, (ksize, ksize))
+
+    img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_CUBIC)
+    return img
+
+
+resize = imresize_cv_exact
 
 
 def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
@@ -237,20 +325,20 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
     v = None
     for i in range(max(max_level_x, max_level_y), min_level - 1, -1):
         level_size = (int(round(m * eta**(min(i, max_level_y)))), int(round(n * eta**(min(i, max_level_x)))))
-        f1_level = cv2.resize(f1_low, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC)
-        f2_level = cv2.resize(f2_low, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC)
+        f1_level = resize(f1_low, level_size)
+        f2_level = resize(f2_low, level_size)
         if f1_level.ndim == 2:
             f1_level = f1_level[:, :, np.newaxis]
             f2_level = f2_level[:, :, np.newaxis]
         current_hx = float(m) / f1_level.shape[0]
         current_hy = float(n) / f1_level.shape[1]
         if i == max(max_level_x, max_level_y):
-            u = add_boundary(cv2.resize(u_init, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
-            v = add_boundary(cv2.resize(v_init, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
+            u = add_boundary(resize(u_init, level_size))
+            v = add_boundary(resize(v_init, level_size))
             tmp = f2_level.copy()
         else:
-            u = add_boundary(cv2.resize(u[1:-1, 1:-1], (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
-            v = add_boundary(cv2.resize(v[1:-1, 1:-1], (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
+            u = add_boundary(resize(u[1:-1, 1:-1], level_size))
+            v = add_boundary(resize(v[1:-1, 1:-1], level_size))
             tmp = imregister_wrapper(f2_level, u[1:-1,1:-1]/current_hy, v[1:-1,1:-1]/current_hx, f1_level)
         if tmp.ndim == 2:
             tmp = tmp[:, :, np.newaxis]
@@ -273,7 +361,7 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
             J23[:, :, ch] = J23_ch
         weight_level = weight
         if weight.shape[:2] != f1_level.shape[:2]:
-            weight_level = cv2.resize(weight, (f1_level.shape[1], f1_level.shape[0]), interpolation=cv2.INTER_CUBIC)
+            weight_level = resize(weight, f1_level.shape)
         weight_level = cv2.copyMakeBorder(
             weight_level, 1, 1, 1, 1,
             borderType=cv2.BORDER_CONSTANT, value=0.0)
@@ -283,7 +371,7 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
         else:
             alpha_scaling = eta**(-0.5 * i)
 
-        alpha_tmp = [alpha_scaling * alpha[i] for i in range(len(alpha))]
+        alpha_tmp = [alpha_scaling * alpha[j] for j in range(len(alpha))]
 
         du, dv = level_solver(np.ascontiguousarray(J11),
                               np.ascontiguousarray(J22),
@@ -294,8 +382,8 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
                               np.ascontiguousarray(weight_level), u, v,
                               alpha_tmp, iterations, update_lag, 0, a_data_arr, a_smooth, current_hx, current_hy)
         if min(level_size) > 5:
-            du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode='reflect')
-            dv[1:-1, 1:-1] = median_filter(dv[1:-1, 1:-1], size=(5, 5), mode='reflect')
+            du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode='mirror')
+            dv[1:-1, 1:-1] = median_filter(dv[1:-1, 1:-1], size=(5, 5), mode='mirror')
         u = u + du
         v = v + dv
     w = np.zeros((u.shape[0]-2, u.shape[1]-2, 2), dtype=np.float64)
