@@ -1,13 +1,10 @@
-import numpy as np
-from skimage.transform import resize
-from scipy.ndimage import median_filter
 import cv2
-from pyflowreg.src import compute_flow
 import numpy as np
-from skimage.transform import warp
-from scipy.ndimage import map_coordinates
-from skimage.transform import resize as ski_resize
-from numba import njit, prange
+from scipy.ndimage import median_filter
+from skimage.transform import resize
+
+from pyflowreg.src import compute_flow
+from pyflowreg.util.resize_util import imresize_numba
 
 
 def matlab_gradient(f, spacing):
@@ -21,179 +18,6 @@ def matlab_gradient(f, spacing):
     return grad
 
 
-def resize_image_skimage(image, size):
-    """
-    Resize an image to the specified size using the given interpolation method.
-
-    Parameters:
-    - image: Input image to be resized.
-    - size: Tuple (width, height) specifying the new size.
-    - interpolation: Interpolation method to use for resizing.
-
-    Returns:
-    - Resized image.
-    """
-    img = ski_resize(image, (size[1], size[0]), order=3, mode='edge', anti_aliasing=True)
-    return img
-
-
-def resize_image_cv2(image, size):
-    """
-    Resize an image to the specified size using the given interpolation method.
-
-    Parameters:
-    - image: Input image to be resized.
-    - size: Tuple (width, height) specifying the new size.
-    - interpolation: Interpolation method to use for resizing.
-
-    Returns:
-    - Resized image.
-    """
-    img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_LANCZOS4)
-    return img
-
-
-def resize_image_cv2_aa_gauss(image, size):
-    h_orig, w_orig = image.shape[:2]
-    h_new, w_new = size[:2]
-    scale = min(h_new / h_orig, w_new / w_orig)
-
-    if scale < 1:
-        sigma = 0.6 / scale
-        ksize = int(2 * np.ceil(2 * sigma) + 1)
-        image = cv2.GaussianBlur(image, (ksize, ksize), sigma)
-    img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_CUBIC)
-    return img
-
-
-def imresize_cv2_aa_gauss_sep(img, size):
-    h, w = img.shape[:2]
-    sx, sy = size[1] / w, size[0] / h
-    scale = min(sx, sy)
-    if scale < 1:
-        sigma = 0.6 / scale
-        k = int(2 * np.ceil(2 * sigma) + 1)
-        g = cv2.getGaussianKernel(k, sigma)
-        img = cv2.sepFilter2D(img, -1, g, g, borderType=cv2.BORDER_REFLECT101)
-    return cv2.resize(img, size[1::-1], interpolation=cv2.INTER_CUBIC)
-
-
-A = -0.75                                     # identical to cv::INTER_CUBIC
-
-@njit(inline='always')
-def _cubic(x):
-    ax = abs(x)
-    if ax < 1.0:
-        return (A + 2.0) * ax**3 - (A + 3.0) * ax**2 + 1.0
-    elif ax < 2.0:
-        return  A        * ax**3 - 5.0*A     * ax**2 + 8.0*A*ax - 4.0*A
-    else:
-        return 0.0
-
-
-@njit(fastmath=True, cache=True)         # inner loop → machine code
-def _fill_tables(idx, wt, in_len, out_len, s, w, scaled):
-    P = idx.shape[1]
-    for i in range(out_len):
-        x = (i + 0.5) / s - 0.5
-        left = int(np.floor(x - 0.5*w))
-        sumw = 0.0
-        for p in range(P):
-            j   = left + p
-            jj  = 0 if j < 0 else (in_len-1 if j > in_len-1 else j)
-            idx[i, p] = jj
-            d   = x - j
-            wgt = s * _cubic(s*d) if scaled else _cubic(d)
-            wt[i, p]  = wgt
-            sumw     += wgt
-        inv = 1.0 / sumw
-        for p in range(P):               # normalise
-            wt[i, p] *= inv
-
-
-def _precompute(in_len, out_len):
-    scale  = out_len / in_len
-    if scale < 1.0:
-        W      = 4.0 / scale
-        shrink = True
-    else:
-        W      = 4.0
-        shrink = False
-
-    P       = int(np.ceil(W)) + 1
-    idx = np.empty((out_len, P), np.int32)
-    wt  = np.empty((out_len, P), np.float32)
-
-    _fill_tables(idx, wt, in_len, out_len, scale, W, shrink)
-    return idx, wt
-
-
-@njit(fastmath=True, cache=True)
-def _resize_h(src, idx, wt):
-    h = src.shape[0]
-    ow, P = wt.shape
-    dst = np.empty((h, ow), src.dtype)
-    for y in range(h):
-        for x in range(ow):
-            s = 0.0
-            for p in range(P):
-                s += src[y, idx[x, p]] * wt[x, p]
-            dst[y, x] = s
-    return dst
-
-
-@njit(fastmath=True, cache=True)
-def _resize_v(src, idx, wt):
-    w = src.shape[1]
-    oh, P = wt.shape
-    dst = np.empty((oh, w), src.dtype)
-    for x in range(w):
-        for y in range(oh):
-            s = 0.0
-            for p in range(P):
-                s += src[idx[y, p], x] * wt[y, p]
-            dst[y, x] = s
-    return dst
-
-
-def imresize_numba(img, size):
-    oh, ow = size[:2]
-
-    work = img.astype(np.float32, copy=False)
-
-    idx_x, wt_x = _precompute(work.shape[1], ow)
-    idx_y, wt_y = _precompute(work.shape[0], oh)
-
-    if work.ndim == 2:                       # true grayscale
-        out = np.empty((oh, ow), np.float32)
-        tmp = _resize_h(work, idx_x, wt_x)
-        out[:] = _resize_v(tmp, idx_y, wt_y)
-
-    else:                                    # colour or single-chan 3-D
-        ch = work.shape[2]
-        out = np.empty((oh, ow, ch), np.float32)
-        for c in range(ch):                  # 2-D slice per kernel call
-            tmp = _resize_h(work[:, :, c], idx_x, wt_x)
-            out[:, :, c] = _resize_v(tmp, idx_y, wt_y)
-
-    return out.astype(img.dtype, copy=False)
-
-
-def resize_image_cv2_aa_blur(image, size):
-    h_orig, w_orig = image.shape[:2]
-    h_new, w_new = size[:2]
-
-    if h_new < h_orig or w_new < w_orig:
-        # Box filter - much faster than Gaussian, still removes aliasing
-        scale = max(h_orig/h_new, w_orig/w_new)
-        ksize = int(scale) | 1  # Ensure odd
-        if ksize > 1:
-            image = cv2.blur(image, (ksize, ksize))
-
-    img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_CUBIC)
-    return img
-
-
 resize = imresize_numba
 
 
@@ -201,10 +25,10 @@ def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
     if f2_level.ndim == 2:
         f2_level = f2_level[:, :, None]
         f1_level = f1_level[:, :, None]
-    #f2_level = f2_level[1:-1, 1:-1]
-    #f1_level = f1_level[1:-1, 1:-1]
-    #u = u[1:-1, 1:-1]
-    #v = v[1:-1, 1:-1]
+    # f2_level = f2_level[1:-1, 1:-1]
+    # f1_level = f1_level[1:-1, 1:-1]
+    # u = u[1:-1, 1:-1]
+    # v = v[1:-1, 1:-1]
     H, W, C = f2_level.shape
     grid_y, grid_x = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
     map_x = (grid_x + u).astype(np.float32)
@@ -220,7 +44,8 @@ def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
         raise ValueError("Unsupported interpolation method. Use 'linear' or 'cubic'.")
     warped = np.empty_like(f2_level, dtype=np.float32)
     for c in range(C):
-        warped[:, :, c] = cv2.remap(f2_level[:, :, c], map_x_clipped, map_y_clipped, interpolation=interp, borderMode=cv2.BORDER_REPLICATE)
+        warped[:, :, c] = cv2.remap(f2_level[:, :, c], map_x_clipped, map_y_clipped, interpolation=interp,
+                                    borderMode=cv2.BORDER_REPLICATE)
 
     for c in range(C):
         warped[:, :, c][out_of_bounds] = f1_level[:, :, c][out_of_bounds]
@@ -240,20 +65,16 @@ def warpingDepth(eta, levels, m, n):
     return warpingdepth
 
 
-def add_boundary_old(f):
-    return cv2.copyMakeBorder(f, 1, 1, 1, 1, borderType=cv2.BORDER_REPLICATE)
-
-
 def add_boundary(f):
     return np.pad(f, 1, mode='edge')
 
 
 def get_motion_tensor_gc(f1, f2, hy, hx):
-    f1p = np.pad(f1, ((1,1),(1,1)), mode='symmetric')
-    f2p = np.pad(f2, ((1,1),(1,1)), mode='symmetric')
+    f1p = np.pad(f1, ((1, 1), (1, 1)), mode='symmetric')
+    f2p = np.pad(f2, ((1, 1), (1, 1)), mode='symmetric')
     _, fx1p = np.gradient(f1p, hy, hx)
     _, fx2p = np.gradient(f2p, hy, hx)
-    fx = 0.5*(fx1p + fx2p)
+    fx = 0.5 * (fx1p + fx2p)
     ft = f2p - f1p
     fx = np.pad(fx[1:-1, 1:-1], 1, mode='symmetric')
     ft = np.pad(ft[1:-1, 1:-1], 1, mode='symmetric')
@@ -263,21 +84,23 @@ def get_motion_tensor_gc(f1, f2, hy, hx):
     ft_grad = np.gradient(ft, hy, hx)
     fxt = ft_grad[1]
     fyt = ft_grad[0]
+
     def gradient2(f, hx_, hy_):
         fxx = np.zeros_like(f)
         fyy = np.zeros_like(f)
-        fxx[1:-1, 1:-1] = (f[1:-1, 0:-2] - 2*f[1:-1, 1:-1] + f[1:-1, 2:]) / (hx_**2)
-        fyy[1:-1, 1:-1] = (f[0:-2, 1:-1] - 2*f[1:-1, 1:-1] + f[2:, 1:-1]) / (hy_**2)
+        fxx[1:-1, 1:-1] = (f[1:-1, 0:-2] - 2 * f[1:-1, 1:-1] + f[1:-1, 2:]) / (hx_ ** 2)
+        fyy[1:-1, 1:-1] = (f[0:-2, 1:-1] - 2 * f[1:-1, 1:-1] + f[2:, 1:-1]) / (hy_ ** 2)
         return fxx, fyy
+
     fxx1, fyy1 = gradient2(f1p, hy, hx)
     fxx2, fyy2 = gradient2(f2p, hy, hx)
-    fxx = 0.5*(fxx1 + fxx2)
-    fyy = 0.5*(fyy1 + fyy2)
-    reg_x = 1.0 / ((np.sqrt(fxx**2 + fxy**2)**2) + 1e-6)
-    reg_y = 1.0 / ((np.sqrt(fxy**2 + fyy**2)**2) + 1e-6)
-    J11 = reg_x * fxx**2 + reg_y * fxy**2
-    J22 = reg_x * fxy**2 + reg_y * fyy**2
-    J33 = reg_x * fxt**2 + reg_y * fyt**2
+    fxx = 0.5 * (fxx1 + fxx2)
+    fyy = 0.5 * (fyy1 + fyy2)
+    reg_x = 1.0 / ((np.sqrt(fxx ** 2 + fxy ** 2) ** 2) + 1e-6)
+    reg_y = 1.0 / ((np.sqrt(fxy ** 2 + fyy ** 2) ** 2) + 1e-6)
+    J11 = reg_x * fxx ** 2 + reg_y * fxy ** 2
+    J22 = reg_x * fxy ** 2 + reg_y * fyy ** 2
+    J33 = reg_x * fxt ** 2 + reg_y * fyt ** 2
     J12 = reg_x * fxx * fxy + reg_y * fxy * fyy
     J13 = reg_x * fxx * fxt + reg_y * fxy * fyt
     J23 = reg_x * fxy * fxt + reg_y * fyy * fyt
@@ -289,20 +112,17 @@ def get_motion_tensor_gc(f1, f2, hy, hx):
     return J11, J22, J33, J12, J13, J23
 
 
-def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, update_lag, verbose, a_data, a_smooth, hx, hy):
-    # call the C++ solver
-    result = compute_flow(J11, J22, J33, J12, J13, J23, weight=weight,
-                          u=u, v=v,
-                          alpha_x=alpha[0], alpha_y=alpha[1], iterations=iterations, update_lag=update_lag,
-                          a_data=a_data, a_smooth=a_smooth, hx=hx, hy=hy)
-
-    # du = np.zeros_like(u)
-    # dv = np.zeros_like(v)
+def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, update_lag, verbose, a_data, a_smooth,
+                 hx, hy):
+    result = compute_flow(J11, J22, J33, J12, J13, J23, weight=weight, u=u, v=v, alpha_x=alpha[0], alpha_y=alpha[1],
+                          iterations=iterations, update_lag=update_lag, a_data=a_data, a_smooth=a_smooth, hx=hx, hy=hy)
     du = result[:, :, 0]
     dv = result[:, :, 1]
     return du, dv
 
-def get_displacement_old(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8, a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
+
+def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8,
+                     a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
     fixed = fixed.astype(np.float64)
     moving = moving.astype(np.float64)
     if fixed.ndim == 3:
@@ -339,93 +159,7 @@ def get_displacement_old(fixed, moving, alpha=(2,2), update_lag=10, iterations=2
     u = None
     v = None
     for i in range(max(max_level_x, max_level_y), min_level - 1, -1):
-        level_size = (int(round(m * eta**(min(i, max_level_y)))), int(round(n * eta**(min(i, max_level_x)))))
-        f1_level = cv2.resize(f1_low, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC)
-        f2_level = cv2.resize(f2_low, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC)
-        current_hx = float(m) / f1_level.shape[0]
-        current_hy = float(n) / f1_level.shape[1]
-        if i == max(max_level_x, max_level_y):
-            u = add_boundary(cv2.resize(u_init, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
-            v = add_boundary(cv2.resize(v_init, (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
-            tmp = f2_level.copy()
-        else:
-            u = add_boundary(cv2.resize(u[1:-1, 1:-1], (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
-            v = add_boundary(cv2.resize(v[1:-1, 1:-1], (level_size[1], level_size[0]), interpolation=cv2.INTER_CUBIC))
-            tmp = imregister_wrapper(f2_level, u[1:-1,1:-1]/current_hy, v[1:-1,1:-1]/current_hx, f1_level)
-        u = np.ascontiguousarray(u)
-        v = np.ascontiguousarray(v)
-        J11 = np.zeros_like(f1_level, dtype=np.float64)
-        J22 = np.zeros_like(f1_level, dtype=np.float64)
-        J33 = np.zeros_like(f1_level, dtype=np.float64)
-        J12 = np.zeros_like(f1_level, dtype=np.float64)
-        J13 = np.zeros_like(f1_level, dtype=np.float64)
-        J23 = np.zeros_like(f1_level, dtype=np.float64)
-        for ch in range(n_channels):
-            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy)
-            J11[:, :, ch] = J11_ch
-            J22[:, :, ch] = J22_ch
-            J33[:, :, ch] = J33_ch
-            J12[:, :, ch] = J12_ch
-            J13[:, :, ch] = J13_ch
-            J23[:, :, ch] = J23_ch
-        weight_level = weight
-        if weight.shape[:2] != f1_level.shape[:2]:
-            weight_level = cv2.resize(weight, (f1_level.shape[1], f1_level.shape[0]), interpolation=cv2.INTER_CUBIC)
-        weight_level = cv2.copyMakeBorder(
-            weight_level, 1, 1, 1, 1,
-            borderType=cv2.BORDER_CONSTANT, value=0.0)
-        du, dv = level_solver(np.ascontiguousarray(J11), np.ascontiguousarray(J22), np.ascontiguousarray(J33), np.ascontiguousarray(J12), np.ascontiguousarray(J13), np.ascontiguousarray(J23), np.ascontiguousarray(weight_level), u, v, alpha, iterations, update_lag, 0, a_data_arr, a_smooth, current_hx, current_hy)
-        if min(level_size) > 5:
-            du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode='mirror')
-            dv[1:-1, 1:-1] = median_filter(dv[1:-1, 1:-1], size=(5, 5), mode='mirror')
-        u = u + du
-        v = v + dv
-    w = np.zeros((u.shape[0]-2, u.shape[1]-2, 2), dtype=np.float64)
-    w[:, :, 0] = u[1:-1, 1:-1]
-    w[:, :, 1] = v[1:-1, 1:-1]
-    if min_level > 0:
-        w = cv2.resize(w, (n, m), interpolation=cv2.INTER_CUBIC)
-    return w
-
-
-def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8, a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
-    fixed = fixed.astype(np.float64)
-    moving = moving.astype(np.float64)
-    if fixed.ndim == 3:
-        m, n, n_channels = fixed.shape
-    else:
-        m, n = fixed.shape
-        n_channels = 1
-        fixed = fixed[:, :, np.newaxis]
-        moving = moving[:, :, np.newaxis]
-    u_init = np.zeros((m, n), dtype=np.float64)
-    v_init = np.zeros((m, n), dtype=np.float64)
-    if weight is None:
-        weight = np.ones((m, n, n_channels), dtype=np.float64) / n_channels
-    else:
-        weight = weight.astype(np.float64)
-        if weight.ndim < 3:
-            weight = np.ones((m, n, n_channels), dtype=np.float64) * weight
-    if not isinstance(a_data, np.ndarray):
-        a_data_arr = np.full(n_channels, a_data, dtype=np.float64)
-    else:
-        a_data_arr = a_data
-    a_data_arr = np.ascontiguousarray(a_data_arr)
-    f1_low = fixed
-    f2_low = moving
-    max_level_y = warpingDepth(eta, levels, m, n)
-    max_level_x = warpingDepth(eta, levels, m, n)
-    max_level = min(max_level_x, max_level_y) * 4
-    max_level_y = min(max_level_y, max_level)
-    max_level_x = min(max_level_x, max_level)
-    if max(max_level_x, max_level_y) <= min_level:
-        min_level = max(max_level_x, max_level_y) - 1
-    if min_level < 0:
-        min_level = 0
-    u = None
-    v = None
-    for i in range(max(max_level_x, max_level_y), min_level - 1, -1):
-        level_size = (int(round(m * eta**(min(i, max_level_y)))), int(round(n * eta**(min(i, max_level_x)))))
+        level_size = (int(round(m * eta ** (min(i, max_level_y)))), int(round(n * eta ** (min(i, max_level_x)))))
         f1_level = resize(f1_low, level_size)
         f2_level = resize(f2_low, level_size)
         if f1_level.ndim == 2:
@@ -440,7 +174,7 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
         else:
             u = add_boundary(resize(u[1:-1, 1:-1], level_size))
             v = add_boundary(resize(v[1:-1, 1:-1], level_size))
-            tmp = imregister_wrapper(f2_level, u[1:-1,1:-1]/current_hy, v[1:-1,1:-1]/current_hx, f1_level)
+            tmp = imregister_wrapper(f2_level, u[1:-1, 1:-1] / current_hy, v[1:-1, 1:-1] / current_hx, f1_level)
         if tmp.ndim == 2:
             tmp = tmp[:, :, np.newaxis]
         u = np.ascontiguousarray(u)
@@ -453,7 +187,8 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
         J13 = np.zeros(J_size, dtype=np.float64)
         J23 = np.zeros(J_size, dtype=np.float64)
         for ch in range(n_channels):
-            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy)
+            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(f1_level[:, :, ch], tmp[:, :, ch],
+                                                                                  current_hx, current_hy)
             J11[:, :, ch] = J11_ch
             J22[:, :, ch] = J22_ch
             J33[:, :, ch] = J33_ch
@@ -463,31 +198,25 @@ def get_displacement(fixed, moving, alpha=(2,2), update_lag=10, iterations=20, m
         weight_level = weight
         if weight.shape[:2] != f1_level.shape[:2]:
             weight_level = resize(weight, f1_level.shape)
-        weight_level = cv2.copyMakeBorder(
-            weight_level, 1, 1, 1, 1,
-            borderType=cv2.BORDER_CONSTANT, value=0.0)
+        weight_level = cv2.copyMakeBorder(weight_level, 1, 1, 1, 1, borderType=cv2.BORDER_CONSTANT, value=0.0)
 
         if i == min_level:
             alpha_scaling = 1
         else:
-            alpha_scaling = eta**(-0.5 * i)
+            alpha_scaling = eta ** (-0.5 * i)
 
         alpha_tmp = [alpha_scaling * alpha[j] for j in range(len(alpha))]
 
-        du, dv = level_solver(np.ascontiguousarray(J11),
-                              np.ascontiguousarray(J22),
-                              np.ascontiguousarray(J33),
-                              np.ascontiguousarray(J12),
-                              np.ascontiguousarray(J13),
-                              np.ascontiguousarray(J23),
-                              np.ascontiguousarray(weight_level), u, v,
-                              alpha_tmp, iterations, update_lag, 0, a_data_arr, a_smooth, current_hx, current_hy)
+        du, dv = level_solver(np.ascontiguousarray(J11), np.ascontiguousarray(J22), np.ascontiguousarray(J33),
+                              np.ascontiguousarray(J12), np.ascontiguousarray(J13), np.ascontiguousarray(J23),
+                              np.ascontiguousarray(weight_level), u, v, alpha_tmp, iterations, update_lag, 0,
+                              a_data_arr, a_smooth, current_hx, current_hy)
         if min(level_size) > 5:
             du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode='mirror')
             dv[1:-1, 1:-1] = median_filter(dv[1:-1, 1:-1], size=(5, 5), mode='mirror')
         u = u + du
         v = v + dv
-    w = np.zeros((u.shape[0]-2, u.shape[1]-2, 2), dtype=np.float64)
+    w = np.zeros((u.shape[0] - 2, u.shape[1] - 2, 2), dtype=np.float64)
     w[:, :, 0] = u[1:-1, 1:-1]
     w[:, :, 1] = v[1:-1, 1:-1]
     if min_level > 0:
