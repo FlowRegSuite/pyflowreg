@@ -19,8 +19,8 @@ def preprocess(frame):
 
     ranges = maxs - mins
 
-    #frame1 = (frame1 - mins) / ranges
-    #frame2 = (frame2 - mins) / ranges
+    frame1 = (frame1 - mins) / ranges
+    frame2 = (frame2 - mins) / ranges
 
     return frame1, frame2
 
@@ -62,23 +62,23 @@ pfr.get_displacement(cold_f1, cold_f1, alpha=(2, 2),
 
 base_params = dict(
     alpha=(8, 8),
-    iterations=50,
+    iterations=100,
     a_data=0.45,
     a_smooth=1.0,
     weight=np.array([0.6, 0.4], np.float32),
-    levels=100,
+    levels=50,
     eta=0.8,
     update_lag=5,
 )
 
 for name, data in datasets:
-    #data = gaussian_filter(data, (0.1, 0.01, 1.5, 1.5),
-    #                       truncate=10, mode='constant')
-    for i in range(data.shape[1]):
-        data[:, i, :, :] = gaussian_filter(data[:, i, :, :],
-                                           (0.1, 1.5, 1.5),  # 3D sigmas only
-                                           truncate=10,
-                                           mode='constant')
+    data = gaussian_filter(data, (0.1, 0.01, 1.5, 1.5),
+                           truncate=10, mode='constant')
+    #for i in range(data.shape[1]):
+    #    data[:, i, :, :] = gaussian_filter(data[:, i, :, :],
+    #                                       (0.1, 1.5, 1.5),  # 3D sigmas only
+    #                                       truncate=10,
+    #                                       mode='constant')
     f1, f2 = preprocess(data)
 
     w = run({**base_params, "min_level": 0}, f1, f2)

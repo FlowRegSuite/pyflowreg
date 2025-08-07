@@ -14,13 +14,14 @@ if __name__ == "__main__":
         #clean = f["clean"][:]
         clean = f[("clean")][:]
         noisy35db = f["noisy35db"][:]
+        clean = f[("noisy30db")][:]
 
         w = f["w"][:]
 
     frame1 = np.permute_dims(clean[0], (1, 2, 0)).astype(float)
     frame2 = np.permute_dims(clean[1], (1, 2, 0)).astype(float)
-    frame1 = cv2.GaussianBlur(frame1, None, 2)
-    frame2 = cv2.GaussianBlur(frame2, None, 2)
+    frame1 = cv2.GaussianBlur(frame1, None, 1.5)
+    frame2 = cv2.GaussianBlur(frame2, None, 1.5)
 
     eps = 1e-6
     mins = frame1.min(axis=(0, 1))[None, None, :]  # shape (1,1,C)
@@ -57,7 +58,7 @@ if __name__ == "__main__":
         start = time()
         w = pfr.get_displacement(
             frame1[..., :], frame2[..., :],
-            alpha=(15, 15),
+            alpha=(8, 8),
             levels=50,
             min_level=0,
             iterations=50,
