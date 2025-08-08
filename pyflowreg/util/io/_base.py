@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from typing import Optional
 
+
 class VideoReader(ABC):
     """
     Abstract base class for all video file readers.
@@ -47,6 +48,7 @@ class VideoReader(ABC):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+
 class VideoWriter(ABC):
     """
     Abstract base class for all video file writers.
@@ -54,12 +56,25 @@ class VideoWriter(ABC):
     """
     def __init__(self):
         self.initialized = False
+        self.height = 0
+        self.width = 0
         self.n_channels = 0
         self.bit_depth = 0
+        self.dtype = None
+
+    def init(self, first_frame_batch: np.ndarray):
+        """Initializes writer properties based on the first batch of frames."""
+        shape = first_frame_batch.shape
+        self.height = shape[0]
+        self.width = shape[1]
+        self.n_channels = shape[2] if len(shape) > 2 else 1
+        self.dtype = first_frame_batch.dtype
+        self.bit_depth = self.dtype.itemsize * 8
+        self.initialized = True
 
     @abstractmethod
     def write_frames(self, frames: np.ndarray):
-        """Writes frames to the file."""
+        """Writes a batch of frames to the file."""
         pass
 
     @abstractmethod

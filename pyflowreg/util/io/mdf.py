@@ -1,7 +1,7 @@
 import numpy as np
 from datetime import datetime
 from typing import Optional, Any
-from pyflowreg.util.io.base import VideoReader
+from pyflowreg.util.io._base import VideoReader
 import time
 import gc
 
