@@ -3,7 +3,7 @@ import numpy as np
 from scipy.ndimage import median_filter
 from skimage.transform import resize
 
-from pyflowreg.src import compute_flow
+from pyflowreg.core import compute_flow
 from pyflowreg.util.resize_util import imresize_numba, imresize_fused_gauss_cubic
 
 
