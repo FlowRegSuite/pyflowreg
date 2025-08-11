@@ -10,3 +10,4 @@ tifffile
 scikit-build
 pybind11
 numba
+pydantic

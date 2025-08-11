@@ -11,3 +11,4 @@ scikit-build
 pybind11
 numba
 pywin32
+pydantic
