@@ -175,3 +175,78 @@ def resize_image_cv2_aa_blur(image, size):
 
     img = cv2.resize(image, (size[1], size[0]), interpolation=cv2.INTER_CUBIC)
     return img
+
+
+@njit(inline='always')
+def _reflect_idx(j, n):
+    if n <= 1:
+        return 0
+    while j < 0 or j >= n:
+        if j < 0:
+            j = -j - 1
+        else:
+            j = 2 * n - 1 - j
+    return j
+
+
+@njit(fastmath=True, cache=True)
+def _fill_tables_fused_gauss_cubic_reflect(idx, wt, in_len, out_len, scale, g, R):
+    P = 2 * R + 4
+    for i in range(out_len):
+        x = (i + 0.5) / scale - 0.5
+        left = int(np.floor(x - 2.0)) - R
+        ssum = 0.0
+        for p in range(P):
+            j = left + p
+            jj = _reflect_idx(j, in_len)
+            idx[i, p] = jj
+            d = x - j
+            acc = 0.0
+            for u in range(-R, R + 1):
+                acc += g[u + R] * _cubic(d - u)
+            wt[i, p] = acc
+            ssum += acc
+        inv = 1.0 / ssum
+        for p in range(P):
+            wt[i, p] *= inv
+
+
+def _precompute_fused_gauss_cubic(in_len, out_len, sigma):
+    scale = out_len / in_len
+    if sigma <= 0.0:
+        R = 0
+        g = np.array([1.0], dtype=np.float32)
+    else:
+        R = int(np.ceil(2.0 * sigma))
+        x = np.arange(-R, R + 1, dtype=np.float32)
+        g = np.exp(-0.5 * (x / sigma) ** 2).astype(np.float32)
+        g /= g.sum()
+    idx = np.empty((out_len, 2 * R + 4), np.int32)
+    wt  = np.empty((out_len, 2 * R + 4), np.float32)
+    _fill_tables_fused_gauss_cubic_reflect(idx, wt, in_len, out_len, scale, g, R)
+    return idx, wt
+
+
+def imresize_fused_gauss_cubic(img, size, sigma_coeff=0.6, per_axis=False):
+    oh, ow = size[:2]
+    x = img.astype(np.float32, copy=False)
+    sy = oh / x.shape[0]
+    sx = ow / x.shape[1]
+    if per_axis:
+        sigx = sigma_coeff / sx if sx < 1.0 else 0.0
+        sigy = sigma_coeff / sy if sy < 1.0 else 0.0
+    else:
+        s = sy if sy < sx else sx
+        sigx = sigy = (sigma_coeff / s) if s < 1.0 else 0.0
+    idx_x, wt_x = _precompute_fused_gauss_cubic(x.shape[1], ow, sigx)
+    idx_y, wt_y = _precompute_fused_gauss_cubic(x.shape[0], oh, sigy)
+    if x.ndim == 2:
+        tmp = _resize_h(x, idx_x, wt_x)
+        y = _resize_v(tmp, idx_y, wt_y)
+    else:
+        c = x.shape[2]
+        y = np.empty((oh, ow, c), np.float32)
+        for k in range(c):
+            tmp = _resize_h(x[:, :, k], idx_x, wt_x)
+            y[:, :, k] = _resize_v(tmp, idx_y, wt_y)
+    return y.astype(img.dtype, copy=False)

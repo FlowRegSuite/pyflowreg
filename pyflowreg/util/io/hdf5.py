@@ -199,3 +199,7 @@ class HDF5FileWriter(DSFileWriter, VideoWriter):
             self._h5file.close()
             self._h5file = None
             print("HDF5 file writer closed.")
+
+
+if __name__ == "__main__":
+    pass

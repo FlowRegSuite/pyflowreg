@@ -4,7 +4,7 @@ from scipy.ndimage import median_filter
 from skimage.transform import resize
 
 from pyflowreg.src import compute_flow
-from pyflowreg.util.resize_util import imresize_numba
+from pyflowreg.util.resize_util import imresize_numba, imresize_fused_gauss_cubic
 
 
 def matlab_gradient(f, spacing):
@@ -18,7 +18,7 @@ def matlab_gradient(f, spacing):
     return grad
 
 
-resize = imresize_numba
+resize = imresize_fused_gauss_cubic
 
 
 def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
