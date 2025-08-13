@@ -138,11 +138,11 @@ class HDF5FileWriter(DSFileWriter, VideoWriter):
         self._frame_counter = 0
 
         # MATLAB compatibility options
-        # Default (0, 1, 2) means store as (H, W, T) which MATLAB expects
-        self.dimension_ordering = kwargs.get('dimension_ordering', (0, 1, 2))
+        # Default (1, 2, 0) means store as (T, H, W) which MATLAB reads as (H, W, T)
+        self.dimension_ordering = kwargs.get('dimension_ordering', (1, 2, 0))
 
         # Compression options
-        self.compression = kwargs.get('compression', 'gzip')
+        self.compression = kwargs.get('compression', None)
         self.compression_level = kwargs.get('compression_level', 4)
         self.chunk_temporal = kwargs.get('chunk_size', 1)
 
@@ -334,30 +334,57 @@ def main():
     import numpy as np
     from pathlib import Path
     from mdf import MDFFileReader
+    import cv2
 
     filename = r"D:\2025_OIST\Shinobu\RFPonly\190403_001.MDF"
     out_path = Path(filename + ".hdf")
 
     mdf = MDFFileReader(filename, buffer_size=500, bin_size=1)
-    frames = mdf[0:100]
-    mdf.close()
 
     with HDF5FileWriter(str(out_path)) as w:
-        w.write_frames(frames)
+        # for i in range(5 * 8200, 5 * 9200):
+        for i in range(5 * 8200, 5 * 8300):
+            frame = mdf[i]
+            w.write_frames(frame[np.newaxis])
 
     h5 = HDF5FileReader(str(out_path), buffer_size=500, bin_size=5)
     h5_b5 = h5[0:20]
     h5.close()
+    mdf.close()
 
     mdf2 = MDFFileReader(filename, buffer_size=500, bin_size=5)
-    mdf_b5 = mdf2[0:20]
+    mdf_b5 = mdf2[8200:8200+20]
     mdf2.close()
+
+    counter = 0
+    while True:
+        frame = np.concatenate(
+            [h5_b5[counter], mdf_b5[counter]], axis=0
+        )
+        counter = (counter + 1) % h5_b5.shape[0]
+        cv2.imshow("Frame", cv2.normalize(frame[..., 0],
+                                          None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U))
+        key = cv2.waitKey(1)
+        if key == 27:
+            break
 
     if not np.array_equal(h5_b5, mdf_b5):
         d = h5_b5.astype(np.int64) - mdf_b5.astype(np.int64)
         print(int(np.abs(d).max()))
-        raise SystemExit(1)
-    print(f"OK {out_path}")
+        print("Frames are not equal!")
+    else:
+        print(f"OK {out_path}")
+
+
+def reader_main():
+    import cv2
+    filename = r"D:\2025_OIST\Shinobu\RFPonly\test.hdf"
+    reader = HDF5FileReader(filename, buffer_size=500, bin_size=1)
+    print(f"Number of frames: {len(reader)}")
+    for i in range(len(reader)):
+        frame = reader[i]
+        cv2.imshow(f"Frame", cv2.normalize(frame[:, :, 0], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U))
+        cv2.waitKey(1)
 
 
 if __name__ == "__main__":

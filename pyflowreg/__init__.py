@@ -1,1 +1,1 @@
-from pyflowreg.optical_flow import get_displacement
+from pyflowreg.core.optical_flow import get_displacement
