@@ -12,3 +12,4 @@ pybind11
 numba
 pydantic
 tifffile
+hdf5storage

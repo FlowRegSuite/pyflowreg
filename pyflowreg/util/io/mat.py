@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 import scipy.io as sio
 import h5py
+import hdf5storage as h5s
 
 from pyflowreg.util.io._base import VideoReader, VideoWriter
 from pyflowreg.util.io._ds_io import DSFileReader, DSFileWriter
@@ -37,18 +38,37 @@ class MATFileReader(DSFileReader, VideoReader):
         # Known dataset patterns from MATLAB version
         self.known_patterns = ['ch*_reg', 'ch*', 'buffer*', 'mov', 'data']
 
+    @staticmethod
+    def _is_v73(path: str) -> bool:
+        try:
+            with open(path, "rb") as f:
+                head = f.read(128)
+            if b"MATLAB 7.3 MAT-file" in head:
+                return True
+        except Exception:
+            pass
+        return h5py.is_hdf5(path)
+
     def _initialize(self):
         """Open MAT file and set up properties."""
-        try:
-            # Try loading as regular MAT file first
-            self.mat_data = sio.loadmat(self.file_path, verify_compressed_data_integrity=False)
-            self.is_v73 = False
-        except NotImplementedError:
-            # v7.3 MAT file - use h5py
+        if self._is_v73(self.file_path):
             self.is_v73 = True
             try:
-                self.h5file = h5py.File(self.file_path, 'r')
+                self.h5file = h5py.File(self.file_path, "r")
             except Exception as e:
+                raise IOError(f"Cannot open MAT v7.3 (HDF5) file: {e}")
+        else:
+            try:
+                self.mat_data = sio.loadmat(
+                    self.file_path,
+                    verify_compressed_data_integrity=False
+                )
+                self.is_v73 = False
+            except NotImplementedError:
+                # Unexpected v7.3 despite header test
+                self.is_v73 = True
+                self.h5file = h5py.File(self.file_path, "r")
+            except ValueError as e:
                 raise IOError(f"Cannot open MAT v7.3 file: {e}")
 
         # Find datasets
@@ -350,17 +370,26 @@ class MATFileWriter(DSFileWriter, VideoWriter):
         }
 
         # Write MAT file
-        if self.use_v73:
-            # Use v7.3 format for large files
-            sio.savemat(self.file_path, final_dict, do_compression=True, format='7.3')
-        else:
+        #if self.use_v73:
+        #    # Use v7.3 format for large files
+        #    sio.savemat(self.file_path, final_dict, do_compression=True, format='7.3')
+        #else:
             # Use default format
-            try:
-                sio.savemat(self.file_path, final_dict, do_compression=True)
-            except ValueError:
+        #    try:
+        #        sio.savemat(self.file_path, final_dict, do_compression=True)
+        #    except ValueError:
                 # File too large for v5/v7, switch to v7.3
-                warnings.warn("File too large for MAT v5/v7, switching to v7.3 format")
-                sio.savemat(self.file_path, final_dict, do_compression=True, format='7.3')
+        #        warnings.warn("File too large for MAT v5/v7, switching to v7.3 format")
+        #        sio.savemat(self.file_path, final_dict, do_compression=True, format='7.3')
+
+        try:
+            if self.use_v73:
+                h5s.savemat(self.file_path, final_dict)
+            else:
+                sio.savemat(self.file_path, final_dict, do_compression=True, format='5')
+        except ValueError:
+            warnings.warn("Switching to v7.3 (file too large for v5).")
+            h5s.savemat(self.file_path, final_dict)
 
         print(f"MAT file written: {self.file_path}")
         self._data_dict = {}
@@ -385,7 +414,7 @@ def main():
         mat_path = f.name
 
     print(f"Writing test MAT file: {mat_path}")
-    with MATFileWriter(mat_path) as writer:
+    with MATFileWriter(mat_path, use_v73=True) as writer:
         writer.write_frames(test_frames[:50])
         writer.write_frames(test_frames[50:])
 
