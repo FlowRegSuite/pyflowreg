@@ -7,13 +7,14 @@ import numpy as np
 from pyflowreg.util.io._base import VideoReader, VideoWriter
 
 
-def get_video_file_reader(file_path: str, buffer_size: int = 500,
+def get_video_file_reader(file_path: Union[str, List[str]], buffer_size: int = 500,
                           bin_size: int = 1, **kwargs) -> VideoReader:
     """
-    Factory function to create appropriate reader based on file extension.
+    Factory function to create appropriate reader based on file type.
+    Mirrors MATLAB get_video_file_reader functionality.
 
     Args:
-        file_path: Path to video file
+        file_path: Path to video file, list of paths for multichannel, or folder for images
         buffer_size: Buffer size for reading
         bin_size: Temporal binning factor
         **kwargs: Additional reader-specific arguments
@@ -28,8 +29,30 @@ def get_video_file_reader(file_path: str, buffer_size: int = 500,
     from pyflowreg.util.io.hdf5 import HDF5FileReader
     from pyflowreg.util.io.mat import MATFileReader
     from pyflowreg.util.io.mdf import MDFFileReader
+    from pyflowreg.util.io.multifile_wrappers import MULTICHANNELFileReader
 
-    ext = Path(file_path).suffix.lower()
+    # Handle multichannel input (list of files)
+    if isinstance(file_path, list):
+        return MULTICHANNELFileReader(file_path, buffer_size, bin_size, **kwargs)
+    
+    path = Path(file_path)
+    
+    # Handle folder input (image sequence) - TODO: implement IMGFileReader
+    if path.is_dir():
+        # Check if folder contains images
+        image_exts = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'}
+        has_images = any(f.suffix.lower() in image_exts for f in path.iterdir() if f.is_file())
+        if has_images:
+            # TODO: Implement IMGFileReader for image folders
+            raise NotImplementedError("Image folder reading not yet implemented. Use TIFF stacks instead.")
+        else:
+            raise ValueError(f"Folder {file_path} does not contain images")
+    
+    # Handle file input
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    ext = path.suffix.lower()
 
     readers = {
         '.tif': TIFFFileReader,
@@ -43,18 +66,29 @@ def get_video_file_reader(file_path: str, buffer_size: int = 500,
 
     reader_class = readers.get(ext)
     if reader_class:
-        return reader_class(file_path, buffer_size, bin_size, **kwargs)
+        return reader_class(str(file_path), buffer_size, bin_size, **kwargs)
     else:
+        # Try to check if it's HDF5 without extension
+        try:
+            import h5py
+            with h5py.File(str(file_path), 'r'):
+                return HDF5FileReader(str(file_path), buffer_size, bin_size, **kwargs)
+        except:
+            pass
+        
+        # Try video formats as last resort
+        # TODO: Implement AVIFileReader for video files
         raise ValueError(f"Unsupported file format: {ext}")
 
 
-def get_video_file_writer(file_path: str, file_type: Optional[str] = None, **kwargs) -> VideoWriter:
+def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> VideoWriter:
     """
-    Factory function to create appropriate writer based on file extension.
+    Factory function to create appropriate writer based on output format.
+    Mirrors MATLAB get_video_file_writer functionality.
 
     Args:
         file_path: Output file path
-        file_type: Optional explicit file type (overrides extension)
+        output_format: Output format string (e.g., 'TIFF', 'HDF5', 'MAT', 'MULTIFILE_TIFF', etc.)
         **kwargs: Additional writer-specific arguments
 
     Returns:
@@ -66,26 +100,32 @@ def get_video_file_writer(file_path: str, file_type: Optional[str] = None, **kwa
     from pyflowreg.util.io.tiff import TIFFFileWriter
     from pyflowreg.util.io.hdf5 import HDF5FileWriter
     from pyflowreg.util.io.mat import MATFileWriter
+    from pyflowreg.util.io.multifile_wrappers import MULTIFILEFileWriter
 
-    if file_type:
-        ext = '.' + file_type.lower()
+    # Handle different output formats (matches MATLAB switch statement)
+    if output_format == 'TIFF':
+        return TIFFFileWriter(file_path, **kwargs)
+    elif output_format == 'SUITE2P_TIFF':
+        # TODO: Add suite2p-specific formatting
+        return TIFFFileWriter(file_path, format='suite2p', **kwargs)
+    elif output_format == 'MAT':
+        return MATFileWriter(file_path, **kwargs)
+    elif output_format == 'HDF5':
+        return HDF5FileWriter(file_path, **kwargs)
+    elif output_format == 'MULTIFILE_TIFF':
+        return MULTIFILEFileWriter(file_path, 'TIFF', **kwargs)
+    elif output_format == 'MULTIFILE_MAT':
+        return MULTIFILEFileWriter(file_path, 'MAT', **kwargs)
+    elif output_format == 'MULTIFILE_HDF5':
+        return MULTIFILEFileWriter(file_path, 'HDF5', **kwargs)
+    elif output_format == 'CAIMAN_HDF5':
+        # Multifile HDF5 with /mov dataset for CaImAn compatibility
+        return MULTIFILEFileWriter(file_path, 'HDF5', dataset_names='/mov', **kwargs)
+    elif output_format == 'BEGONIA':
+        # TODO: Implement TSERIESH5_file_writer
+        raise NotImplementedError("BEGONIA format not yet implemented")
     else:
-        ext = Path(file_path).suffix.lower()
-
-    writers = {
-        '.tif': TIFFFileWriter,
-        '.tiff': TIFFFileWriter,
-        '.h5': HDF5FileWriter,
-        '.hdf5': HDF5FileWriter,
-        '.hdf': HDF5FileWriter,
-        '.mat': MATFileWriter,
-    }
-
-    writer_class = writers.get(ext)
-    if writer_class:
-        return writer_class(file_path, **kwargs)
-    else:
-        raise ValueError(f"Unsupported file format: {ext}")
+        raise ValueError(f"Unsupported output format: {output_format}")
 
 
 def main():

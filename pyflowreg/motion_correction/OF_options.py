@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Annotated, Any, Callable, List, Optional, Tuple, Union
 
 import numpy as np
 import tifffile
@@ -30,11 +30,11 @@ except ImportError:
 try:
     from pyflowreg.util.io.hdf5 import HDF5FileReader, HDF5FileWriter
     from pyflowreg.util.io.mdf import MDFFileReader
-    from pyflowreg.util.io._base import VideoReader as _VideoReaderBase, VideoWriter as _VideoWriterBase
+    from pyflowreg.util.io._base import VideoReader, VideoWriter
     from pyflowreg.util.io.tiff import TIFFStackReader, TIFFStackWriter
 except ImportError:
-    _VideoReaderBase = object
-    _VideoWriterBase = object
+    VideoReader = object
+    VideoWriter = object
     HDF5FileReader = None
     HDF5FileWriter = None
     MDFFileReader = None
@@ -88,12 +88,12 @@ class OFOptions(BaseModel):
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
-        validate_assignment=True,
+        validate_assignment=False,  # Default Pydantic behavior - appropriate for config objects
         extra="forbid"
     )
 
     # I/O
-    input_file: Optional[Union[str, Path, np.ndarray, _VideoReaderBase]] = Field(
+    input_file: Optional[Union[str, Path, np.ndarray, VideoReader]] = Field(
         None, description="Path/ndarray/VideoReader for input"
     )
     output_path: Path = Field(Path("results"), description="Output directory")
@@ -102,7 +102,7 @@ class OFOptions(BaseModel):
     channel_idx: Optional[List[int]] = Field(None, description="Channel indices to process")
 
     # Flow parameters
-    alpha: Union[float, Tuple[float, float]] = Field(1.5, gt=0, description="Regularization strength")
+    alpha: Union[float, Tuple[float, float]] = Field(1.5, description="Regularization strength")
     weight: Union[List[float], np.ndarray] = Field([0.5, 0.5], description="Channel weights")
     levels: StrictInt = Field(100, ge=1, description="Number of pyramid levels")
     min_level: StrictInt = Field(-1, ge=-1, description="Min pyramid level; -1 = from preset")
@@ -114,7 +114,7 @@ class OFOptions(BaseModel):
     a_data: float = Field(0.45, gt=0, le=1, description="Data-term diffusion parameter")
 
     # Preprocessing
-    sigma: Union[List[float], np.ndarray] = Field(
+    sigma: Any = Field(
         [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]],
         description="Gaussian [sx, sy, st] per-channel"
     )
@@ -147,10 +147,69 @@ class OFOptions(BaseModel):
     preproc_funct: Optional[Callable] = Field(None, exclude=True)
 
     # Private attributes (using PrivateAttr for Pydantic v2)
-    _video_reader: Optional[_VideoReaderBase] = PrivateAttr(default=None)
-    _video_writer: Optional[_VideoWriterBase] = PrivateAttr(default=None)
+    _video_reader: Optional[VideoReader] = PrivateAttr(default=None)
+    _video_writer: Optional[VideoWriter] = PrivateAttr(default=None)
     _quality_setting_old: QualitySetting = PrivateAttr(default=QualitySetting.QUALITY)
     _datatype: str = PrivateAttr(default="NONE")
+
+    @field_validator('alpha', mode='before')
+    @classmethod
+    def normalize_alpha(cls, v):
+        """Normalize alpha to always be a 2-tuple of positive floats."""
+        if isinstance(v, (int, float)):
+            if v <= 0:
+                raise ValueError("Alpha must be positive")
+            return (float(v), float(v))
+        elif isinstance(v, (list, tuple)):
+            if len(v) == 1:
+                if v[0] <= 0:
+                    raise ValueError("Alpha must be positive")
+                return (float(v[0]), float(v[0]))
+            elif len(v) == 2:
+                if v[0] <= 0 or v[1] <= 0:
+                    raise ValueError("All alpha values must be positive")
+                return (float(v[0]), float(v[1]))
+            else:
+                raise ValueError("Alpha must be scalar or 2-element tuple")
+        else:
+            raise ValueError("Alpha must be scalar or 2-element tuple")
+
+    @field_validator('weight', mode='before')
+    @classmethod
+    def normalize_weight(cls, v):
+        """Normalize weight values to sum to 1."""
+        if isinstance(v, np.ndarray):
+            if v.ndim == 1:
+                weight_sum = v.sum()
+                if weight_sum > 0:
+                    return (v / weight_sum).tolist()
+                return v.tolist()
+            return v.tolist()
+        elif isinstance(v, (list, tuple)):
+            arr = np.asarray(v, dtype=float)
+            if arr.ndim == 1:
+                weight_sum = arr.sum()
+                if weight_sum > 0:
+                    return (arr / weight_sum).tolist()
+            return v
+        return v
+
+    @field_validator('sigma', mode='before')
+    @classmethod
+    def normalize_sigma(cls, v):
+        """Normalize sigma to correct shape."""
+        sig = np.asarray(v, dtype=float)
+        if sig.ndim == 1:
+            if sig.size != 3:
+                raise ValueError("1D sigma must be [sx, sy, st]")
+            return sig.reshape(1, 3).tolist()
+        elif sig.ndim == 2:
+            if sig.shape[1] != 3:
+                raise ValueError("2D sigma must be (n_channels, 3)")
+            return sig.tolist()
+        else:
+            raise ValueError("Sigma must be [sx,sy,st] or (n_channels, 3)")
+        return v
 
     @model_validator(mode="after")
     def validate_and_normalize(self) -> "OFOptions":
@@ -158,44 +217,6 @@ class OFOptions(BaseModel):
         # Path conversion
         if not isinstance(self.output_path, Path):
             self.output_path = Path(self.output_path)
-
-        # Alpha normalization
-        if isinstance(self.alpha, (int, float)):
-            self.alpha = (float(self.alpha), float(self.alpha))
-        elif isinstance(self.alpha, (list, tuple)):
-            if len(self.alpha) == 1:
-                self.alpha = (float(self.alpha[0]), float(self.alpha[0]))
-            elif len(self.alpha) == 2:
-                self.alpha = (float(self.alpha[0]), float(self.alpha[1]))
-            else:
-                raise ValueError("Alpha must be scalar or 2-element tuple")
-
-        # Weight normalization
-        if isinstance(self.weight, np.ndarray):
-            if self.weight.ndim == 1:
-                weight_sum = self.weight.sum()
-                if weight_sum > 0:
-                    self.weight = (self.weight / weight_sum).tolist()
-        elif isinstance(self.weight, (list, tuple)):
-            arr = np.asarray(self.weight, dtype=float)
-            if arr.ndim == 1:
-                weight_sum = arr.sum()
-                if weight_sum > 0:
-                    self.weight = (arr / weight_sum).tolist()
-
-        # Sigma normalization
-        sig = np.asarray(self.sigma, dtype=float)
-        if sig.ndim == 1:
-            if sig.size == 3:
-                self.sigma = sig.reshape(1, 3).tolist()
-            else:
-                raise ValueError("1D sigma must have 3 elements [sx, sy, st]")
-        elif sig.ndim == 2:
-            if sig.shape[1] != 3:
-                raise ValueError("2D sigma must be (n_channels, 3)")
-            self.sigma = sig.tolist()
-        else:
-            raise ValueError("Sigma must be [sx,sy,st] or (n_channels, 3)")
 
         # Quality setting logic (MATLAB parity)
         if self.quality_setting != QualitySetting.CUSTOM:
@@ -232,7 +253,7 @@ class OFOptions(BaseModel):
 
         # If sigma is 2D, return row for channel i
         if i >= sig.shape[0]:
-            if not self.verbose:
+            if self.verbose:
                 print(f"Sigma for channel {i} not specified, using channel 0")
             return sig[0]
 
@@ -254,7 +275,7 @@ class OFOptions(BaseModel):
                 self.weight = w.tolist()
 
             if i >= w.size:
-                if not self.verbose:
+                if self.verbose:
                     print(f"Weight for channel {i} not set, using 1/n_channels")
                 return 1.0 / n_channels
 
@@ -262,7 +283,7 @@ class OFOptions(BaseModel):
 
         # Handle 2D or 3D weights (spatial weights)
         if i >= w.shape[0]:
-            if not self.verbose:
+            if self.verbose:
                 print(f"Weight for channel {i} not set, using 1/n_channels")
             return np.ones(w.shape[1:]) / n_channels
 
@@ -272,100 +293,67 @@ class OFOptions(BaseModel):
         """Create a deep copy (MATLAB copyable interface)."""
         return self.model_copy(deep=True)
 
-    def get_video_reader(self) -> _VideoReaderBase:
-        """Get or create video reader."""
+    def get_video_reader(self) -> VideoReader:
+        """Get or create video reader (mirrors MATLAB get_video_file_reader)."""
+        # Return cached reader if available
         if self._video_reader is not None:
             return self._video_reader
 
-        if isinstance(self.input_file, _VideoReaderBase):
+        # If input_file is already a VideoReader, use it directly
+        if isinstance(self.input_file, VideoReader):
             self._video_reader = self.input_file
             return self._video_reader
 
-        if isinstance(self.input_file, np.ndarray):
-            try:
-                from pyflowreg.util.io.matrix import MatrixFileReader
-            except ImportError as e:
-                raise RuntimeError("MatrixFileReader not available") from e
-            self._video_reader = MatrixFileReader(
-                self.input_file,
-                buffer_size=self.buffer_size,
-                bin_size=self.bin_size
-            )
-            return self._video_reader
-
-        if self.input_file is None:
-            raise ValueError("No input_file provided")
-
-        path = Path(self.input_file)
-        suffix = path.suffix.lower()
-
-        if suffix == ".mdf":
-            if MDFFileReader is None:
-                raise RuntimeError("MDFFileReader not available")
-            self._video_reader = MDFFileReader(
-                str(path),
-                buffer_size=self.buffer_size,
-                bin_size=self.bin_size
-            )
-        elif suffix in (".h5", ".hdf5", ".hdf"):
-            if HDF5FileReader is None:
-                raise RuntimeError("HDF5FileReader not available")
-            self._video_reader = HDF5FileReader(
-                str(path),
-                buffer_size=self.buffer_size,
-                bin_size=self.bin_size
-            )
-        elif suffix in (".tif", ".tiff"):
-            if TIFFStackReader is None:
-                raise RuntimeError("TIFFStackReader not available")
-            self._video_reader = TIFFStackReader(
-                str(path),
-                buffer_size=self.buffer_size,
-                bin_size=self.bin_size
-            )
-        else:
-            raise ValueError(f"Unsupported input format: {suffix}")
-
+        # Call factory function to create reader (matches MATLAB behavior)
+        from pyflowreg.util.io.factory import get_video_file_reader
+        self._video_reader = get_video_file_reader(
+            self.input_file,
+            buffer_size=self.buffer_size,
+            bin_size=self.bin_size
+        )
+        
+        # Store reader back in input_file (matches MATLAB line 247)
+        self.input_file = self._video_reader
+        
         return self._video_reader
 
-    def get_video_writer(self) -> _VideoWriterBase:
-        """Get or create video writer."""
+    def get_video_writer(self) -> VideoWriter:
+        """Get or create video writer (mirrors MATLAB get_video_writer)."""
+        # Return cached writer if available
         if self._video_writer is not None:
             return self._video_writer
 
-        # Determine filename
+        # Determine filename (matches MATLAB lines 258-269)
         if self.output_file_name:
-            base = Path(self.output_file_name)
+            filename = self.output_file_name
         else:
             if self.naming_convention == NamingConvention.DEFAULT:
-                base = self.output_path / "compensated"
+                # Extension from output_format enum value
+                ext = "HDF5" if self.output_format == OutputFormat.HDF5 else self.output_format.value
+                filename = str(self.output_path / f"compensated.{ext}")
             else:
                 reader = self.get_video_reader()
-                base_name = Path(getattr(reader, "file_name", "output")).stem
-                base = self.output_path / f"{base_name}_compensated"
+                input_name = Path(getattr(reader, "input_file_name", "output")).stem
+                ext = "HDF5" if self.output_format == OutputFormat.HDF5 else self.output_format.value
+                filename = str(self.output_path / f"{input_name}_compensated.{ext}")
 
-        # Create writer based on format
-        if self.output_format == OutputFormat.HDF5:
-            filename = base.with_suffix(".h5")
-            if HDF5FileWriter is None:
-                raise RuntimeError("HDF5FileWriter not available")
-            self._video_writer = HDF5FileWriter(str(filename))
-        elif self.output_format in (OutputFormat.TIFF, OutputFormat.SUITE2P_TIFF):
-            filename = base.with_suffix(".tif")
-            if TIFFStackWriter is None:
-                raise RuntimeError("TIFFStackWriter not available")
-            self._video_writer = TIFFStackWriter(str(filename))
-        else:
-            raise NotImplementedError(f"Writer for {self.output_format} not implemented")
-
+        # Call factory function to create writer (matches MATLAB)
+        from pyflowreg.util.io.factory import get_video_file_writer
+        self._video_writer = get_video_file_writer(
+            filename,
+            self.output_format.value
+        )
+        
         return self._video_writer
 
-    def get_reference_frame(self, video_reader: Optional[_VideoReaderBase] = None) -> Union[
+    def get_reference_frame(self, video_reader: Optional[VideoReader] = None) -> Union[
         np.ndarray, List[np.ndarray]]:
         """Get reference frame(s), with optional preregistration."""
         if self.n_references > 1:
-            warnings.warn("Multi-reference mode not fully implemented")
-            ref = self.get_reference_frame(video_reader)
+            warnings.warn("Multi-reference mode not fully implemented; repeating a single computed reference")
+            # Create a copy with n_references=1 to avoid recursion
+            single_ref_opts = self.model_copy(update={'n_references': 1})
+            ref = single_ref_opts.get_reference_frame(video_reader)
             return [ref] * self.n_references
 
         # Direct ndarray
@@ -403,7 +391,7 @@ class OFOptions(BaseModel):
             for c in range(n_channels):
                 weight_2d[:, :, c] = self.get_weight_at(c, n_channels)
 
-            if not self.verbose:
+            if self.verbose:
                 print("Preregistering reference frames...")
 
             # Preprocess with extra smoothing for preregistration
@@ -460,7 +448,7 @@ class OFOptions(BaseModel):
                 # Fallback to simple mean
                 reference = ref_mean
 
-            if not self.verbose:
+            if self.verbose:
                 print("Finished pre-registration of the reference frames.")
 
             return reference
@@ -538,7 +526,7 @@ class OFOptions(BaseModel):
             "update_lag": self.update_lag,
             "a_data": self.a_data,
             "a_smooth": self.a_smooth,
-            "constancy_assumption": self.constancy_assumption.value
+            "const_assumption": self.constancy_assumption.value  # Fixed: use const_assumption for API compatibility
         }
 
     def __repr__(self) -> str:
