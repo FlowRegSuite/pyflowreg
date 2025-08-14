@@ -1,6 +1,14 @@
-# Flow-Registration: Optical flow based motion compensation / video stabilization / registration for 2-photon imaging data
+# <img src="img/flowreglogo.png" alt="FlowReg logo" height="64"> PyFlowReg
 
-Toolbox for the compensation and stabilization of multichannel microscopy videos. The code is written in Matlab, Java (IJ Plugin) and C++. The publication for this toolbox can be found [here](https://doi.org/10.1002/jbio.202100330) and the project website with video results [here](https://www.snnu.uni-saarland.de/flow-registration/).
+Python bindings & CLI for Flow-Registration - variational optical-flow motion correction for 2-photon (2P) microscopy videos and volumetric 3D scans.
+
+Derived from the Flow-Registration toolbox for compensation and stabilization of multichannel microscopy videos. The original implementation spans MATLAB, Java (ImageJ/Fiji plugin), and C++. See the [publication](https://doi.org/10.1002/jbio.202100330) and the [project website](https://www.snnu.uni-saarland.de/flow-registration/) for method details and video results.
+
+**Related projects**
+- Original Flow-Registration repo: https://github.com/FlowRegSuite/flow_registration
+- ImageJ/Fiji plugin: https://github.com/FlowRegSuite/flow_registration_IJ
+- Napari plugin: https://github.com/FlowRegSuite/napari-flowreg
+- MCP tools for LLM workflows: https://github.com/FlowRegSuite/pyflowreg-mcp
 
 ![Fig1](img/bg.jpg)
 
@@ -42,12 +50,12 @@ Details on the method and video results can be found [here](https://www.snnu.uni
 
 If you use parts of this code or the plugin for your work, please cite
 
-> P. Flotho, S. Nomura, D. J. Strauss and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos,” arxiv, 2024. [doi:https://]()
+> P. Flotho, S. Nomura, M. Flotho, A. Keller and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos and 3D scans,” arxiv, 2025. [doi:https://]()
 
 BibTeX entry
 ```
-@article{flotea2024c,
-    author = {Flotho, P. and Nomura, S. and Strauss, D. J. and Kuhn, B.},
+@article{flotea2025d,
+    author = {Flotho, P. and Nomura, S. and Flotho, M. and Keller, A. and Kuhn, B.},
     title = {Software for Non-Parametric Image Registration of 2-Photon Imaging Data},
     year = {2022},
   journal = {J Biophotonics},
