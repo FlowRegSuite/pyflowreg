@@ -1,0 +1,571 @@
+"""
+Motion Compensation Pipeline v3 - Optimized and MATLAB-Compatible
+----------------------------------------------------------------
+
+Key improvements:
+1. Correct preprocessing order (normalize -> filter) matching MATLAB
+2. Persistent thread pool for better performance
+3. Simplified API matching synth_evaluation.py style
+4. Fixed reference update logic
+5. Memory-efficient parallelization
+"""
+
+from __future__ import annotations
+
+import warnings
+from dataclasses import dataclass
+from pathlib import Path
+from time import time
+from typing import Any, Optional, Tuple, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import h5py
+import numpy as np
+from scipy.ndimage import gaussian_filter
+import cv2
+
+try:
+    import pyflowreg as pfr
+    from pyflowreg import get_displacement
+except ImportError:
+    warnings.warn("pyflowreg not available; using stub")
+
+
+    def get_displacement(img: np.ndarray, ref: np.ndarray, **kwargs) -> np.ndarray:
+        H, W = img.shape[:2]
+        return np.zeros((H, W, 2), dtype=np.float32)
+
+
+@dataclass
+class RegistrationConfig:
+    """Simplified configuration."""
+    n_jobs: int = -1  # -1 = all cores
+    batch_size: int = 100
+    verbose: bool = False
+    warmup: bool = True  # Pre-compile with small arrays like synth_evaluation
+
+
+class CompensateRecording:
+    """
+    Main registration pipeline matching MATLAB behavior exactly.
+    """
+
+    def __init__(self, options: Any, config: Optional[RegistrationConfig] = None):
+        self.options = options
+        self.config = config or RegistrationConfig()
+
+        # Statistics
+        self.mean_disp: List[float] = []
+        self.max_disp: List[float] = []
+        self.mean_div: List[float] = []
+        self.mean_translation: List[float] = []
+
+        # State
+        self.reference_raw: Optional[np.ndarray] = None
+        self.reference_proc: Optional[np.ndarray] = None
+        self.weight: Optional[np.ndarray] = None
+        self.w_init: Optional[np.ndarray] = None
+
+        # I/O
+        self.video_reader = None
+        self.video_writer = None
+        self.w_file: Optional[h5py.File] = None
+
+        # Thread pool (persistent across batches)
+        self.executor: Optional[ThreadPoolExecutor] = None
+
+        # Get number of workers
+        if self.config.n_jobs == -1:
+            import os
+            self.n_workers = os.cpu_count() or 4
+        else:
+            self.n_workers = self.config.n_jobs
+
+    def _setup_io(self):
+        """Setup I/O handlers."""
+        output_path = Path(self.options.output_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        self.video_reader = self.options.get_video_reader()
+        self.video_writer = self.options.get_video_writer()
+
+        if getattr(self.options, 'save_w', False):
+            w_path = output_path / 'w.h5'
+            self.w_file = h5py.File(str(w_path), 'w')
+            H = self.video_reader.height
+            W = self.video_reader.width
+
+            # Try to get total frames for better preallocation
+            try:
+                T = self.video_reader.total_frames()
+                chunks = (H, W, min(self.config.batch_size, T))
+            except:
+                T = None
+                chunks = True
+
+            if T:
+                self.w_file.create_dataset('u', shape=(H, W, T), chunks=chunks, dtype=np.float32)
+                self.w_file.create_dataset('v', shape=(H, W, T), chunks=chunks, dtype=np.float32)
+            else:
+                self.w_file.create_dataset('u', shape=(H, W, 0), maxshape=(H, W, None),
+                                           chunks=chunks, dtype=np.float32)
+                self.w_file.create_dataset('v', shape=(H, W, 0), maxshape=(H, W, None),
+                                           chunks=chunks, dtype=np.float32)
+
+    def _setup_reference(self, reference_frame: Optional[np.ndarray] = None):
+        """Setup reference frame and weights."""
+        if reference_frame is None:
+            self.reference_raw = self.options.get_reference_frame(self.video_reader).astype(np.float64)
+        else:
+            self.reference_raw = reference_frame.astype(np.float64)
+
+        H, W = self.reference_raw.shape[:2]
+        n_channels = self.reference_raw.shape[2] if self.reference_raw.ndim == 3 else 1
+
+        # Setup weights
+        self.weight = np.ones((H, W, n_channels), dtype=np.float64)
+        if hasattr(self.options, 'get_weight_at'):
+            for c in range(n_channels):
+                self.weight[:, :, c] = self.options.get_weight_at(c, n_channels)
+        else:
+            weight_1d = np.asarray(getattr(self.options, 'weight', [1.0] * n_channels))
+            weight_sum = weight_1d.sum()
+            if weight_sum > 0:
+                weight_1d = weight_1d / weight_sum
+            for c in range(n_channels):
+                self.weight[:, :, c] = weight_1d[c] if c < len(weight_1d) else 1.0 / n_channels
+
+        # Preprocess reference (MATLAB order: normalize then filter)
+        self.reference_proc = self._preprocess_frames(self.reference_raw)
+
+    def _normalize(self, arr: np.ndarray, ref: Optional[np.ndarray] = None) -> np.ndarray:
+        """Normalize to [0,1] - handles (H,W,C) or (H,W,C,T).
+
+        Args:
+            arr: Array to normalize
+            ref: Optional reference for normalization ranges (MATLAB compatibility)
+        """
+        eps = 1e-8
+
+        if getattr(self.options, 'channel_normalization', 'together') == 'separate':
+            # Per-channel normalization
+            if arr.ndim == 3:  # (H,W,C)
+                result = np.zeros_like(arr, dtype=np.float64)
+                for c in range(arr.shape[2]):
+                    if ref is not None and ref.ndim >= 3:
+                        # Use reference's min/max for this channel
+                        ref_channel = ref[:, :, c] if ref.ndim == 3 else ref[:, :, c, :]
+                        min_val = ref_channel.min()
+                        max_val = ref_channel.max()
+                    else:
+                        # Use array's own min/max
+                        channel = arr[:, :, c]
+                        min_val = channel.min()
+                        max_val = channel.max()
+                    result[:, :, c] = (arr[:, :, c] - min_val) / (max_val - min_val + eps)
+                return result
+            else:  # (H,W,C,T)
+                result = np.zeros_like(arr, dtype=np.float64)
+                for c in range(arr.shape[2]):
+                    if ref is not None and ref.ndim >= 3:
+                        # Use reference's min/max for this channel
+                        ref_channel = ref[:, :, c] if ref.ndim == 3 else ref[:, :, c, :]
+                        min_val = ref_channel.min()
+                        max_val = ref_channel.max()
+                    else:
+                        # Use array's own min/max
+                        channel = arr[:, :, c, :]
+                        min_val = channel.min()
+                        max_val = channel.max()
+                    result[:, :, c, :] = (arr[:, :, c, :] - min_val) / (max_val - min_val + eps)
+                return result
+        else:
+            # Joint normalization
+            if ref is not None:
+                min_val = ref.min()
+                max_val = ref.max()
+            else:
+                min_val = arr.min()
+                max_val = arr.max()
+            return (arr - min_val) / (max_val - min_val + eps)
+
+    def _apply_gaussian_filter(self, arr: np.ndarray) -> np.ndarray:
+        """Apply Gaussian filtering matching MATLAB's imgaussfilt3."""
+        sigma = np.asarray(self.options.sigma)
+
+        if arr.ndim == 3:  # (H,W,C) - spatial only
+            result = np.zeros_like(arr, dtype=np.float64)
+            for c in range(arr.shape[2]):
+                if sigma.ndim == 2:  # Per-channel sigmas
+                    s = sigma[min(c, len(sigma) - 1), :2]  # Use only spatial components
+                else:
+                    s = sigma[:2]  # Use first two components
+                result[:, :, c] = gaussian_filter(arr[:, :, c], sigma=s, mode='reflect')
+            return result
+
+        elif arr.ndim == 4:  # (H,W,C,T) - spatiotemporal
+            result = np.zeros_like(arr, dtype=np.float64)
+            for c in range(arr.shape[2]):
+                if sigma.ndim == 2:  # Per-channel sigmas
+                    s = sigma[min(c, len(sigma) - 1)]
+                    # Reorder to (sx, sy, st) for scipy
+                    s_3d = (s[0], s[1], s[2])
+                else:
+                    s_3d = tuple(sigma[:3])
+
+                # Apply 3D Gaussian filter
+                result[:, :, c, :] = gaussian_filter(
+                    arr[:, :, c, :],
+                    sigma=s_3d,
+                    mode='reflect',
+                    truncate=4.0
+                )
+            return result
+
+        else:
+            return arr
+
+    def _preprocess_frames(self, frames: np.ndarray) -> np.ndarray:
+        """Preprocess frames: normalize -> filter (MATLAB order)."""
+        # First normalize
+        normalized = self._normalize(frames)
+        # Then filter
+        filtered = self._apply_gaussian_filter(normalized)
+        return filtered.astype(np.float64)
+
+    def _compute_flow_single(self, frame_proc: np.ndarray, ref_proc: np.ndarray,
+                             w_init: Optional[np.ndarray] = None) -> np.ndarray:
+        """Compute flow for a single frame."""
+        flow_params = {
+            'alpha': self.options.alpha,
+            'weight': self.weight,
+            'levels': self.options.levels,
+            'min_level': getattr(self.options, 'effective_min_level',
+                                 getattr(self.options, 'min_level', 0)),
+            'eta': self.options.eta,
+            'update_lag': self.options.update_lag,
+            'iterations': self.options.iterations,
+            'a_smooth': self.options.a_smooth,
+            'a_data': self.options.a_data,
+        }
+
+        if w_init is not None:
+            flow_params['uv'] = (w_init[:, :, 0], w_init[:, :, 1])
+
+        # Note: get_displacement expects (reference, moving)
+        return get_displacement(ref_proc, frame_proc, **flow_params)
+
+    def _warp_frame(self, frame: np.ndarray, flow: np.ndarray) -> np.ndarray:
+        """Backward warp using OpenCV."""
+        h, w = flow.shape[:2]
+        grid_x, grid_y = np.meshgrid(np.arange(w, dtype=np.float32),
+                                     np.arange(h, dtype=np.float32))
+        map_x = grid_x + flow[:, :, 0]
+        map_y = grid_y + flow[:, :, 1]
+
+        if frame.ndim == 3 and frame.shape[2] > 1:
+            result = np.zeros_like(frame)
+            for c in range(frame.shape[2]):
+                result[:, :, c] = cv2.remap(
+                    frame[:, :, c].astype(np.float32),
+                    map_x, map_y,
+                    interpolation=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REFLECT_101
+                )
+            return result
+        else:
+            return cv2.remap(
+                frame.astype(np.float32),
+                map_x, map_y,
+                interpolation=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT_101
+            )
+
+    def _process_batch_parallel(self, batch: np.ndarray, batch_proc: np.ndarray,
+                                w_init: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Process batch using thread pool."""
+        H, W, C, T = batch.shape
+
+        if self.executor is None:
+            self.executor = ThreadPoolExecutor(max_workers=self.n_workers)
+
+        # Submit all tasks
+        futures = []
+        for t in range(T):
+            future = self.executor.submit(
+                self._compute_flow_single,
+                batch_proc[:, :, :, t],
+                self.reference_proc,
+                w_init
+            )
+            futures.append((t, future))
+
+        # Collect results in order
+        flows = np.zeros((H, W, 2, T), dtype=np.float32)
+        registered = np.zeros_like(batch)
+
+        for t, future in futures:
+            flow = future.result()
+            flows[:, :, :, t] = flow
+            # Warp original frame
+            registered[:, :, :, t] = self._warp_frame(batch[:, :, :, t], flow)
+
+        return registered, flows
+
+    def _compute_initial_w(self, first_batch: np.ndarray, first_batch_proc: np.ndarray) -> np.ndarray:
+        """Compute initial displacement field from first frames."""
+        n_init = min(22, first_batch.shape[3])
+
+        if not self.config.verbose:
+            print("Computing initial displacement field...")
+
+        # Process first n_init frames
+        if n_init > 4:  # Use parallel for multiple frames
+            _, flows = self._process_batch_parallel(
+                first_batch[:, :, :, :n_init],
+                first_batch_proc[:, :, :, :n_init],
+                np.zeros((self.reference_proc.shape[0], self.reference_proc.shape[1], 2))
+            )
+        else:  # Serial for very few frames
+            H, W = self.reference_proc.shape[:2]
+            flows = np.zeros((H, W, 2, n_init), dtype=np.float32)
+            for t in range(n_init):
+                flows[:, :, :, t] = self._compute_flow_single(
+                    first_batch_proc[:, :, :, t],
+                    self.reference_proc
+                )
+
+        # Average flows
+        w_init = np.mean(flows, axis=3)
+
+        if not self.config.verbose:
+            print("Done pre-registration to get w_init.")
+
+        return w_init
+
+    def _update_reference(self, batch_proc: np.ndarray, flows: np.ndarray):
+        """Update reference using compensated frames (MATLAB-compatible)."""
+        n_ref_frames = min(100, batch_proc.shape[3])
+        if n_ref_frames < 1:
+            return
+
+        # Use last n_ref_frames
+        start_idx = batch_proc.shape[3] - n_ref_frames
+
+        # Compensate and average per channel
+        H, W, C = self.reference_proc.shape
+        new_ref = np.zeros_like(self.reference_proc)
+
+        for c in range(C):
+            compensated = np.zeros((H, W, n_ref_frames), dtype=np.float64)
+            for t in range(n_ref_frames):
+                compensated[:, :, t] = self._warp_frame(
+                    batch_proc[:, :, c, start_idx + t],
+                    flows[:, :, :, start_idx + t]
+                )
+            new_ref[:, :, c] = np.mean(compensated, axis=2)
+
+        self.reference_proc = new_ref
+
+    def _warmup(self):
+        """Warm up JIT compilation like in synth_evaluation."""
+        if self.config.warmup:
+            try:
+                dummy = np.zeros((32, 32, 2), np.float32)
+                get_displacement(dummy, dummy,
+                                 alpha=(2, 2), levels=50, min_level=5,
+                                 iterations=50, a_data=0.45, a_smooth=1,
+                                 weight=np.array([0.6, 0.4]))
+            except:
+                pass
+
+    def run(self, reference_frame: Optional[np.ndarray] = None) -> np.ndarray:
+        """Run complete registration pipeline."""
+        # Warmup
+        self._warmup()
+
+        # Setup
+        self._setup_io()
+        self._setup_reference(reference_frame)
+
+        if not self.config.verbose:
+            quality = getattr(self.options, 'quality_setting', 'balanced')
+            print(f"\nStarting compensation with quality={quality}")
+            print(f"Batch size: {self.config.batch_size}, Workers: {self.n_workers}")
+
+        # Process batches
+        batch_idx = 0
+        total_frames = 0
+        w_cursor = 0
+        start_time = time()
+
+        try:
+            while self.video_reader.has_batch():
+                batch_idx += 1
+                batch_start = time()
+
+                # Read batch
+                batch = self.video_reader.read_batch()  # (H,W,C,T)
+
+                # Preprocess entire batch (normalize -> filter)
+                batch_proc = self._preprocess_frames(batch)
+
+                # First batch: compute w_init
+                if batch_idx == 1:
+                    self.w_init = self._compute_initial_w(batch, batch_proc)
+
+                # Decide whether to use w_init
+                if not getattr(self.options, 'update_initialization_w', True):
+                    current_w_init = np.zeros_like(self.w_init)
+                else:
+                    current_w_init = self.w_init
+
+                # Process batch in parallel
+                registered, flows = self._process_batch_parallel(batch, batch_proc, current_w_init)
+
+                # Update w_init for next batch
+                if getattr(self.options, 'update_initialization_w', True):
+                    if flows.shape[3] > 20:
+                        self.w_init = np.mean(flows[:, :, :, -20:], axis=3)
+                    else:
+                        self.w_init = np.mean(flows, axis=3)
+
+                # Compute statistics
+                disp_magnitude = np.sqrt(flows[:, :, 0, :] ** 2 + flows[:, :, 1, :] ** 2)
+                self.mean_disp.extend(np.mean(disp_magnitude, axis=(0, 1)).tolist())
+                self.max_disp.extend(np.max(disp_magnitude, axis=(0, 1)).tolist())
+
+                # Divergence and translation
+                for t in range(flows.shape[3]):
+                    du_dx = np.gradient(flows[:, :, 0, t], axis=1)
+                    dv_dy = np.gradient(flows[:, :, 1, t], axis=0)
+                    self.mean_div.append(float(np.mean(du_dx + dv_dy)))
+
+                    u_mean = float(np.mean(flows[:, :, 0, t]))
+                    v_mean = float(np.mean(flows[:, :, 1, t]))
+                    self.mean_translation.append(float(np.sqrt(u_mean ** 2 + v_mean ** 2)))
+
+                # Write results
+                self.video_writer.write_frames(registered)
+
+                # Save flows if requested
+                if self.w_file is not None:
+                    T = flows.shape[3]
+                    if 'u' in self.w_file and self.w_file['u'].shape[2] > 0:
+                        # Fixed size dataset
+                        self.w_file['u'][:, :, w_cursor:w_cursor + T] = flows[:, :, 0, :]
+                        self.w_file['v'][:, :, w_cursor:w_cursor + T] = flows[:, :, 1, :]
+                    else:
+                        # Resizable dataset
+                        for t in range(T):
+                            idx = self.w_file['u'].shape[2]
+                            self.w_file['u'].resize((flows.shape[0], flows.shape[1], idx + 1))
+                            self.w_file['v'].resize((flows.shape[0], flows.shape[1], idx + 1))
+                            self.w_file['u'][:, :, idx] = flows[:, :, 0, t]
+                            self.w_file['v'][:, :, idx] = flows[:, :, 1, t]
+                    w_cursor += T
+
+                # Update reference if requested
+                if getattr(self.options, 'update_reference', False):
+                    self._update_reference(batch_proc, flows)
+
+                # Progress
+                total_frames += registered.shape[3]
+                batch_time = time() - batch_start
+
+                if not self.config.verbose:
+                    fps = registered.shape[3] / batch_time
+                    print(f"Batch {batch_idx}: {registered.shape[3]} frames in {batch_time:.2f}s ({fps:.1f} fps)")
+
+        finally:
+            # Cleanup thread pool
+            if self.executor is not None:
+                self.executor.shutdown(wait=True)
+
+        # Final stats
+        total_time = time() - start_time
+        if not self.config.verbose:
+            avg_fps = total_frames / max(1e-6, total_time)
+            print(f"\nProcessed {total_frames} frames in {total_time:.2f}s (avg {avg_fps:.1f} fps)")
+
+        # Save metadata
+        self._save_metadata()
+
+        # Cleanup
+        self._cleanup()
+
+        return self.reference_raw
+
+    def _save_metadata(self):
+        """Save statistics and reference frame."""
+        if not getattr(self.options, 'save_meta_info', False):
+            return
+
+        output_path = Path(self.options.output_path)
+
+        # Save statistics
+        stats_path = output_path / 'statistics.npz'
+        np.savez(str(stats_path),
+                 mean_disp=np.array(self.mean_disp),
+                 max_disp=np.array(self.max_disp),
+                 mean_div=np.array(self.mean_div),
+                 mean_translation=np.array(self.mean_translation))
+
+        # Save reference
+        if self.reference_raw is not None:
+            ref_path = output_path / 'reference_frame.npy'
+            np.save(str(ref_path), self.reference_raw)
+
+        print(f"Saved metadata to {output_path}")
+
+    def _cleanup(self):
+        """Close file handlers."""
+        if self.video_writer is not None:
+            self.video_writer.close()
+        if self.w_file is not None:
+            self.w_file.close()
+
+
+def compensate_recording(options: Any,
+                         reference_frame: Optional[np.ndarray] = None,
+                         config: Optional[RegistrationConfig] = None) -> np.ndarray:
+    """
+    Main entry point matching MATLAB API.
+
+    Args:
+        options: OF_options object with parameters
+        reference_frame: Optional pre-computed reference
+        config: Optional registration configuration
+
+    Returns:
+        The reference frame used
+    """
+    pipeline = CompensateRecording(options, config)
+    return pipeline.run(reference_frame)
+
+
+# Example usage
+if __name__ == "__main__":
+    try:
+        from OF_options import OFOptions
+
+        options = OFOptions(
+            input_file="test_video.h5",
+            output_path="results",
+            quality_setting="balanced",
+            save_w=True,
+            sigma=[[1.0, 1.0, 0.5], [1.0, 1.0, 0.5]],  # [sx, sy, st] per channel
+            update_reference=False,
+            update_initialization_w=True,
+        )
+
+        config = RegistrationConfig(
+            n_jobs=-1,  # Use all cores
+            batch_size=100,
+            warmup=True
+        )
+
+        ref = compensate_recording(options, config=config)
+
+    except ImportError:
+        print("OF_options not available")

@@ -1,9 +1,6 @@
 """
 Wrapper classes for video file I/O operations.
 Provides multi-file, multi-channel, and subset reading/writing capabilities.
-
-Author: Philipp Flotho
-Copyright 2021 by Philipp Flotho, All rights reserved.
 """
 
 import os
