@@ -1,22 +1,46 @@
 [build-system]
-requires = ["setuptools>=61", "scikit-build", "pybind11", "cmake"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyflowreg"
 version = "0.0.0-alpha.1"
-description = "Optical flow computations with bioformats, TIFF, and HDF5 support"
+description = "Variational optical-flow motion correction for 2-photon microscopy videos and 3D scans"
+readme = "README.md"
 authors = [
     { name="Philipp Flotho", email="Philipp.Flotho@uni-saarland.de" }
 ]
-license = { text = "CC BY-NC-SA 1.0" }
-dependencies = [
-    "numpy",
-    "scipy",
-    "scikit-image",
-    "opencv-contrib-python",
-    "h5py",
-    "tifffile",
-    "pillow",
-    "scikit-build",
+license = { text = "CC BY-NC-SA 4.0" }
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
+dependencies = [
+    "numpy>=2.0.0",
+    "scipy>=1.14.0",
+    "scikit-image>=0.24.0",
+    "opencv-contrib-python>=4.10.0",
+    "h5py>=3.12.0",
+    "tifffile>=2024.9.0",
+    "numba>=0.60.0",
+    "pydantic>=2.11.0,<3.0.0",
+    "hdf5storage>=0.2.0",
+    "pywin32>=311; platform_system=='Windows'",
+]
+
+[tool.setuptools]
+packages = ["pyflowreg"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyflowreg*"]
+exclude = ["tests*", "docs*", "examples*"]

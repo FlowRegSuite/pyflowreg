@@ -1,15 +1,9 @@
 numpy
 scipy
-scikit-image
-scikit-build
-cmake
-pybind11
+scikit-imagenice
 opencv-contrib-python
 h5py
 tifffile
-scikit-build
-pybind11
 numba
 pydantic
-tifffile
 hdf5storage
