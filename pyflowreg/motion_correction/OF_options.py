@@ -33,8 +33,15 @@ try:
     from pyflowreg.util.io._base import VideoReader, VideoWriter
     from pyflowreg.util.io.tiff import TIFFStackReader, TIFFStackWriter
 except ImportError:
-    VideoReader = object
-    VideoWriter = object
+    # Use placeholder classes instead of object to avoid isinstance() always returning True
+    class _VideoReaderPlaceholder: 
+        """Placeholder when VideoReader is not available."""
+        pass
+    class _VideoWriterPlaceholder: 
+        """Placeholder when VideoWriter is not available."""
+        pass
+    VideoReader = _VideoReaderPlaceholder
+    VideoWriter = _VideoWriterPlaceholder
     HDF5FileReader = None
     HDF5FileWriter = None
     MDFFileReader = None
