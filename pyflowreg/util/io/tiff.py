@@ -113,7 +113,6 @@ class TIFFFileReader(VideoReader):
             # Samples as channels
             s_idx = axes.index('S')
             self.n_channels = shape[s_idx]
-            self._sample_mode = True
         else:
             self.n_channels = 1
 
@@ -187,15 +186,15 @@ class TIFFFileReader(VideoReader):
         # Allocate output
         output = np.zeros((n_frames, self.height, self.width, self.n_channels), dtype=self.dtype)
 
-        if self._sample_mode:
-            # Single page with multiple samples - read strips
-            self._read_sample_mode(frame_indices, output)
-        elif self._tiff_series is not None and not self.deinterleave > 1:
-            # Use series for efficient reading
-            self._read_series_mode(frame_indices, output)
-        else:
-            # Page-based reading (with possible deinterleaving)
-            self._read_page_mode(frame_indices, output)
+        #if self._sample_mode:
+        #    # Single page with multiple samples - read strips
+        #    self._read_sample_mode(frame_indices, output)
+        #elif self._tiff_series is not None and not self.deinterleave > 1:
+        #    # Use series for efficient reading
+        #    self._read_series_mode(frame_indices, output)
+        #else:
+        #    # Page-based reading (with possible deinterleaving)
+        self._read_page_mode(frame_indices, output)
 
         return output
 
@@ -347,7 +346,7 @@ class TIFFFileReader(VideoReader):
         return metadata
 
 
-class TIFFFileWriter(ideoWriter):
+class TIFFFileWriter(VideoWriter):
     """
     TIFF stack file writer with multi-page and compression support.
 
@@ -439,7 +438,8 @@ class TIFFFileWriter(ideoWriter):
             frames = frames[:, :, :, 0]  # Remove channel dimension
             self._current_axes = 'TYX'
         else:
-            self._current_axes = 'TYXC'
+            self._current_axes = 'TCYX'
+            frames = np.moveaxis(frames, -1, -3)
 
         # Initialize on first write (after format transforms)
         if not self.initialized:
@@ -456,11 +456,12 @@ class TIFFFileWriter(ideoWriter):
                              f"got ({H}, {W})")
 
         expected_c = 1 if self._current_axes == 'TYX' else C
-        actual_c = 1 if frames.ndim == 3 else frames.shape[3]
+        actual_c = 1 if frames.ndim == 3 else frames.shape[1]
         if actual_c != expected_c:
             raise ValueError(f"Channel count mismatch. Expected {expected_c}, got {actual_c}")
 
         # Write frames
+
         self._write_frames_to_file(frames)
 
         # Update frame count based on original T (before suite2p transform)
@@ -489,23 +490,22 @@ class TIFFFileWriter(ideoWriter):
 
         # Create metadata with current axes
         metadata = self.metadata.copy()
-        metadata.update({
-            'axes': self._current_axes,
-            'Software': 'pyflowreg'
-        })
+        if hasattr(self, '_current_axes'):
+            metadata.update({
+                # 'axes': self._current_axes,
+                'Software': 'pyflowreg'
+            })
 
-        # File creation kwargs
         self._file_kwargs = {
             'bigtiff': self.bigtiff,
             'compression': compression,
-            'metadata': metadata,
+            'metadata': metadata if hasattr(self, '_current_axes') else {'Software': 'pyflowreg'},
             'imagej': self.imagej
         }
 
-        # Frame append kwargs (subset of file kwargs)
         self._frame_kwargs = {
             'compression': compression,
-            'metadata': metadata
+            'metadata': metadata if hasattr(self, '_current_axes') else None  # ✅ Fallback
         }
 
     def _format_suite2p(self, frames: np.ndarray) -> np.ndarray:
@@ -539,23 +539,32 @@ class TIFFFileWriter(ideoWriter):
             frames: Array with shape (T, H, W) or (T, H, W, C)
         """
         # Write using tifffile
-        if self._frame_count == 0:
+        #if self._frame_count == 0:
             # First write - create new file with all kwargs
-            tifffile.imwrite(
-                self.file_path,
-                frames,
-                **self._file_kwargs
-            )
-        else:
+
+            #tifffile.imwrite(
+           ##     self.file_path,
+          ##      frames,
+         ##       planarconfig='contig',
+         #       contiguous=True,
+         #       **self._file_kwargs
+         #   )
+        ##else:
             # Append to existing file
-            with tifffile.TiffWriter(self.file_path, append=True) as tif:
-                # Write each frame individually for append mode
-                if frames.ndim == 3:  # (T, H, W)
-                    for frame in frames:
-                        tif.write(frame, **self._frame_kwargs)
-                else:  # (T, H, W, C)
-                    for frame in frames:
-                        tif.write(frame, **self._frame_kwargs)
+        append = self._frame_count > 0
+        with tifffile.TiffWriter(self.file_path, append=append) as tif:
+            # Write each frame individually for append mode
+            if frames.ndim == 3:  # (T, H, W)
+                for frame in frames:
+                    tif.write(frame[None, ...],
+                              **self._frame_kwargs)
+            else:  # (T, C, H, W)
+                for frame in frames:
+                    frame = np.moveaxis(frame, 0, -1)  # Move C
+                    tif.write(frame,
+                              planarconfig='contig',
+                              contiguous=True,
+                              **self._frame_kwargs)
 
     def close(self):
         """Close the TIFF file."""
@@ -755,7 +764,7 @@ def main2():
 
     with TIFFFileWriter(str(out_path)) as w:
         # for i in range(5 * 8200, 5 * 9200):
-        for i in range(5 * 8200, 5 * 8300):
+        for i in range(5 * 8200, 5 * 8221):
             frame = mdf[i]
             w.write_frames(frame[np.newaxis])
 
@@ -788,5 +797,19 @@ def main2():
         print(f"OK {out_path}")
 
 
+def main3():
+    input_file = "D:\\2024_OIST\\flow-registration\\2024\\MotionCorrection_2024\\FearConditioning_L6_somas_z1\\M231221_2_240207_002_001.TIF"
+    import cv2
+    tif_reader = TIFFFileReader(input_file, bin_size=20)
+    frames = tif_reader[0:500]
+    counter = 0
+    while True:
+        cv2.imshow("Frame", cv2.normalize(frames[counter],
+                                          None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U))
+        counter = (counter + 1) % frames.shape[0]
+        key = cv2.waitKey(1)
+        if key == 27:
+            break
+
 if __name__ == "__main__":
-    main2()
+    main3()
