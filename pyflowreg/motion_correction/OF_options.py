@@ -380,12 +380,15 @@ class OFOptions(BaseModel):
 
         # List of frame indices - preregister
         if isinstance(self.reference_frames, list) and video_reader is not None:
-            frames = video_reader[self.reference_frames]  # (H,W,C,T) using array-like indexing
+            frames = video_reader[self.reference_frames]  # (T,H,W,C) using array-like indexing
 
             if frames.ndim != 4:
                 if frames.ndim == 3:
-                    return frames  # Single frame
-                raise ValueError("read_frames must return (H,W,C) or (H,W,C,T)")
+                    return frames  # Single frame (H,W,C)
+                raise ValueError("read_frames must return (H,W,C) or (T,H,W,C)")
+
+            # Convert from (T,H,W,C) to (H,W,C,T) for compatibility
+            frames = np.transpose(frames, (1, 2, 3, 0))  # Now (H,W,C,T)
 
             # Single frame
             if frames.shape[3] == 1:

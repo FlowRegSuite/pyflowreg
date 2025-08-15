@@ -122,7 +122,7 @@ def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, 
 
 
 def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8,
-                     a_smooth=0.5, a_data=0.45, const_assumption='gc', weight=None):
+                     a_smooth=0.5, a_data=0.45, const_assumption='gc', uv=None, weight=None):
     fixed = fixed.astype(np.float64)
     moving = moving.astype(np.float64)
     if fixed.ndim == 3:
@@ -132,8 +132,12 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, 
         n_channels = 1
         fixed = fixed[:, :, np.newaxis]
         moving = moving[:, :, np.newaxis]
-    u_init = np.zeros((m, n), dtype=np.float64)
-    v_init = np.zeros((m, n), dtype=np.float64)
+    if uv is not None:
+        u_init = uv[:, :, 0]
+        v_init = uv[:, :, 1]
+    else:
+        u_init = np.zeros((m, n), dtype=np.float64)
+        v_init = np.zeros((m, n), dtype=np.float64)
     if weight is None:
         weight = np.ones((m, n, n_channels), dtype=np.float64) / n_channels
     else:
@@ -195,10 +199,11 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, 
             J12[:, :, ch] = J12_ch
             J13[:, :, ch] = J13_ch
             J23[:, :, ch] = J23_ch
-        weight_level = weight
-        if weight.shape[:2] != f1_level.shape[:2]:
-            weight_level = resize(weight, f1_level.shape)
+
+        weight_level = resize(weight, f1_level.shape[:2])
         weight_level = cv2.copyMakeBorder(weight_level, 1, 1, 1, 1, borderType=cv2.BORDER_CONSTANT, value=0.0)
+        if weight_level.ndim < 3:
+            weight_level = weight_level[:, :, np.newaxis]
 
         if i == min_level:
             alpha_scaling = 1

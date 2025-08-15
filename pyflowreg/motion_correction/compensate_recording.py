@@ -69,7 +69,7 @@ class CompensateRecording:
         # I/O
         self.video_reader = None
         self.video_writer = None
-        self.w_file: Optional[h5py.File] = None
+        self.w_writer = None
 
         # Thread pool (persistent across batches)
         self.executor: Optional[ThreadPoolExecutor] = None
@@ -90,27 +90,15 @@ class CompensateRecording:
         self.video_writer = self.options.get_video_writer()
 
         if getattr(self.options, 'save_w', False):
+            from pyflowreg.util.io.factory import get_video_file_writer
             w_path = output_path / 'w.h5'
-            self.w_file = h5py.File(str(w_path), 'w')
-            H = self.video_reader.height
-            W = self.video_reader.width
-
-            # Try to get total frames for better preallocation
-            try:
-                T = self.video_reader.total_frames()
-                chunks = (H, W, min(self.config.batch_size, T))
-            except:
-                T = None
-                chunks = True
-
-            if T:
-                self.w_file.create_dataset('u', shape=(H, W, T), chunks=chunks, dtype=np.float32)
-                self.w_file.create_dataset('v', shape=(H, W, T), chunks=chunks, dtype=np.float32)
-            else:
-                self.w_file.create_dataset('u', shape=(H, W, 0), maxshape=(H, W, None),
-                                           chunks=chunks, dtype=np.float32)
-                self.w_file.create_dataset('v', shape=(H, W, 0), maxshape=(H, W, None),
-                                           chunks=chunks, dtype=np.float32)
+            
+            # Create HDF5 writer for displacement fields (u and v as separate datasets)
+            self.w_writer = get_video_file_writer(
+                str(w_path),
+                'HDF5',
+                dataset_names=['u', 'v']
+            )
 
     def _setup_reference(self, reference_frame: Optional[np.ndarray] = None):
         """Setup reference frame and weights."""
@@ -139,7 +127,7 @@ class CompensateRecording:
         self.reference_proc = self._preprocess_frames(self.reference_raw)
 
     def _normalize(self, arr: np.ndarray, ref: Optional[np.ndarray] = None) -> np.ndarray:
-        """Normalize to [0,1] - handles (H,W,C) or (H,W,C,T).
+        """Normalize to [0,1] - handles (H,W,C) or (T,H,W,C).
 
         Args:
             arr: Array to normalize
@@ -154,30 +142,30 @@ class CompensateRecording:
                 for c in range(arr.shape[2]):
                     if ref is not None and ref.ndim >= 3:
                         # Use reference's min/max for this channel
-                        ref_channel = ref[:, :, c] if ref.ndim == 3 else ref[:, :, c, :]
+                        ref_channel = ref[..., c]
                         min_val = ref_channel.min()
                         max_val = ref_channel.max()
                     else:
                         # Use array's own min/max
-                        channel = arr[:, :, c]
+                        channel = arr[..., c]
                         min_val = channel.min()
                         max_val = channel.max()
-                    result[:, :, c] = (arr[:, :, c] - min_val) / (max_val - min_val + eps)
+                    result[..., c] = (arr[..., c] - min_val) / (max_val - min_val + eps)
                 return result
-            else:  # (H,W,C,T)
+            else:  # (T,H,W,C)
                 result = np.zeros_like(arr, dtype=np.float64)
-                for c in range(arr.shape[2]):
+                for c in range(arr.shape[3]):  # C is last dimension
                     if ref is not None and ref.ndim >= 3:
                         # Use reference's min/max for this channel
-                        ref_channel = ref[:, :, c] if ref.ndim == 3 else ref[:, :, c, :]
+                        ref_channel = ref[..., c]
                         min_val = ref_channel.min()
                         max_val = ref_channel.max()
                     else:
                         # Use array's own min/max
-                        channel = arr[:, :, c, :]
+                        channel = arr[..., c]
                         min_val = channel.min()
                         max_val = channel.max()
-                    result[:, :, c, :] = (arr[:, :, c, :] - min_val) / (max_val - min_val + eps)
+                    result[..., c] = (arr[..., c] - min_val) / (max_val - min_val + eps)
                 return result
         else:
             # Joint normalization
@@ -200,22 +188,22 @@ class CompensateRecording:
                     s = sigma[min(c, len(sigma) - 1), :2]  # Use only spatial components
                 else:
                     s = sigma[:2]  # Use first two components
-                result[:, :, c] = gaussian_filter(arr[:, :, c], sigma=s, mode='reflect')
+                result[..., c] = gaussian_filter(arr[..., c], sigma=s, mode='reflect')
             return result
 
-        elif arr.ndim == 4:  # (H,W,C,T) - spatiotemporal
+        elif arr.ndim == 4:  # (T,H,W,C) - spatiotemporal
             result = np.zeros_like(arr, dtype=np.float64)
-            for c in range(arr.shape[2]):
+            for c in range(arr.shape[3]):  # C is last dimension
                 if sigma.ndim == 2:  # Per-channel sigmas
                     s = sigma[min(c, len(sigma) - 1)]
-                    # Reorder to (sx, sy, st) for scipy
-                    s_3d = (s[0], s[1], s[2])
+                    # Reorder to (st, sy, sx) for scipy with T first
+                    s_3d = (s[2], s[0], s[1])
                 else:
-                    s_3d = tuple(sigma[:3])
+                    s_3d = (sigma[2], sigma[0], sigma[1])
 
                 # Apply 3D Gaussian filter
-                result[:, :, c, :] = gaussian_filter(
-                    arr[:, :, c, :],
+                result[..., c] = gaussian_filter(
+                    arr[..., c],
                     sigma=s_3d,
                     mode='reflect',
                     truncate=4.0
@@ -250,7 +238,7 @@ class CompensateRecording:
         }
 
         if w_init is not None:
-            flow_params['uv'] = (w_init[:, :, 0], w_init[:, :, 1])
+            flow_params['uv'] = w_init
 
         # Note: get_displacement expects (reference, moving)
         return get_displacement(ref_proc, frame_proc, **flow_params)
@@ -284,7 +272,7 @@ class CompensateRecording:
     def _process_batch_parallel(self, batch: np.ndarray, batch_proc: np.ndarray,
                                 w_init: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Process batch using thread pool."""
-        H, W, C, T = batch.shape
+        T, H, W, C = batch.shape
 
         if self.executor is None:
             self.executor = ThreadPoolExecutor(max_workers=self.n_workers)
@@ -294,95 +282,82 @@ class CompensateRecording:
         for t in range(T):
             future = self.executor.submit(
                 self._compute_flow_single,
-                batch_proc[:, :, :, t],
+                batch_proc[t],
                 self.reference_proc,
                 w_init
             )
             futures.append((t, future))
 
         # Collect results in order
-        flows = np.zeros((H, W, 2, T), dtype=np.float32)
+        w = np.zeros((T, H, W, 2), dtype=np.float32)
         registered = np.zeros_like(batch)
 
         for t, future in futures:
             flow = future.result()
-            flows[:, :, :, t] = flow
+            w[t] = flow
             # Warp original frame
-            registered[:, :, :, t] = self._warp_frame(batch[:, :, :, t], flow)
+            registered[t] = self._warp_frame(batch[t], flow)
 
-        return registered, flows
+        return registered, w
 
     def _compute_initial_w(self, first_batch: np.ndarray, first_batch_proc: np.ndarray) -> np.ndarray:
         """Compute initial displacement field from first frames."""
-        n_init = min(22, first_batch.shape[3])
+        n_init = min(22, first_batch.shape[0])  # T is first dimension
 
         if not self.config.verbose:
             print("Computing initial displacement field...")
 
         # Process first n_init frames
         if n_init > 4:  # Use parallel for multiple frames
-            _, flows = self._process_batch_parallel(
-                first_batch[:, :, :, :n_init],
-                first_batch_proc[:, :, :, :n_init],
+            _, w = self._process_batch_parallel(
+                first_batch[:n_init],
+                first_batch_proc[:n_init],
                 np.zeros((self.reference_proc.shape[0], self.reference_proc.shape[1], 2))
             )
         else:  # Serial for very few frames
             H, W = self.reference_proc.shape[:2]
-            flows = np.zeros((H, W, 2, n_init), dtype=np.float32)
+            w = np.zeros((n_init, H, W, 2), dtype=np.float32)
             for t in range(n_init):
-                flows[:, :, :, t] = self._compute_flow_single(
-                    first_batch_proc[:, :, :, t],
+                w[t] = self._compute_flow_single(
+                    first_batch_proc[t],
                     self.reference_proc
                 )
 
         # Average flows
-        w_init = np.mean(flows, axis=3)
+        w_init = np.mean(w, axis=0)
 
         if not self.config.verbose:
             print("Done pre-registration to get w_init.")
 
         return w_init
 
-    def _update_reference(self, batch_proc: np.ndarray, flows: np.ndarray):
+    def _update_reference(self, batch_proc: np.ndarray, w: np.ndarray):
         """Update reference using compensated frames (MATLAB-compatible)."""
-        n_ref_frames = min(100, batch_proc.shape[3])
+        n_ref_frames = min(100, batch_proc.shape[0])  # T is first dimension
         if n_ref_frames < 1:
             return
 
         # Use last n_ref_frames
-        start_idx = batch_proc.shape[3] - n_ref_frames
+        start_idx = batch_proc.shape[0] - n_ref_frames
 
         # Compensate and average per channel
         H, W, C = self.reference_proc.shape
         new_ref = np.zeros_like(self.reference_proc)
 
         for c in range(C):
-            compensated = np.zeros((H, W, n_ref_frames), dtype=np.float64)
+            compensated = np.zeros((n_ref_frames, H, W), dtype=np.float64)
             for t in range(n_ref_frames):
-                compensated[:, :, t] = self._warp_frame(
-                    batch_proc[:, :, c, start_idx + t],
-                    flows[:, :, :, start_idx + t]
+                frame_c = batch_proc[start_idx + t, :, :, c] if C > 1 else batch_proc[start_idx + t, :, :, 0]
+                compensated[t] = self._warp_frame(
+                    frame_c,
+                    w[start_idx + t]
                 )
-            new_ref[:, :, c] = np.mean(compensated, axis=2)
+            new_ref[:, :, c] = np.mean(compensated, axis=0)
 
         self.reference_proc = new_ref
 
-    def _warmup(self):
-        """Warm up JIT compilation like in synth_evaluation."""
-        if self.config.warmup:
-            try:
-                dummy = np.zeros((32, 32, 2), np.float32)
-                get_displacement(dummy, dummy,
-                                 alpha=(2, 2), levels=50, min_level=5,
-                                 iterations=50, a_data=0.45, a_smooth=1,
-                                 weight=np.array([0.6, 0.4]))
-            except:
-                pass
-
     def run(self, reference_frame: Optional[np.ndarray] = None) -> np.ndarray:
         """Run complete registration pipeline."""
-        # Warmup
-        self._warmup()
 
         # Setup
         self._setup_io()
@@ -396,7 +371,6 @@ class CompensateRecording:
         # Process batches
         batch_idx = 0
         total_frames = 0
-        w_cursor = 0
         start_time = time()
 
         try:
@@ -405,7 +379,7 @@ class CompensateRecording:
                 batch_start = time()
 
                 # Read batch
-                batch = self.video_reader.read_batch()  # (H,W,C,T)
+                batch = self.video_reader.read_batch()  # (T,H,W,C)
 
                 # Preprocess entire batch (normalize -> filter)
                 batch_proc = self._preprocess_frames(batch)
@@ -421,61 +395,50 @@ class CompensateRecording:
                     current_w_init = self.w_init
 
                 # Process batch in parallel
-                registered, flows = self._process_batch_parallel(batch, batch_proc, current_w_init)
+                registered, w = self._process_batch_parallel(batch, batch_proc, current_w_init)
 
                 # Update w_init for next batch
                 if getattr(self.options, 'update_initialization_w', True):
-                    if flows.shape[3] > 20:
-                        self.w_init = np.mean(flows[:, :, :, -20:], axis=3)
+                    if w.shape[0] > 20:
+                        self.w_init = np.mean(w[-20:], axis=0)
                     else:
-                        self.w_init = np.mean(flows, axis=3)
+                        self.w_init = np.mean(w, axis=0)
 
                 # Compute statistics
-                disp_magnitude = np.sqrt(flows[:, :, 0, :] ** 2 + flows[:, :, 1, :] ** 2)
-                self.mean_disp.extend(np.mean(disp_magnitude, axis=(0, 1)).tolist())
-                self.max_disp.extend(np.max(disp_magnitude, axis=(0, 1)).tolist())
+                disp_magnitude = np.sqrt(w[:, :, :, 0] ** 2 + w[:, :, :, 1] ** 2)
+                self.mean_disp.extend(np.mean(disp_magnitude, axis=(1, 2)).tolist())
+                self.max_disp.extend(np.max(disp_magnitude, axis=(1, 2)).tolist())
 
                 # Divergence and translation
-                for t in range(flows.shape[3]):
-                    du_dx = np.gradient(flows[:, :, 0, t], axis=1)
-                    dv_dy = np.gradient(flows[:, :, 1, t], axis=0)
+                for t in range(w.shape[0]):
+                    du_dx = np.gradient(w[t, :, :, 0], axis=1)
+                    dv_dy = np.gradient(w[t, :, :, 1], axis=0)
                     self.mean_div.append(float(np.mean(du_dx + dv_dy)))
 
-                    u_mean = float(np.mean(flows[:, :, 0, t]))
-                    v_mean = float(np.mean(flows[:, :, 1, t]))
+                    u_mean = float(np.mean(w[t, :, :, 0]))
+                    v_mean = float(np.mean(w[t, :, :, 1]))
                     self.mean_translation.append(float(np.sqrt(u_mean ** 2 + v_mean ** 2)))
 
                 # Write results
                 self.video_writer.write_frames(registered)
 
                 # Save flows if requested
-                if self.w_file is not None:
-                    T = flows.shape[3]
-                    if 'u' in self.w_file and self.w_file['u'].shape[2] > 0:
-                        # Fixed size dataset
-                        self.w_file['u'][:, :, w_cursor:w_cursor + T] = flows[:, :, 0, :]
-                        self.w_file['v'][:, :, w_cursor:w_cursor + T] = flows[:, :, 1, :]
-                    else:
-                        # Resizable dataset
-                        for t in range(T):
-                            idx = self.w_file['u'].shape[2]
-                            self.w_file['u'].resize((flows.shape[0], flows.shape[1], idx + 1))
-                            self.w_file['v'].resize((flows.shape[0], flows.shape[1], idx + 1))
-                            self.w_file['u'][:, :, idx] = flows[:, :, 0, t]
-                            self.w_file['v'][:, :, idx] = flows[:, :, 1, t]
-                    w_cursor += T
+                if hasattr(self, 'w_writer'):
+                    # w has shape (T, H, W, 2) where last dimension is [u, v]
+                    # Writer with dataset_names=['u', 'v'] will split into separate datasets
+                    self.w_writer.write_frames(w)
 
                 # Update reference if requested
                 if getattr(self.options, 'update_reference', False):
-                    self._update_reference(batch_proc, flows)
+                    self._update_reference(batch_proc, w)
 
                 # Progress
-                total_frames += registered.shape[3]
+                total_frames += registered.shape[0]
                 batch_time = time() - batch_start
 
                 if not self.config.verbose:
-                    fps = registered.shape[3] / batch_time
-                    print(f"Batch {batch_idx}: {registered.shape[3]} frames in {batch_time:.2f}s ({fps:.1f} fps)")
+                    fps = registered.shape[0] / batch_time
+                    print(f"Batch {batch_idx}: {registered.shape[0]} frames in {batch_time:.2f}s ({fps:.1f} fps)")
 
         finally:
             # Cleanup thread pool
@@ -522,8 +485,8 @@ class CompensateRecording:
         """Close file handlers."""
         if self.video_writer is not None:
             self.video_writer.close()
-        if self.w_file is not None:
-            self.w_file.close()
+        if hasattr(self, 'w_writer') and self.w_writer is not None:
+            self.w_writer.close()
 
 
 def compensate_recording(options: Any,

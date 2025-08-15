@@ -4,7 +4,7 @@ import cv2
 import pyflowreg as pfr
 from os.path import join, dirname
 import os
-from pyflowreg.optical_flow import imregister_wrapper
+from pyflowreg.core.optical_flow import imregister_wrapper
 from time import time
 
 

@@ -147,6 +147,32 @@ class VideoReader(ABC):
 
             return np.concatenate(binned_frames, axis=0)
 
+        # Handle list or numpy array (fancy indexing)
+        elif isinstance(key, (list, np.ndarray)):
+            # Convert to numpy array if it's a list
+            indices = np.asarray(key, dtype=np.int64)
+            
+            # Handle negative indices
+            indices = np.where(indices < 0, binned_count + indices, indices)
+            
+            # Check bounds
+            if np.any(indices < 0) or np.any(indices >= binned_count):
+                raise IndexError(f"Index out of range for {binned_count} binned frames")
+            
+            # Collect frames at specified indices
+            frames_list = []
+            for idx in indices:
+                idx = int(idx)  # Ensure it's a Python int
+                frame_start = idx * self.bin_size
+                frame_end = min((idx + 1) * self.bin_size, self.frame_count)
+                
+                raw_frames = self._read_raw_frames(slice(frame_start, frame_end))
+                binned_frame = raw_frames.mean(axis=0, keepdims=True)
+                frames_list.append(binned_frame)
+            
+            # Return (T, H, W, C) for consistency with slice indexing
+            return np.concatenate(frames_list, axis=0)
+
         # Handle tuple for advanced indexing
         elif isinstance(key, tuple):
             frame_key, *rest = key
