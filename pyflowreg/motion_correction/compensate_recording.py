@@ -20,7 +20,6 @@ class RegistrationConfig:
     n_jobs: int = -1  # -1 = all cores
     batch_size: int = 100
     verbose: bool = False
-    warmup: bool = True  # Pre-compile with small arrays like synth_evaluation
 
 
 class CompensateRecording:
@@ -232,43 +231,29 @@ class CompensateRecording:
                                 w_init: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Process batch using thread pool."""
         T, H, W, C = batch.shape
-
         if self.executor is None:
             self.executor = ThreadPoolExecutor(max_workers=self.n_workers)
 
-        # Submit all tasks
-        futures = []
-        for t in range(T):
-            future = self.executor.submit(
-                self._compute_flow_single,
-                batch_proc[t],
-                self.reference_proc,
-                w_init
-            )
-            futures.append((t, future))
+        registered = np.empty_like(batch)
+        w = np.empty((T, H, W, 2), dtype=np.float32)
+        interp_method = getattr(self.options, 'interpolation_method', 'cubic')
 
-        # Collect results in order
-        w = np.zeros((T, H, W, 2), dtype=np.float32)
-        registered = np.zeros_like(batch)
-
-        for t, future in futures:
-            flow = future.result()
-            w[t] = flow
-            # Warp original frame using imregister_wrapper
-            # Note: imregister_wrapper expects (moving, u, v, reference)
-            interp_method = getattr(self.options, 'interpolation_method', 'cubic')
-            tmp = imregister_wrapper(
-                batch[t],
-                flow[:, :, 0],
-                flow[:, :, 1],
-                self.reference_raw,
+        def work(t):
+            flow = self._compute_flow_single(batch_proc[t], self.reference_proc, w_init.copy())
+            reg = imregister_wrapper(
+                batch[t], flow[:, :, 0], flow[:, :, 1], self.reference_raw,
                 interpolation_method=interp_method
             )
-            if tmp.ndim < registered.ndim - 1:
-                registered[t, ..., 0] = tmp
-            else:
-                registered[t] = tmp
+            return t, reg, flow
 
+        futures = [self.executor.submit(work, t) for t in range(T)]
+        for f in as_completed(futures):
+            t, reg, flow = f.result()
+            w[t] = flow
+            if reg.ndim < registered.ndim - 1:
+                registered[t, ..., 0] = reg
+            else:
+                registered[t] = reg
         return registered, w
 
     def _compute_initial_w(self, first_batch: np.ndarray, first_batch_proc: np.ndarray) -> np.ndarray:
@@ -485,7 +470,6 @@ def compensate_recording(options: Any,
     return pipeline.run(reference_frame)
 
 
-# Example usage
 if __name__ == "__main__":
     try:
         from OF_options import OFOptions
@@ -503,7 +487,6 @@ if __name__ == "__main__":
         config = RegistrationConfig(
             n_jobs=-1,  # Use all cores
             batch_size=100,
-            warmup=True
         )
 
         ref = compensate_recording(options, config=config)
