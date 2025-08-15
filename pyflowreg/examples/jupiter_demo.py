@@ -60,7 +60,7 @@ def main():
     print(f"\nReading compensated video from {compensated_file}")
     
     vid_reader = get_video_file_reader(str(compensated_file))
-    total_frames = vid_reader.frame_count
+    total_frames = len(vid_reader)
     
     # Display video with cv2
     print(f"Displaying {total_frames} frames. Press 'q' to quit, 'p' to pause/resume")
@@ -82,32 +82,20 @@ def main():
     cv2.namedWindow('Jupiter Demo - Compensated', cv2.WINDOW_NORMAL)
     
     # Playback settings
-    fps = 60
-    frame_delay = int(1000 / fps)  # milliseconds
+    frame_delay = 1
     paused = False
     frame_idx = 0
     
     while True:
         if not paused:
-            # Get current frame
-            if frames.ndim == 4:  # (H, W, C, T)
-                frame = frames[:, :, :, frame_idx]
-            else:  # (H, W, T)
-                frame = frames[:, :, frame_idx]
-            
-            # Convert grayscale to BGR for display if needed
-            if frame.ndim == 2:
-                display_frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-            else:
-                display_frame = frame
-            
+
+            frame = cv2.cvtColor(frames[frame_idx], cv2.COLOR_GRAY2BGR)
+
             # Add progress counter
             progress_text = f"Frame {frame_idx + 1}/{total_frames} ({100 * (frame_idx + 1) / total_frames:.1f}%)"
-            cv2.putText(display_frame, progress_text, (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             # Display frame
-            cv2.imshow('Jupiter Demo - Compensated', display_frame)
+            cv2.imshow('Jupiter Demo - Compensated', frame)
             
             # Advance to next frame
             frame_idx = (frame_idx + 1) % total_frames
