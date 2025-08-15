@@ -1,15 +1,3 @@
-"""
-Motion Compensation Pipeline v3 - Optimized and MATLAB-Compatible
-----------------------------------------------------------------
-
-Key improvements:
-1. Correct preprocessing order (normalize -> filter) matching MATLAB
-2. Persistent thread pool for better performance
-3. Simplified API matching synth_evaluation.py style
-4. Fixed reference update logic
-5. Memory-efficient parallelization
-"""
-
 from __future__ import annotations
 
 import warnings
@@ -19,11 +7,9 @@ from time import time
 from typing import Any, Optional, Tuple, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import h5py
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-import pyflowreg as pfr
 from pyflowreg import get_displacement
 from pyflowreg.core.optical_flow import imregister_wrapper
 
@@ -39,7 +25,7 @@ class RegistrationConfig:
 
 class CompensateRecording:
     """
-    Main registration pipeline matching MATLAB behavior exactly.
+    Main registration pipeline.
     """
 
     def __init__(self, options: Any, config: Optional[RegistrationConfig] = None):
@@ -81,16 +67,22 @@ class CompensateRecording:
         self.video_reader = self.options.get_video_reader()
         self.video_writer = self.options.get_video_writer()
 
+        # Create displacement writer if requested
         if getattr(self.options, 'save_w', False):
-            from pyflowreg.util.io.factory import get_video_file_writer
-            w_path = output_path / 'w.h5'
-            
-            # Create HDF5 writer for displacement fields (u and v as separate datasets)
-            self.w_writer = get_video_file_writer(
-                str(w_path),
-                'HDF5',
-                dataset_names=['u', 'v']
-            )
+            try:
+                from pyflowreg.util.io.factory import get_video_file_writer
+                w_path = output_path / 'w.h5'
+                
+                # Create HDF5 writer for displacement fields (u and v as separate datasets)
+                self.w_writer = get_video_file_writer(
+                    str(w_path),
+                    'HDF5',
+                    dataset_names=['u', 'v']
+                )
+            except Exception as e:
+                warnings.warn(f"Failed to create displacement writer: {e}. Displacements will not be saved.")
+                self.w_writer = None
+                self.options.save_w = False  # Disable to avoid trying to write later
 
     def _setup_reference(self, reference_frame: Optional[np.ndarray] = None):
         """Setup reference frame and weights."""
@@ -265,13 +257,17 @@ class CompensateRecording:
             # Warp original frame using imregister_wrapper
             # Note: imregister_wrapper expects (moving, u, v, reference)
             interp_method = getattr(self.options, 'interpolation_method', 'cubic')
-            registered[t] = imregister_wrapper(
+            tmp = imregister_wrapper(
                 batch[t],
                 flow[:, :, 0],
                 flow[:, :, 1],
                 self.reference_raw,
                 interpolation_method=interp_method
             )
+            if tmp.ndim < registered.ndim - 1:
+                registered[t, ..., 0] = tmp
+            else:
+                registered[t] = tmp
 
         return registered, w
 
@@ -402,10 +398,13 @@ class CompensateRecording:
                 self.video_writer.write_frames(registered)
 
                 # Save flows if requested
-                if hasattr(self, 'w_writer'):
-                    # w has shape (T, H, W, 2) where last dimension is [u, v]
-                    # Writer with dataset_names=['u', 'v'] will split into separate datasets
-                    self.w_writer.write_frames(w)
+                if getattr(self.options, 'save_w', False):
+                    if self.w_writer is not None:
+                        # w has shape (T, H, W, 2) where last dimension is [u, v]
+                        # Writer with dataset_names=['u', 'v'] will split into separate datasets
+                        self.w_writer.write_frames(w)
+                    else:
+                        warnings.warn("Displacement saving was requested but writer could not be initialized. Skipping displacement save.")
 
                 # Update reference if requested
                 if getattr(self.options, 'update_reference', False):
