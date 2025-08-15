@@ -22,18 +22,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import h5py
 import numpy as np
 from scipy.ndimage import gaussian_filter
-import cv2
 
-try:
-    import pyflowreg as pfr
-    from pyflowreg import get_displacement
-except ImportError:
-    warnings.warn("pyflowreg not available; using stub")
-
-
-    def get_displacement(img: np.ndarray, ref: np.ndarray, **kwargs) -> np.ndarray:
-        H, W = img.shape[:2]
-        return np.zeros((H, W, 2), dtype=np.float32)
+import pyflowreg as pfr
+from pyflowreg import get_displacement
+from pyflowreg.core.optical_flow import imregister_wrapper
 
 
 @dataclass
@@ -243,31 +235,6 @@ class CompensateRecording:
         # Note: get_displacement expects (reference, moving)
         return get_displacement(ref_proc, frame_proc, **flow_params)
 
-    def _warp_frame(self, frame: np.ndarray, flow: np.ndarray) -> np.ndarray:
-        """Backward warp using OpenCV."""
-        h, w = flow.shape[:2]
-        grid_x, grid_y = np.meshgrid(np.arange(w, dtype=np.float32),
-                                     np.arange(h, dtype=np.float32))
-        map_x = grid_x + flow[:, :, 0]
-        map_y = grid_y + flow[:, :, 1]
-
-        if frame.ndim == 3 and frame.shape[2] > 1:
-            result = np.zeros_like(frame)
-            for c in range(frame.shape[2]):
-                result[:, :, c] = cv2.remap(
-                    frame[:, :, c].astype(np.float32),
-                    map_x, map_y,
-                    interpolation=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_REFLECT_101
-                )
-            return result
-        else:
-            return cv2.remap(
-                frame.astype(np.float32),
-                map_x, map_y,
-                interpolation=cv2.INTER_LINEAR,
-                borderMode=cv2.BORDER_REFLECT_101
-            )
 
     def _process_batch_parallel(self, batch: np.ndarray, batch_proc: np.ndarray,
                                 w_init: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -295,8 +262,16 @@ class CompensateRecording:
         for t, future in futures:
             flow = future.result()
             w[t] = flow
-            # Warp original frame
-            registered[t] = self._warp_frame(batch[t], flow)
+            # Warp original frame using imregister_wrapper
+            # Note: imregister_wrapper expects (moving, u, v, reference)
+            interp_method = getattr(self.options, 'interpolation_method', 'cubic')
+            registered[t] = imregister_wrapper(
+                batch[t],
+                flow[:, :, 0],
+                flow[:, :, 1],
+                self.reference_raw,
+                interpolation_method=interp_method
+            )
 
         return registered, w
 
@@ -348,9 +323,13 @@ class CompensateRecording:
             compensated = np.zeros((n_ref_frames, H, W), dtype=np.float64)
             for t in range(n_ref_frames):
                 frame_c = batch_proc[start_idx + t, :, :, c] if C > 1 else batch_proc[start_idx + t, :, :, 0]
-                compensated[t] = self._warp_frame(
+                interp_method = getattr(self.options, 'interpolation_method', 'cubic')
+                compensated[t] = imregister_wrapper(
                     frame_c,
-                    w[start_idx + t]
+                    w[start_idx + t, :, :, 0],
+                    w[start_idx + t, :, :, 1],
+                    self.reference_proc[:, :, c] if C > 1 else self.reference_proc[:, :, 0],
+                    interpolation_method=interp_method
                 )
             new_ref[:, :, c] = np.mean(compensated, axis=0)
 
