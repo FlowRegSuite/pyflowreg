@@ -380,7 +380,7 @@ class OFOptions(BaseModel):
 
         # List of frame indices - preregister
         if isinstance(self.reference_frames, list) and video_reader is not None:
-            frames = video_reader.read_frames(self.reference_frames)  # (H,W,C,T)
+            frames = video_reader[self.reference_frames]  # (H,W,C,T) using array-like indexing
 
             if frames.ndim != 4:
                 if frames.ndim == 3:
