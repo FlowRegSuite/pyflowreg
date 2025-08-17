@@ -37,9 +37,6 @@ dependencies = [
     "pywin32>=311; platform_system=='Windows'",
 ]
 
-[tool.setuptools]
-packages = ["pyflowreg"]
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pyflowreg*"]

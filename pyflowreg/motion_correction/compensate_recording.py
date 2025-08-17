@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import time
 from typing import Any, Optional, Tuple, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from pyflowreg import get_displacement
 from pyflowreg.core.optical_flow import imregister_wrapper
+from pyflowreg.runtime_context import RuntimeContext
 
 
 @dataclass
@@ -20,6 +20,7 @@ class RegistrationConfig:
     n_jobs: int = -1  # -1 = all cores
     batch_size: int = 100
     verbose: bool = False
+    parallelization: Optional[str] = None  # None = auto-select, or 'sequential', 'threading', 'multiprocessing'
 
 
 class CompensateRecording:
@@ -48,15 +49,54 @@ class CompensateRecording:
         self.video_writer = None
         self.w_writer = None
 
-        # Thread pool (persistent across batches)
-        self.executor: Optional[ThreadPoolExecutor] = None
-
         # Get number of workers
         if self.config.n_jobs == -1:
             import os
             self.n_workers = os.cpu_count() or 4
         else:
             self.n_workers = self.config.n_jobs
+
+        # Initialize executor from RuntimeContext
+        self._setup_executor()
+
+    def _setup_executor(self):
+        """Setup the parallelization executor based on configuration."""
+        # Get executor class from RuntimeContext
+        executor_name = self.config.parallelization
+        
+        if executor_name is None:
+            # Auto-select based on available parallelization
+            available = RuntimeContext.get('available_parallelization', set())
+            if 'multiprocessing' in available:
+                executor_name = 'multiprocessing'
+            elif 'threading' in available:
+                executor_name = 'threading'
+            else:
+                executor_name = 'sequential'
+        
+        # Get executor class
+        executor_class = RuntimeContext.get_parallelization_executor(executor_name)
+        if executor_class is None:
+            # Fallback to sequential if requested executor not available
+            if not self.config.verbose:
+                print(f"Warning: {executor_name} executor not available, falling back to sequential")
+            executor_class = RuntimeContext.get_parallelization_executor('sequential')
+            
+            # If sequential is also not available, import and register it
+            if executor_class is None:
+                from pyflowreg.motion_correction.parallelization.sequential import SequentialExecutor
+                SequentialExecutor.register()
+                executor_class = RuntimeContext.get_parallelization_executor('sequential')
+                
+                # Final safety check
+                if executor_class is None:
+                    raise RuntimeError("Could not load any executor, including sequential fallback")
+        
+        # Create executor instance
+        self.executor = executor_class(n_workers=self.n_workers)
+        
+        if not self.config.verbose:
+            print(f"Using {executor_name} executor with {self.n_workers} workers")
 
     def _setup_io(self):
         """Setup I/O handlers."""
@@ -229,32 +269,36 @@ class CompensateRecording:
 
     def _process_batch_parallel(self, batch: np.ndarray, batch_proc: np.ndarray,
                                 w_init: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Process batch using thread pool."""
-        T, H, W, C = batch.shape
-        if self.executor is None:
-            self.executor = ThreadPoolExecutor(max_workers=self.n_workers)
-
-        registered = np.empty_like(batch)
-        w = np.empty((T, H, W, 2), dtype=np.float32)
+        """Process batch using the configured executor."""
+        # Build flow parameters dictionary
+        flow_params = {
+            'alpha': self.options.alpha,
+            'weight': self.weight,
+            'levels': self.options.levels,
+            'min_level': getattr(self.options, 'effective_min_level',
+                                 getattr(self.options, 'min_level', 0)),
+            'eta': self.options.eta,
+            'update_lag': self.options.update_lag,
+            'iterations': self.options.iterations,
+            'a_smooth': self.options.a_smooth,
+            'a_data': self.options.a_data,
+        }
+        
+        # Get interpolation method
         interp_method = getattr(self.options, 'interpolation_method', 'cubic')
-
-        def work(t):
-            flow = self._compute_flow_single(batch_proc[t], self.reference_proc, w_init.copy())
-            reg = imregister_wrapper(
-                batch[t], flow[:, :, 0], flow[:, :, 1], self.reference_raw,
-                interpolation_method=interp_method
-            )
-            return t, reg, flow
-
-        futures = [self.executor.submit(work, t) for t in range(T)]
-        for f in as_completed(futures):
-            t, reg, flow = f.result()
-            w[t] = flow
-            if reg.ndim < registered.ndim - 1:
-                registered[t, ..., 0] = reg
-            else:
-                registered[t] = reg
-        return registered, w
+        
+        # Use executor to process batch
+        return self.executor.process_batch(
+            batch=batch,
+            batch_proc=batch_proc,
+            reference_raw=self.reference_raw,
+            reference_proc=self.reference_proc,
+            w_init=w_init,
+            get_displacement_func=get_displacement,
+            imregister_func=imregister_wrapper,
+            interpolation_method=interp_method,
+            flow_params=flow_params
+        )
 
     def _compute_initial_w(self, first_batch: np.ndarray, first_batch_proc: np.ndarray) -> np.ndarray:
         """Compute initial displacement field from first frames."""
@@ -404,9 +448,9 @@ class CompensateRecording:
                     print(f"Batch {batch_idx}: {registered.shape[0]} frames in {batch_time:.2f}s ({fps:.1f} fps)")
 
         finally:
-            # Cleanup thread pool
+            # Cleanup executor
             if self.executor is not None:
-                self.executor.shutdown(wait=True)
+                self.executor.cleanup()
 
         # Final stats
         total_time = time() - start_time
