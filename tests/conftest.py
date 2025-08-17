@@ -17,7 +17,7 @@ from tests.fixtures import (
     cleanup_temp_files
 )
 from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
-from pyflowreg.runtime_context import RuntimeContext
+from pyflowreg._runtime import RuntimeContext
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -25,14 +25,8 @@ def initialize_runtime_context():
     """Initialize RuntimeContext for all tests."""
     RuntimeContext.init(force=True)
     
-    # Ensure all executors are registered
-    from pyflowreg.motion_correction.parallelization.sequential import SequentialExecutor
-    from pyflowreg.motion_correction.parallelization.threading import ThreadingExecutor
-    from pyflowreg.motion_correction.parallelization.multiprocessing import MultiprocessingExecutor
-    
-    SequentialExecutor.register()
-    ThreadingExecutor.register()
-    MultiprocessingExecutor.register()
+    # Import parallelization module to trigger executor registration
+    import pyflowreg.motion_correction.parallelization
 
 
 @pytest.fixture(scope="function")

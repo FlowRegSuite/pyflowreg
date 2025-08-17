@@ -14,7 +14,7 @@ from pyflowreg.motion_correction.compensate_recording import (
     RegistrationConfig, 
     compensate_recording
 )
-from pyflowreg.runtime_context import RuntimeContext
+from pyflowreg._runtime import RuntimeContext
 from tests.fixtures import cleanup_temp_files
 
 

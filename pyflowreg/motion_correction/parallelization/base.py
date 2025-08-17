@@ -5,7 +5,7 @@ Base executor abstract class for parallelization strategies.
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
-from ...runtime_context import RuntimeContext
+from ..._runtime import RuntimeContext
 
 
 class BaseExecutor(ABC):

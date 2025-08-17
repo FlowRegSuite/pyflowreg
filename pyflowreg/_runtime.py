@@ -5,9 +5,10 @@ Handles feature detection, parallelization modes, and configuration.
 
 import os
 import sys
-import threading
+import contextvars
+import json
 import warnings
-from typing import Any, Dict, Optional, Set, Type
+from typing import Any, Dict, Optional, Set, Type, Union
 from contextlib import contextmanager
 from importlib import import_module
 
@@ -27,8 +28,11 @@ class RuntimeContext:
         'parallelization_registry': {},
     }
     
-    # Thread-local overrides
-    _local = threading.local()
+    # Context-local overrides (supports async and threading)
+    _context_overrides: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
+        'runtime_overrides', 
+        default={}
+    )
     
     # Track if initialization has been done
     _initialized = False
@@ -151,15 +155,23 @@ class RuntimeContext:
             pass
     
     @classmethod
-    def register_parallelization_executor(cls, name: str, executor_class: Type) -> None:
+    def register_parallelization_executor(cls, name: str, executor_class: Union[Type, str]) -> None:
         """
         Register a parallelization executor class.
         
         Args:
             name: Name of the parallelization mode
-            executor_class: Class implementing the executor interface
+            executor_class: Class implementing the executor interface or dotted path string
         """
-        cls._config['parallelization_registry'][name] = executor_class
+        # Store as dotted path string for pickle compatibility
+        if isinstance(executor_class, type):
+            module = executor_class.__module__
+            class_name = executor_class.__qualname__
+            dotted_path = f"{module}.{class_name}"
+        else:
+            dotted_path = executor_class
+        
+        cls._config['parallelization_registry'][name] = dotted_path
         cls._config['available_parallelization'].add(name)
     
     @classmethod
@@ -175,7 +187,23 @@ class RuntimeContext:
         """
         if name is None:
             return None
-        return cls._config['parallelization_registry'].get(name)
+        
+        dotted_path = cls._config['parallelization_registry'].get(name)
+        if dotted_path is None:
+            return None
+        
+        # Import and return the class from dotted path
+        try:
+            if isinstance(dotted_path, str):
+                module_path, class_name = dotted_path.rsplit('.', 1)
+                module = import_module(module_path)
+                return getattr(module, class_name)
+            else:
+                # Backward compatibility if already a class
+                return dotted_path
+        except (ImportError, AttributeError, ValueError) as e:
+            warnings.warn(f"Failed to import executor {name} from {dotted_path}: {e}")
+            return None
     
     @classmethod
     def set(cls, key: str, value: Any, local: bool = False) -> None:
@@ -191,9 +219,9 @@ class RuntimeContext:
             cls.init()
             
         if local:
-            if not hasattr(cls._local, 'overrides'):
-                cls._local.overrides = {}
-            cls._local.overrides[key] = value
+            overrides = cls._context_overrides.get().copy()
+            overrides[key] = value
+            cls._context_overrides.set(overrides)
         else:
             cls._config[key] = value
     
@@ -212,10 +240,10 @@ class RuntimeContext:
         if not cls._initialized:
             cls.init()
             
-        # Check thread-local overrides first
-        local_overrides = getattr(cls._local, 'overrides', {})
-        if key in local_overrides:
-            return local_overrides[key]
+        # Check context-local overrides first
+        overrides = cls._context_overrides.get()
+        if key in overrides:
+            return overrides[key]
         
         # Fall back to global config
         return cls._config.get(key, default)
@@ -240,21 +268,19 @@ class RuntimeContext:
         if not cls._initialized:
             cls.init()
             
-        # Save current local overrides
-        old_overrides = getattr(cls._local, 'overrides', {}).copy()
-        
-        # Ensure overrides dict exists
-        if not hasattr(cls._local, 'overrides'):
-            cls._local.overrides = {}
+        # Save current context overrides
+        old_overrides = cls._context_overrides.get().copy()
         
         # Apply new settings
-        cls._local.overrides.update(settings)
+        new_overrides = old_overrides.copy()
+        new_overrides.update(settings)
+        token = cls._context_overrides.set(new_overrides)
         
         try:
             yield
         finally:
             # Restore old overrides
-            cls._local.overrides = old_overrides
+            cls._context_overrides.reset(token)
     
     @classmethod
     def get_available_backends(cls) -> Set[str]:
@@ -410,7 +436,92 @@ class RuntimeContext:
         print(f"\nAvailable Features:")
         for feature in info['features']:
             print(f"  - {feature}")
+    
+    @classmethod
+    def snapshot(cls, workload: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Create a snapshot of the current runtime context for multiprocessing.
+        
+        Args:
+            workload: Optional workload identifier for targeted snapshot
+        
+        Returns:
+            Dictionary containing serializable runtime state
+        """
+        if not cls._initialized:
+            cls.init()
+        
+        snapshot = {
+            'config': cls._config.copy(),
+            'overrides': cls._context_overrides.get().copy(),
+            'workload': workload
+        }
+        
+        # Ensure registry contains dotted paths, not classes
+        snapshot['config']['parallelization_registry'] = {
+            name: (path if isinstance(path, str) else 
+                   f"{path.__module__}.{path.__qualname__}" if hasattr(path, '__module__') else str(path))
+            for name, path in cls._config['parallelization_registry'].items()
+        }
+        
+        # Convert sets to lists for JSON serialization
+        for key in ['available_features', 'available_parallelization', 'available_backends']:
+            if key in snapshot['config'] and isinstance(snapshot['config'][key], set):
+                snapshot['config'][key] = list(snapshot['config'][key])
+        
+        return snapshot
+    
+    @classmethod
+    def from_env(cls, env_var: str = 'PYFLOWREG_CONTEXT') -> None:
+        """
+        Load runtime context from environment variable (for worker processes).
+        
+        Args:
+            env_var: Name of environment variable containing JSON snapshot
+        """
+        snapshot_json = os.environ.get(env_var)
+        if snapshot_json:
+            try:
+                snapshot = json.loads(snapshot_json)
+                cls.from_snapshot(snapshot)
+            except (json.JSONDecodeError, KeyError) as e:
+                warnings.warn(f"Failed to load runtime context from {env_var}: {e}")
+    
+    @classmethod
+    def from_snapshot(cls, snapshot: Dict[str, Any]) -> None:
+        """
+        Restore runtime context from a snapshot.
+        
+        Args:
+            snapshot: Dictionary containing runtime state
+        """
+        if 'config' in snapshot:
+            config = snapshot['config']
+            
+            # Convert lists back to sets
+            for key in ['available_features', 'available_parallelization', 'available_backends']:
+                if key in config and isinstance(config[key], list):
+                    config[key] = set(config[key])
+            
+            cls._config.update(config)
+        
+        if 'overrides' in snapshot:
+            cls._context_overrides.set(snapshot['overrides'])
+        
+        cls._initialized = True
+    
+    @classmethod
+    def to_env(cls, env_var: str = 'PYFLOWREG_CONTEXT', workload: Optional[str] = None) -> None:
+        """
+        Export runtime context to environment variable for worker processes.
+        
+        Args:
+            env_var: Name of environment variable to set
+            workload: Optional workload identifier
+        """
+        snapshot = cls.snapshot(workload)
+        os.environ[env_var] = json.dumps(snapshot)
 
 
-# Initialize on module import
-RuntimeContext.init()
+# DO NOT auto-initialize on import - let users control when initialization happens
+# RuntimeContext.init()

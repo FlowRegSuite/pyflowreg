@@ -11,7 +11,7 @@ from scipy.ndimage import gaussian_filter
 
 from pyflowreg import get_displacement
 from pyflowreg.core.optical_flow import imregister_wrapper
-from pyflowreg.runtime_context import RuntimeContext
+from pyflowreg._runtime import RuntimeContext
 
 # Import to trigger executor registration (side effect)
 import pyflowreg.motion_correction.parallelization
