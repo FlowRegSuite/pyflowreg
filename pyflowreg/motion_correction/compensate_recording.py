@@ -12,6 +12,7 @@ from scipy.ndimage import gaussian_filter
 from pyflowreg import get_displacement
 from pyflowreg.core.optical_flow import imregister_wrapper
 from pyflowreg._runtime import RuntimeContext
+from pyflowreg.util.image_processing import normalize, apply_gaussian_filter
 
 # Import to trigger executor registration (side effect)
 import pyflowreg.motion_correction.parallelization
@@ -113,14 +114,21 @@ class CompensateRecording:
         if getattr(self.options, 'save_w', False):
             try:
                 from pyflowreg.util.io.factory import get_video_file_writer
-                w_path = output_path / 'w.h5'
                 
-                # Create HDF5 writer for displacement fields (u and v as separate datasets)
-                self.w_writer = get_video_file_writer(
-                    str(w_path),
-                    'HDF5',
-                    dataset_names=['u', 'v']
-                )
+                # Use ArrayWriter for displacements when main output is ARRAY
+                if self.options.output_format == 'ARRAY':
+                    self.w_writer = get_video_file_writer(
+                        None,  # Path ignored for ARRAY format
+                        'ARRAY'
+                    )
+                else:
+                    # Use HDF5 for file-based output (preserves double precision)
+                    w_path = output_path / 'w.h5'
+                    self.w_writer = get_video_file_writer(
+                        str(w_path),
+                        'HDF5',
+                        dataset_names=['u', 'v']
+                    )
             except Exception as e:
                 warnings.warn(f"Failed to create displacement writer: {e}. Displacements will not be saved.")
                 self.w_writer = None
@@ -152,99 +160,21 @@ class CompensateRecording:
         # Preprocess reference (MATLAB order: normalize then filter)
         self.reference_proc = self._preprocess_frames(self.reference_raw)
 
-    def _normalize(self, arr: np.ndarray, ref: Optional[np.ndarray] = None) -> np.ndarray:
-        """Normalize to [0,1] - handles (H,W,C) or (T,H,W,C).
-
-        Args:
-            arr: Array to normalize
-            ref: Optional reference for normalization ranges (MATLAB compatibility)
-        """
-        eps = 1e-8
-
-        if getattr(self.options, 'channel_normalization', 'together') == 'separate':
-            # Per-channel normalization
-            if arr.ndim == 3:  # (H,W,C)
-                result = np.zeros_like(arr, dtype=np.float64)
-                for c in range(arr.shape[2]):
-                    if ref is not None and ref.ndim >= 3:
-                        # Use reference's min/max for this channel
-                        ref_channel = ref[..., c]
-                        min_val = ref_channel.min()
-                        max_val = ref_channel.max()
-                    else:
-                        # Use array's own min/max
-                        channel = arr[..., c]
-                        min_val = channel.min()
-                        max_val = channel.max()
-                    result[..., c] = (arr[..., c] - min_val) / (max_val - min_val + eps)
-                return result
-            else:  # (T,H,W,C)
-                result = np.zeros_like(arr, dtype=np.float64)
-                for c in range(arr.shape[3]):  # C is last dimension
-                    if ref is not None and ref.ndim >= 3:
-                        # Use reference's min/max for this channel
-                        ref_channel = ref[..., c]
-                        min_val = ref_channel.min()
-                        max_val = ref_channel.max()
-                    else:
-                        # Use array's own min/max
-                        channel = arr[..., c]
-                        min_val = channel.min()
-                        max_val = channel.max()
-                    result[..., c] = (arr[..., c] - min_val) / (max_val - min_val + eps)
-                return result
-        else:
-            # Joint normalization
-            if ref is not None:
-                min_val = ref.min()
-                max_val = ref.max()
-            else:
-                min_val = arr.min()
-                max_val = arr.max()
-            return (arr - min_val) / (max_val - min_val + eps)
-
-    def _apply_gaussian_filter(self, arr: np.ndarray) -> np.ndarray:
-        """Apply Gaussian filtering matching MATLAB's imgaussfilt3."""
-        sigma = np.asarray(self.options.sigma)
-
-        if arr.ndim == 3:  # (H,W,C) - spatial only
-            result = np.zeros_like(arr, dtype=np.float64)
-            for c in range(arr.shape[2]):
-                if sigma.ndim == 2:  # Per-channel sigmas
-                    s = sigma[min(c, len(sigma) - 1), :2]  # Use only spatial components
-                else:
-                    s = sigma[:2]  # Use first two components
-                result[..., c] = gaussian_filter(arr[..., c], sigma=s, mode='reflect')
-            return result
-
-        elif arr.ndim == 4:  # (T,H,W,C) - spatiotemporal
-            result = np.zeros_like(arr, dtype=np.float64)
-            for c in range(arr.shape[3]):  # C is last dimension
-                if sigma.ndim == 2:  # Per-channel sigmas
-                    s = sigma[min(c, len(sigma) - 1)]
-                    # Reorder to (st, sy, sx) for scipy with T first
-                    s_3d = (s[2], s[0], s[1])
-                else:
-                    s_3d = (sigma[2], sigma[0], sigma[1])
-
-                # Apply 3D Gaussian filter
-                result[..., c] = gaussian_filter(
-                    arr[..., c],
-                    sigma=s_3d,
-                    mode='reflect',
-                    truncate=4.0
-                )
-            return result
-
-        else:
-            return arr
-
     def _preprocess_frames(self, frames: np.ndarray) -> np.ndarray:
         """Preprocess frames: normalize -> filter (MATLAB order)."""
         # First normalize
-        normalized = self._normalize(frames)
+        normalized = normalize(
+            frames,
+            ref=None,
+            channel_normalization=getattr(self.options, 'channel_normalization', 'together')
+        )
         # Then filter
-        filtered = self._apply_gaussian_filter(normalized)
+        filtered = apply_gaussian_filter(
+            normalized,
+            sigma=np.asarray(self.options.sigma),
+            mode='reflect',
+            truncate=4.0
+        )
         return filtered.astype(np.float64)
 
     def _compute_flow_single(self, frame_proc: np.ndarray, ref_proc: np.ndarray,

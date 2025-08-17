@@ -51,6 +51,7 @@ except ImportError:
 
 # Enums
 class OutputFormat(str, Enum):
+    # File formats
     TIFF = "TIFF"
     HDF5 = "HDF5"
     MAT = "MAT"
@@ -60,6 +61,9 @@ class OutputFormat(str, Enum):
     CAIMAN_HDF5 = "CAIMAN_HDF5"
     BEGONIA = "BEGONIA"
     SUITE2P_TIFF = "SUITE2P_TIFF"
+    
+    # Memory formats (special handling - ignores output_path)
+    ARRAY = "ARRAY"  # Returns ArrayWriter for in-memory accumulation
 
 
 class QualitySetting(str, Enum):
