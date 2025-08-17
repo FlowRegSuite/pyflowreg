@@ -55,47 +55,80 @@ def main():
     compensate_recording(options)
     print("Motion compensation complete!")
     
+    # Read the original video for comparison
+    print(f"\nReading original video from {input_file}")
+    orig_reader = get_video_file_reader(str(input_file))
+    original_frames = orig_reader[:]  # Get all frames
+    orig_reader.close()
+    
     # Read the compensated video
     compensated_file = output_folder / "hdf5_comp_minimal" / "compensated.HDF5"
-    print(f"\nReading compensated video from {compensated_file}")
+    print(f"Reading compensated video from {compensated_file}")
     
     vid_reader = get_video_file_reader(str(compensated_file))
-    total_frames = len(vid_reader)
+    compensated_frames = vid_reader[:]  # Get all frames
+    vid_reader.close()
     
-    # Display video with cv2
-    print(f"Displaying {total_frames} frames. Press 'q' to quit, 'p' to pause/resume")
+    total_frames = len(compensated_frames)
     
-    # Read all frames using array-like indexing
-    frames = vid_reader[:]  # Get all frames
+    # Display videos side-by-side with cv2
+    print(f"Displaying {total_frames} frames side-by-side. Press 'q' to quit, 'p' to pause/resume")
     
-    # Normalize frames for display if needed
-    if frames.dtype != np.uint8:
-        # Convert to uint8 for display
-        frames_min = frames.min()
-        frames_max = frames.max()
-        if frames_max > frames_min:
-            frames = ((frames - frames_min) / (frames_max - frames_min) * 255).astype(np.uint8)
-        else:
-            frames = np.zeros_like(frames, dtype=np.uint8)
+    # Normalize both videos for display
+    def normalize_for_display(frames):
+        if frames.dtype != np.uint8:
+            frames_min = frames.min()
+            frames_max = frames.max()
+            if frames_max > frames_min:
+                return ((frames - frames_min) / (frames_max - frames_min) * 255).astype(np.uint8)
+            else:
+                return np.zeros_like(frames, dtype=np.uint8)
+        return frames
+    
+    original_display = normalize_for_display(original_frames)
+    compensated_display = normalize_for_display(compensated_frames)
+    
+    # Handle multi-channel display
+    if original_display.ndim == 4 and original_display.shape[-1] > 1:
+        original_display = original_display[..., 0]
+    elif original_display.ndim == 4 and original_display.shape[-1] == 1:
+        original_display = np.squeeze(original_display, axis=-1)
+    
+    if compensated_display.ndim == 4 and compensated_display.shape[-1] > 1:
+        compensated_display = compensated_display[..., 0]
+    elif compensated_display.ndim == 4 and compensated_display.shape[-1] == 1:
+        compensated_display = np.squeeze(compensated_display, axis=-1)
     
     # Create window
-    cv2.namedWindow('Jupiter Demo - Compensated', cv2.WINDOW_NORMAL)
+    cv2.namedWindow('Jupiter Demo - Comparison', cv2.WINDOW_NORMAL)
     
     # Playback settings
-    frame_delay = 1
+    frame_delay = 5
     paused = False
     frame_idx = 0
     
     while True:
         if not paused:
-
-            frame = cv2.cvtColor(frames[frame_idx], cv2.COLOR_GRAY2BGR)
-
-            # Add progress counter
-            progress_text = f"Frame {frame_idx + 1}/{total_frames} ({100 * (frame_idx + 1) / total_frames:.1f}%)"
+            # Get current frames
+            orig_frame = cv2.cvtColor(original_display[frame_idx], cv2.COLOR_GRAY2BGR)
+            comp_frame = cv2.cvtColor(compensated_display[frame_idx], cv2.COLOR_GRAY2BGR)
             
-            # Display frame
-            cv2.imshow('Jupiter Demo - Compensated', frame)
+            # Add frame number to original (left) image only
+            progress_text = f"Frame {frame_idx + 1}/{total_frames}"
+            cv2.putText(orig_frame, progress_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Add labels at bottom of each video
+            h, w = orig_frame.shape[:2]
+            cv2.putText(orig_frame, "Uncorrected", (w//2 - 60, h - 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.putText(comp_frame, "Corrected", (w//2 - 50, h - 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            
+            # Concatenate frames side by side
+            combined_frame = np.hstack([orig_frame, comp_frame])
+            
+            # Display combined frame
+            cv2.imshow('Jupiter Demo - Comparison', combined_frame)
             
             # Advance to next frame
             frame_idx = (frame_idx + 1) % total_frames

@@ -85,48 +85,65 @@ def main():
         print(f"Max displacement magnitude: {np.max(np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)):.3f} pixels")
         print(f"Mean displacement magnitude: {np.mean(np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)):.3f} pixels")
         
-        # Display video with cv2
-        print(f"\nDisplaying registered video. Press 'q' to quit, 'p' to pause/resume")
+        # Display videos side-by-side with cv2
+        print(f"\nDisplaying side-by-side comparison. Press 'q' to quit, 'p' to pause/resume")
         
-        # Normalize frames for display if needed
-        if registered.dtype != np.uint8:
-            # Convert to uint8 for display
-            frames_min = registered.min()
-            frames_max = registered.max()
-            if frames_max > frames_min:
-                display_frames = ((registered - frames_min) / (frames_max - frames_min) * 255).astype(np.uint8)
-            else:
-                display_frames = np.zeros_like(registered, dtype=np.uint8)
-        else:
-            display_frames = registered
+        # Normalize both videos for display
+        def normalize_for_display(frames):
+            if frames.dtype != np.uint8:
+                frames_min = frames.min()
+                frames_max = frames.max()
+                if frames_max > frames_min:
+                    return ((frames - frames_min) / (frames_max - frames_min) * 255).astype(np.uint8)
+                else:
+                    return np.zeros_like(frames, dtype=np.uint8)
+            return frames
+        
+        original_display = normalize_for_display(video_array)
+        registered_display = normalize_for_display(registered)
         
         # Handle multi-channel display
-        if display_frames.ndim == 4 and display_frames.shape[-1] > 1:
-            # Take first channel for display
-            display_frames = display_frames[..., 0]
-        elif display_frames.ndim == 4 and display_frames.shape[-1] == 1:
-            # Squeeze single channel
-            display_frames = np.squeeze(display_frames, axis=-1)
+        if original_display.ndim == 4 and original_display.shape[-1] > 1:
+            original_display = original_display[..., 0]
+        elif original_display.ndim == 4 and original_display.shape[-1] == 1:
+            original_display = np.squeeze(original_display, axis=-1)
+        
+        if registered_display.ndim == 4 and registered_display.shape[-1] > 1:
+            registered_display = registered_display[..., 0]
+        elif registered_display.ndim == 4 and registered_display.shape[-1] == 1:
+            registered_display = np.squeeze(registered_display, axis=-1)
         
         # Create window
-        cv2.namedWindow('Jupiter Demo Array - Registered', cv2.WINDOW_NORMAL)
+        cv2.namedWindow('Jupiter Demo Array - Comparison', cv2.WINDOW_NORMAL)
         
         # Playback settings
-        frame_delay = 1
+        frame_delay = 5
         paused = False
         frame_idx = 0
-        total_frames = len(display_frames)
+        total_frames = len(registered_display)
         
         while True:
             if not paused:
-                frame = cv2.cvtColor(display_frames[frame_idx], cv2.COLOR_GRAY2BGR)
+                # Get current frames
+                orig_frame = cv2.cvtColor(original_display[frame_idx], cv2.COLOR_GRAY2BGR)
+                reg_frame = cv2.cvtColor(registered_display[frame_idx], cv2.COLOR_GRAY2BGR)
                 
-                # Add progress text
-                progress_text = f"Frame {frame_idx + 1}/{total_frames} ({100 * (frame_idx + 1) / total_frames:.1f}%)"
-                cv2.putText(frame, progress_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                # Add frame number to original (left) image only
+                progress_text = f"Frame {frame_idx + 1}/{total_frames}"
+                cv2.putText(orig_frame, progress_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 
-                # Display frame
-                cv2.imshow('Jupiter Demo Array - Registered', frame)
+                # Add labels at bottom of each video
+                h, w = orig_frame.shape[:2]
+                cv2.putText(orig_frame, "Uncorrected", (w//2 - 60, h - 20), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                cv2.putText(reg_frame, "Corrected", (w//2 - 50, h - 20), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                
+                # Concatenate frames side by side
+                combined_frame = np.hstack([orig_frame, reg_frame])
+                
+                # Display combined frame
+                cv2.imshow('Jupiter Demo Array - Comparison', combined_frame)
                 
                 # Advance to next frame
                 frame_idx = (frame_idx + 1) % total_frames
