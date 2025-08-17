@@ -2,6 +2,7 @@
 Multiprocessing executor - processes frames in parallel using shared memory.
 """
 
+import os
 from multiprocessing import shared_memory
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Callable, Tuple, Optional, Dict, Any
@@ -20,6 +21,15 @@ def _init_shared(shm_specs: Dict[str, Tuple[str, tuple, str]]):
     Args:
         shm_specs: Dictionary mapping names to (shm_name, shape, dtype_str) tuples
     """
+    # Optional: Limit thread usage in numerical libraries to avoid oversubscription
+    # Uncomment if you experience performance issues with nested parallelism
+    # os.environ.update({
+    #     'OMP_NUM_THREADS': '1',
+    #     'MKL_NUM_THREADS': '1', 
+    #     'OPENBLAS_NUM_THREADS': '1',
+    #     'NUMEXPR_NUM_THREADS': '1'
+    # })
+    
     global _SHM
     _SHM = {}
     for key, (name, shape, dtype_str) in shm_specs.items():
@@ -31,8 +41,7 @@ def _init_shared(shm_specs: Dict[str, Tuple[str, tuple, str]]):
 def _process_frame_worker(
     t: int,
     interpolation_method: str,
-    get_displacement_func: Callable,
-    imregister_func: Callable
+    flow_param_scalars: dict
 ) -> int:
     """
     Worker function to process a single frame using shared memory.
@@ -40,12 +49,14 @@ def _process_frame_worker(
     Args:
         t: Frame index
         interpolation_method: Interpolation method for registration
-        get_displacement_func: Function to compute optical flow
-        imregister_func: Function to apply flow field
+        flow_param_scalars: Dictionary of scalar flow parameters (non-array)
         
     Returns:
         Frame index (for tracking completion)
     """
+    # Import functions inside worker to avoid pickling issues with Numba
+    from ...core.optical_flow import get_displacement, imregister_wrapper
+    
     # Get arrays from shared memory
     batch = _SHM['batch'][1]
     batch_proc = _SHM['batch_proc'][1]
@@ -55,15 +66,21 @@ def _process_frame_worker(
     ref_raw = _SHM['ref_raw'][1]
     w_init = _SHM['w_init'][1]
     
-    # Compute optical flow
-    flow = get_displacement_func(
+    # Reconstruct flow parameters with weight array if present
+    flow_params = dict(flow_param_scalars)
+    if 'weight' in _SHM:
+        flow_params['weight'] = _SHM['weight'][1]
+    
+    # Compute optical flow with all parameters
+    flow = get_displacement(
         ref_proc,
         batch_proc[t],
-        uv=w_init.copy()
+        uv=w_init.copy(),
+        **flow_params
     )
     
     # Apply flow field to register the frame
-    reg_frame = imregister_func(
+    reg_frame = imregister_wrapper(
         batch[t],
         flow[..., 0],
         flow[..., 1],
@@ -185,15 +202,18 @@ class MultiprocessingExecutor(BaseExecutor):
             reference_raw: Raw reference frame, shape (H, W, C)
             reference_proc: Preprocessed reference frame, shape (H, W, C)
             w_init: Initial flow field, shape (H, W, 2)
-            get_displacement_func: Function to compute optical flow
-            imregister_func: Function to apply flow field for registration
+            get_displacement_func: Ignored (functions imported in worker)
+            imregister_func: Ignored (functions imported in worker)
             interpolation_method: Interpolation method for registration
-            **kwargs: Additional parameters
+            **kwargs: Additional parameters including 'flow_params' dict
             
         Returns:
             Tuple of (registered_frames, flow_fields)
         """
         T, H, W, C = batch.shape
+        
+        # Get flow parameters from kwargs
+        flow_params = kwargs.get('flow_params', {})
         
         # Create shared memory for all arrays
         shm_specs = {}
@@ -204,6 +224,14 @@ class MultiprocessingExecutor(BaseExecutor):
         self._create_shared_input('ref_raw', reference_raw, shm_specs)
         self._create_shared_input('ref_proc', reference_proc, shm_specs)
         self._create_shared_input('w_init', w_init.astype(np.float32), shm_specs)
+        
+        # Handle weight array separately if present in flow_params
+        if isinstance(flow_params.get('weight', None), np.ndarray):
+            self._create_shared_input('weight', flow_params['weight'], shm_specs)
+            # Create scalar-only params dict (without weight array)
+            flow_param_scalars = {k: v for k, v in flow_params.items() if k != 'weight'}
+        else:
+            flow_param_scalars = dict(flow_params)
         
         # Output arrays (written by workers)
         reg_arr = self._create_shared_output('registered', batch.shape, batch.dtype, shm_specs)
@@ -221,8 +249,7 @@ class MultiprocessingExecutor(BaseExecutor):
                     _process_frame_worker,
                     t,
                     interpolation_method,
-                    get_displacement_func,
-                    imregister_func
+                    flow_param_scalars
                 )
                 for t in range(T)
             ]

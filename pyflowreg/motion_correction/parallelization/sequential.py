@@ -48,24 +48,28 @@ class SequentialExecutor(BaseExecutor):
             get_displacement_func: Function to compute optical flow
             imregister_func: Function to apply flow field for registration
             interpolation_method: Interpolation method for registration
-            **kwargs: Additional parameters
+            **kwargs: Additional parameters including 'flow_params' dict
             
         Returns:
             Tuple of (registered_frames, flow_fields)
         """
         T, H, W, C = batch.shape
         
-        # Initialize output arrays
-        registered = np.zeros_like(batch)
-        flow_fields = np.zeros((T, H, W, 2), dtype=np.float32)
+        # Get flow parameters from kwargs
+        flow_params = kwargs.get('flow_params', {})
+        
+        # Initialize output arrays (use empty instead of zeros for performance)
+        registered = np.empty_like(batch)
+        flow_fields = np.empty((T, H, W, 2), dtype=np.float32)
         
         # Process each frame sequentially
         for t in range(T):
-            # Compute optical flow for this frame
+            # Compute optical flow for this frame with all parameters
             flow = get_displacement_func(
                 reference_proc, 
                 batch_proc[t], 
-                uv=w_init.copy()
+                uv=w_init.copy(),
+                **flow_params
             )
             
             # Apply flow field to register the frame

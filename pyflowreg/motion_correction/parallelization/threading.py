@@ -47,7 +47,8 @@ class ThreadingExecutor(BaseExecutor):
         w_init: np.ndarray,
         get_displacement_func: Callable,
         imregister_func: Callable,
-        interpolation_method: str
+        interpolation_method: str,
+        flow_params: dict
     ) -> Tuple[int, np.ndarray, np.ndarray]:
         """
         Process a single frame.
@@ -62,15 +63,17 @@ class ThreadingExecutor(BaseExecutor):
             get_displacement_func: Function to compute optical flow
             imregister_func: Function to apply flow field
             interpolation_method: Interpolation method
+            flow_params: Dictionary of flow computation parameters
             
         Returns:
             Tuple of (frame_index, registered_frame, flow_field)
         """
-        # Compute optical flow
+        # Compute optical flow with all parameters
         flow = get_displacement_func(
             reference_proc,
             frame_proc,
-            uv=w_init.copy()
+            uv=w_init.copy(),
+            **flow_params
         )
         
         # Apply flow field to register the frame
@@ -108,16 +111,19 @@ class ThreadingExecutor(BaseExecutor):
             get_displacement_func: Function to compute optical flow
             imregister_func: Function to apply flow field for registration
             interpolation_method: Interpolation method for registration
-            **kwargs: Additional parameters
+            **kwargs: Additional parameters including 'flow_params' dict
             
         Returns:
             Tuple of (registered_frames, flow_fields)
         """
         T, H, W, C = batch.shape
         
-        # Initialize output arrays
-        registered = np.zeros_like(batch)
-        flow_fields = np.zeros((T, H, W, 2), dtype=np.float32)
+        # Get flow parameters from kwargs
+        flow_params = kwargs.get('flow_params', {})
+        
+        # Initialize output arrays (use empty instead of zeros for performance)
+        registered = np.empty_like(batch)
+        flow_fields = np.empty((T, H, W, 2), dtype=np.float32)
         
         # Ensure executor is created
         if self.executor is None:
@@ -136,7 +142,8 @@ class ThreadingExecutor(BaseExecutor):
                 w_init,
                 get_displacement_func,
                 imregister_func,
-                interpolation_method
+                interpolation_method,
+                flow_params
             )
             futures.append(future)
         
