@@ -13,6 +13,9 @@ from pyflowreg import get_displacement
 from pyflowreg.core.optical_flow import imregister_wrapper
 from pyflowreg.runtime_context import RuntimeContext
 
+# Import to trigger executor registration (side effect)
+import pyflowreg.motion_correction.parallelization
+
 
 @dataclass
 class RegistrationConfig:

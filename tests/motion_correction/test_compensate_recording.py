@@ -290,8 +290,16 @@ class TestErrorHandling:
     
     def test_executor_instantiation_error(self, fast_of_options):
         """Test handling of executor instantiation errors."""
-        # Mock RuntimeContext to return None for executor class
-        with patch.object(RuntimeContext, 'get_parallelization_executor', return_value=None):
+        # Create a mock that returns None for 'threading' but allows 'sequential' to work
+        original_get_executor = RuntimeContext.get_parallelization_executor
+        
+        def mock_get_executor(name):
+            if name == "threading":
+                return None  # Simulate threading not available
+            else:
+                return original_get_executor(name)  # Allow fallback to work
+                
+        with patch.object(RuntimeContext, 'get_parallelization_executor', side_effect=mock_get_executor):
             config = RegistrationConfig(parallelization="threading")
             
             # Should fallback to sequential

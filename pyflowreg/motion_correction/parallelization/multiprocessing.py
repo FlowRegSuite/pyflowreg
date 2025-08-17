@@ -55,7 +55,7 @@ def _process_frame_worker(
         Frame index (for tracking completion)
     """
     # Import functions inside worker to avoid pickling issues with Numba
-    from ...core.optical_flow import get_displacement, imregister_wrapper
+    from pyflowreg.core.optical_flow import get_displacement, imregister_wrapper
     
     # Get arrays from shared memory
     batch = _SHM['batch'][1]
