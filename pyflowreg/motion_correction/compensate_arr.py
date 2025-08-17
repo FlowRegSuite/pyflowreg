@@ -66,7 +66,7 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
     # Set up for array I/O
     options.input_file = c1  # Will be wrapped by factory into ArrayReader
     options.reference_frames = c_ref
-    options.output_format = OutputFormat.ARRAY  # Triggers ArrayWriter in factory
+    options.output_format = OutputFormat.ARRAY  # Triggers ArrayWriter in factory (must be enum value)
     
     # Enable saving displacement fields to get them back
     options.save_w = True

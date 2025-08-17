@@ -16,7 +16,7 @@ class ArrayReader(VideoReader):
     """
     
     def __init__(self, array: np.ndarray, buffer_size: int = 100, bin_size: int = 1, 
-                 copy: bool = False):
+                 inplace: bool = False):
         """
         Initialize array reader.
         
@@ -24,12 +24,12 @@ class ArrayReader(VideoReader):
             array: Input array with shape (T,H,W,C) or (H,W,C) or (T,H,W)
             buffer_size: Number of frames per batch
             bin_size: Temporal binning factor
-            copy: If True, copy array data on read. If False (default), return views
-                  for memory efficiency. Set True if original array might be modified.
+            inplace: If True, return views for memory efficiency (no copy).
+                     If False (default), return copies for safety with multiprocessing.
         """
         super().__init__()
         
-        # Handle different input shapes
+        # Handle different input shapes - store reference, don't copy the whole array
         if array.ndim == 2:  # (H,W)
             self._array = array[np.newaxis, :, :, np.newaxis]  # -> (1,H,W,1)
         elif array.ndim == 3:
@@ -46,7 +46,10 @@ class ArrayReader(VideoReader):
         
         self.buffer_size = buffer_size
         self.bin_size = bin_size
-        self._copy = copy
+        self._inplace = inplace
+        
+        # Initialize immediately
+        self._initialize()
     
     def _initialize(self):
         """Set VideoReader properties from array shape."""
@@ -62,7 +65,7 @@ class ArrayReader(VideoReader):
             frame_indices: Slice or list of frame indices
             
         Returns:
-            Array with shape (T,H,W,C), either view or copy based on self._copy
+            Array with shape (T,H,W,C), copy by default unless inplace=True
         """
         if isinstance(frame_indices, list):
             if len(frame_indices) == 0:
@@ -72,8 +75,9 @@ class ArrayReader(VideoReader):
             # slice
             result = self._array[frame_indices]
         
-        # Only copy if explicitly requested
-        return result.copy() if self._copy else result
+        # Return copy by default for safety with multiprocessing
+        # Only return view if explicitly requested with inplace=True
+        return result if self._inplace else result.copy()
     
     def close(self):
         """No-op for array reader."""

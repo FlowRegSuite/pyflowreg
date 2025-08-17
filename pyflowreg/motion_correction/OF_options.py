@@ -113,7 +113,7 @@ class OFOptions(BaseModel):
     channel_idx: Optional[List[int]] = Field(None, description="Channel indices to process")
 
     # Flow parameters
-    alpha: Union[float, Tuple[float, float]] = Field(1.5, description="Regularization strength")
+    alpha: Union[float, Tuple[float, float]] = Field((1.5, 1.5), description="Regularization strength")
     weight: Union[List[float], np.ndarray] = Field([0.5, 0.5], description="Channel weights")
     levels: StrictInt = Field(100, ge=1, description="Number of pyramid levels")
     min_level: StrictInt = Field(-1, ge=-1, description="Min pyramid level; -1 = from preset")
