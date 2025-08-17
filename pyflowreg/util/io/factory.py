@@ -7,14 +7,16 @@ import numpy as np
 from pyflowreg.util.io._base import VideoReader, VideoWriter
 
 
-def get_video_file_reader(file_path: Union[str, List[str]], buffer_size: int = 500,
+def get_video_file_reader(input_source: Union[str, Path, np.ndarray, VideoReader, List[str]], 
+                          buffer_size: int = 500,
                           bin_size: int = 1, **kwargs) -> VideoReader:
     """
-    Factory function to create appropriate reader based on file type.
+    Factory function to create appropriate reader based on input type.
     Mirrors MATLAB get_video_file_reader functionality.
 
     Args:
-        file_path: Path to video file, list of paths for multichannel, or folder for images
+        input_source: Path to video file, numpy array, VideoReader instance, 
+                     list of paths for multichannel, or folder for images
         buffer_size: Buffer size for reading
         bin_size: Temporal binning factor
         **kwargs: Additional reader-specific arguments
@@ -24,6 +26,15 @@ def get_video_file_reader(file_path: Union[str, List[str]], buffer_size: int = 5
     """
     from pathlib import Path
 
+    # Handle numpy arrays
+    if isinstance(input_source, np.ndarray):
+        from pyflowreg.util.io._arr import ArrayReader
+        return ArrayReader(input_source, buffer_size, bin_size)
+    
+    # Handle VideoReader instances (already initialized)
+    if isinstance(input_source, VideoReader):
+        return input_source
+
     # Import readers here to avoid circular imports
     from pyflowreg.util.io.tiff import TIFFFileReader
     from pyflowreg.util.io.hdf5 import HDF5FileReader
@@ -32,9 +43,11 @@ def get_video_file_reader(file_path: Union[str, List[str]], buffer_size: int = 5
     from pyflowreg.util.io.multifile_wrappers import MULTICHANNELFileReader
 
     # Handle multichannel input (list of files)
-    if isinstance(file_path, list):
-        return MULTICHANNELFileReader(file_path, buffer_size, bin_size, **kwargs)
+    if isinstance(input_source, list):
+        return MULTICHANNELFileReader(input_source, buffer_size, bin_size, **kwargs)
     
+    # From here on, treat as file path
+    file_path = input_source
     path = Path(file_path)
     
     # Handle folder input (image sequence) - TODO: implement IMGFileReader
@@ -101,6 +114,11 @@ def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> Video
     from pyflowreg.util.io.hdf5 import HDF5FileWriter
     from pyflowreg.util.io.mat import MATFileWriter
     from pyflowreg.util.io.multifile_wrappers import MULTIFILEFileWriter
+
+    # Special handling for memory formats
+    if output_format == 'ARRAY':
+        from pyflowreg.util.io._arr import ArrayWriter
+        return ArrayWriter()
 
     # Handle different output formats (matches MATLAB switch statement)
     if output_format == 'TIFF':
