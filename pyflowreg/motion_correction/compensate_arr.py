@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
-from pyflowreg.motion_correction.compensate_recording import CompensateRecording
+from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrector
 
 
 def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOptions] = None) -> Tuple[np.ndarray, np.ndarray]:
@@ -75,7 +75,7 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
     options.save_meta_info = False
     
     # Run standard pipeline
-    compensator = CompensateRecording(options)
+    compensator = BatchMotionCorrector(options)
     compensator.run()
     
     # Get results from ArrayWriter

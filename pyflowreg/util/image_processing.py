@@ -4,8 +4,9 @@ Provides normalization and filtering functions extracted from CompensateRecordin
 """
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
-from typing import Optional, Literal
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from typing import Optional, Literal, List
+from collections import deque
 
 
 def normalize(
@@ -136,3 +137,53 @@ def apply_gaussian_filter(
     else:
         # 2D or unsupported dimensionality
         return arr
+
+
+def gaussian_filter_1d_half_kernel(
+    buffer: deque,
+    sigma_t: float,
+    mode: str = 'reflect',
+    truncate: float = 4.0
+) -> np.ndarray:
+    """
+    Fast 1D Gaussian filter using half kernel for temporal dimension.
+    Optimized for real-time filtering with circular buffer.
+    
+    Args:
+        buffer: deque of 2D filtered frames [oldest...newest]
+        sigma_t: Temporal standard deviation
+        mode: Boundary handling mode (unused, kept for API consistency)
+        truncate: Truncate filter at this many standard deviations
+        
+    Returns:
+        Temporally filtered current frame (last in buffer)
+    """
+    if not buffer or len(buffer) == 0:
+        return None
+    
+    if len(buffer) == 1:
+        return buffer[-1].copy()
+    
+    # No temporal filtering if sigma is 0
+    if sigma_t <= 0:
+        return buffer[-1].copy()
+    
+    # Create half Gaussian kernel
+    kernel_radius = int(truncate * sigma_t + 0.5)
+    kernel_size = min(kernel_radius + 1, len(buffer))  # Half kernel including center
+    
+    # Generate half Gaussian kernel weights (only past frames + current)
+    x = np.arange(kernel_size, dtype=np.float32)
+    kernel = np.exp(-0.5 * (x / sigma_t) ** 2)
+    kernel = kernel / kernel.sum()
+    
+    # Apply weighted average using half kernel
+    # buffer[-1] is current frame, buffer[-2] is previous, etc.
+    result = np.zeros_like(buffer[-1], dtype=np.float64)
+    
+    for i in range(kernel_size):
+        # Index from the end of buffer
+        frame_idx = -(i + 1)
+        result += kernel[i] * buffer[frame_idx]
+    
+    return result.astype(buffer[-1].dtype)

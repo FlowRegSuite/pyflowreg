@@ -27,7 +27,7 @@ class RegistrationConfig:
     parallelization: Optional[str] = None  # None = auto-select, or 'sequential', 'threading', 'multiprocessing'
 
 
-class CompensateRecording:
+class BatchMotionCorrector:
     """
     Main registration pipeline.
     """
@@ -443,7 +443,7 @@ def compensate_recording(options: Any,
     Returns:
         The reference frame used
     """
-    pipeline = CompensateRecording(options, config)
+    pipeline = BatchMotionCorrector(options, config)
     return pipeline.run(reference_frame)
 
 

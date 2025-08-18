@@ -10,8 +10,8 @@ import pytest
 import numpy as np
 
 from pyflowreg.motion_correction.compensate_recording import (
-    CompensateRecording,
-    RegistrationConfig, 
+    BatchMotionCorrector,
+    RegistrationConfig,
     compensate_recording
 )
 from pyflowreg._runtime import RuntimeContext
@@ -49,7 +49,7 @@ class TestCompensateRecording:
     def test_executor_setup_auto_selection(self, fast_of_options):
         """Test automatic executor selection."""
         config = RegistrationConfig(parallelization=None)
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         
         # Should auto-select an available executor
         assert pipeline.executor is not None
@@ -58,7 +58,7 @@ class TestCompensateRecording:
     def test_executor_setup_specific_selection(self, fast_of_options):
         """Test specific executor selection."""
         config = RegistrationConfig(parallelization="sequential")
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         
         assert pipeline.executor is not None
         assert pipeline.executor.name == "sequential"
@@ -68,7 +68,7 @@ class TestCompensateRecording:
         config = RegistrationConfig(parallelization="nonexistent")
         
         with patch('builtins.print') as mock_print:
-            pipeline = CompensateRecording(fast_of_options, config)
+            pipeline = BatchMotionCorrector(fast_of_options, config)
         
         # Should fallback to sequential
         assert pipeline.executor is not None
@@ -79,18 +79,18 @@ class TestCompensateRecording:
         """Test n_workers configuration."""
         # Test auto-detection (-1)
         config = RegistrationConfig(n_jobs=-1)
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.n_workers > 0
         
         # Test specific value
         config = RegistrationConfig(n_jobs=3)
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.n_workers == 3
     
     def test_initialization_with_basic_options(self, basic_of_options):
         """Test pipeline initialization with basic options."""
         config = RegistrationConfig(n_jobs=2, batch_size=5)
-        pipeline = CompensateRecording(basic_of_options, config)
+        pipeline = BatchMotionCorrector(basic_of_options, config)
         
         assert pipeline.options == basic_of_options
         assert pipeline.config == config
@@ -108,7 +108,7 @@ class TestExecutorTypes:
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
         
-        pipeline = CompensateRecording(fast_of_options, sequential_config)
+        pipeline = BatchMotionCorrector(fast_of_options, sequential_config)
         assert pipeline.executor.name == "sequential"
         assert pipeline.executor.n_workers == 1
     
@@ -118,7 +118,7 @@ class TestExecutorTypes:
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
         
-        pipeline = CompensateRecording(fast_of_options, threading_config)
+        pipeline = BatchMotionCorrector(fast_of_options, threading_config)
         assert pipeline.executor.name == "threading"
         assert pipeline.executor.n_workers == 2
     
@@ -128,7 +128,7 @@ class TestExecutorTypes:
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
         
-        pipeline = CompensateRecording(fast_of_options, multiprocessing_config)
+        pipeline = BatchMotionCorrector(fast_of_options, multiprocessing_config)
         assert pipeline.executor.name == "multiprocessing"
         assert pipeline.executor.n_workers == 2
 
@@ -154,7 +154,7 @@ class TestRuntimeContextIntegration:
         """Test runtime context temporary configuration."""
         with RuntimeContext.use(max_workers=8):
             config = RegistrationConfig(n_jobs=-1)  # Auto-detect
-            pipeline = CompensateRecording(fast_of_options, config)
+            pipeline = BatchMotionCorrector(fast_of_options, config)
             # Note: n_workers might be different due to system limits
             assert pipeline.n_workers > 0
 
@@ -176,7 +176,7 @@ class TestCompensateRecordingIntegration:
         )
         
         # Test that pipeline can be created and configured correctly
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.executor.name == "sequential"
         assert pipeline.n_workers == 1
         assert pipeline.config.batch_size == 5
@@ -196,7 +196,7 @@ class TestCompensateRecordingIntegration:
         )
         
         # Test executor selection by creating pipeline and checking executor type
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.executor.name == executor_name
         
         # Test that pipeline can be initialized properly
@@ -213,7 +213,7 @@ class TestBackwardCompatibility:
         fast_of_options.input_file = video_path
         
         # Test that pipeline can be created with default config
-        pipeline = CompensateRecording(fast_of_options, config=None)
+        pipeline = BatchMotionCorrector(fast_of_options, config=None)
         assert pipeline.config is not None  # Should create default config
         assert pipeline.executor is not None
         
@@ -226,7 +226,7 @@ class TestBackwardCompatibility:
         fast_of_options.input_file = video_path
         
         # Test that pipeline can be created with provided reference frame
-        pipeline = CompensateRecording(fast_of_options)
+        pipeline = BatchMotionCorrector(fast_of_options)
         
         # Test the reference frame setup
         pipeline._setup_reference(reference_frame)
@@ -243,7 +243,7 @@ class TestExecutorCleanup:
         fast_of_options.input_file = video_path
         
         config = RegistrationConfig(parallelization="sequential", n_jobs=1, batch_size=2)
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         executor = pipeline.executor
         
         # Test that executor has cleanup method
@@ -262,7 +262,7 @@ class TestExecutorCleanup:
         fast_of_options.input_file = video_path
         
         config = RegistrationConfig(parallelization="sequential", n_jobs=1, batch_size=2)
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         executor = pipeline.executor
         
         # Test that cleanup can be called after exceptions
@@ -285,7 +285,7 @@ class TestErrorHandling:
         config = RegistrationConfig(parallelization="invalid_executor")
         
         # Should fallback to sequential without crashing
-        pipeline = CompensateRecording(fast_of_options, config)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.executor.name == "sequential"
     
     def test_executor_instantiation_error(self, fast_of_options):
@@ -303,7 +303,7 @@ class TestErrorHandling:
             config = RegistrationConfig(parallelization="threading")
             
             # Should fallback to sequential
-            pipeline = CompensateRecording(fast_of_options, config)
+            pipeline = BatchMotionCorrector(fast_of_options, config)
             assert pipeline.executor.name == "sequential"
 
 
@@ -330,6 +330,6 @@ class TestComprehensiveIntegration:
         # assert reference is not None
         
         # Instead, just test setup
-        pipeline = CompensateRecording(basic_of_options, config)
+        pipeline = BatchMotionCorrector(basic_of_options, config)
         assert pipeline.executor.name == "sequential"
         assert pipeline.config.batch_size == 20
