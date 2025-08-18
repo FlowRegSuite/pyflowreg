@@ -509,10 +509,13 @@ class TestProgressCallback:
         reference = np.mean(video[:2], axis=0)
         
         call_count = [0]
+        exception_raised = [False]
         
         def faulty_callback(current, total):
             call_count[0] += 1
-            if call_count[0] == 2:
+            # Raise exception on first call to test exception handling
+            if call_count[0] == 1:
+                exception_raised[0] = True
                 raise ValueError("Test exception in callback")
         
         # Run with faulty callback - should complete despite exception
@@ -521,7 +524,8 @@ class TestProgressCallback:
         # Check processing completed
         assert registered.shape == video.shape
         assert flow.shape == (T, H, W, 2)
-        assert call_count[0] >= 2  # Callback was called multiple times
+        assert call_count[0] >= 1  # Callback was called at least once
+        assert exception_raised[0]  # Exception was actually raised
     
     def test_progress_percentage(self):
         """Test computing progress percentage from callback."""

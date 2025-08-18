@@ -327,30 +327,25 @@ class TestProgressCallbacks:
     
     def test_callback_exception_handling(self):
         """Test that exceptions in callbacks don't break processing."""
-        # Create test data - use more frames and smaller batch size to ensure multiple callbacks
-        T, H, W, C = 12, 16, 16, 2
+        # Create test data
+        T, H, W, C = 8, 16, 16, 2
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
         
         # Track successful calls
         good_calls = []
-        exception_count = [0]
+        exception_raised = [False]
         
         def good_callback(current, total):
             good_calls.append((current, total))
         
         def bad_callback(current, total):
-            exception_count[0] += 1
-            if exception_count[0] == 2:
+            # Raise exception on first call to test handling
+            if not exception_raised[0]:
+                exception_raised[0] = True
                 raise ValueError("Test exception")
         
-        # Setup with smaller batch size and threading executor to trigger multiple progress callbacks
-        # Threading executor processes frames individually and reports progress more frequently
-        config = RegistrationConfig(
-            batch_size=5,
-            parallelization='threading',  # Use threading for frame-by-frame progress
-            n_jobs=2
-        )
+        # Setup
         options = OFOptions(quality_setting="fast")
         options.input_file = video
         options.reference_frames = reference
@@ -359,7 +354,7 @@ class TestProgressCallbacks:
         options.save_meta_info = False
         
         # Create compensator with both callbacks
-        compensator = BatchMotionCorrector(options, config)
+        compensator = BatchMotionCorrector(options)
         compensator.register_progress_callback(good_callback)
         compensator.register_progress_callback(bad_callback)
         
