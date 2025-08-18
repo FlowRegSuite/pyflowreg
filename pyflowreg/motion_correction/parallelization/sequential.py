@@ -34,6 +34,7 @@ class SequentialExecutor(BaseExecutor):
         get_displacement_func: Callable,
         imregister_func: Callable,
         interpolation_method: str = 'cubic',
+        progress_callback: Callable = None,
         **kwargs
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -89,6 +90,10 @@ class SequentialExecutor(BaseExecutor):
                 registered[t, ..., 0] = reg_frame
             else:
                 registered[t] = reg_frame
+            
+            # Call progress callback for this frame
+            if progress_callback is not None:
+                progress_callback(1)
         
         return registered, flow_fields
     

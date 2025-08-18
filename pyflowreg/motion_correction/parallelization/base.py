@@ -45,6 +45,7 @@ class BaseExecutor(ABC):
         get_displacement_func: Callable,
         imregister_func: Callable,
         interpolation_method: str = 'cubic',
+        progress_callback: Optional[Callable[[int], None]] = None,
         **kwargs
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -59,6 +60,7 @@ class BaseExecutor(ABC):
             get_displacement_func: Function to compute optical flow
             imregister_func: Function to apply flow field for registration
             interpolation_method: Interpolation method for registration
+            progress_callback: Optional callback for per-frame progress (frames_completed)
             **kwargs: Additional parameters
             
         Returns:

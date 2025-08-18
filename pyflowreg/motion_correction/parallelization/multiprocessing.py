@@ -191,6 +191,7 @@ class MultiprocessingExecutor(BaseExecutor):
         get_displacement_func: Callable,
         imregister_func: Callable,
         interpolation_method: str = 'cubic',
+        progress_callback: Optional[Callable[[int], None]] = None,
         **kwargs
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -261,6 +262,10 @@ class MultiprocessingExecutor(BaseExecutor):
         # Copy results from shared memory (important to copy before cleanup!)
         registered = np.array(reg_arr, copy=True)
         flow_fields = np.array(flow_arr, copy=True)
+        
+        # Call progress callback for entire batch (multiprocessing processes batch in parallel)
+        if progress_callback is not None:
+            progress_callback(T)
         
         # Cleanup shared memory
         for shm in self.shm_handles.values():

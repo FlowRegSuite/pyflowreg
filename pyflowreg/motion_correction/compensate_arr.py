@@ -3,14 +3,15 @@ Array-based motion compensation using the same pipeline as file-based processing
 Provides MATLAB compensate_inplace equivalent functionality.
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 import numpy as np
 
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
 from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrector
 
 
-def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOptions] = None) -> Tuple[np.ndarray, np.ndarray]:
+def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOptions] = None, 
+                   progress_callback: Optional[Callable[[int, int], None]] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Process arrays in memory matching MATLAB compensate_inplace functionality.
     
@@ -23,6 +24,8 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
             For single-channel 3D arrays, assumes (T,H,W) if T > 4, else (H,W,C)
         c_ref: Reference frame, shape (H,W,C) or (H,W)
         options: OF_options configuration. If None, uses defaults.
+        progress_callback: Optional callback function that receives (current_frame, total_frames)
+            for progress updates. Note: For multiprocessing executor, updates are batch-wise.
     
     Returns:
         Tuple of:
@@ -37,8 +40,10 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
         >>> video = np.random.rand(100, 256, 256, 2)  # 100 frames, 2 channels
         >>> reference = np.mean(video[:10], axis=0)
         >>> 
-        >>> # Register
-        >>> registered, flow = compensate_arr(video, reference)
+        >>> # Register with progress callback
+        >>> def progress(current, total):
+        ...     print(f"Progress: {current}/{total} ({100*current/total:.1f}%)")
+        >>> registered, flow = compensate_arr(video, reference, progress_callback=progress)
     """
     # Handle 3D squeeze for single channel (MATLAB compatibility)
     squeezed = False
@@ -80,6 +85,11 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
     
     # Run standard pipeline
     compensator = BatchMotionCorrector(options)
+    
+    # Register progress callback if provided
+    if progress_callback is not None:
+        compensator.register_progress_callback(progress_callback)
+    
     compensator.run()
     
     # Get results from ArrayWriter

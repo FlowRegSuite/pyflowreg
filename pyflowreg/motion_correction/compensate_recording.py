@@ -4,7 +4,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, Callable
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
@@ -52,6 +52,11 @@ class BatchMotionCorrector:
         self.video_reader = None
         self.video_writer = None
         self.w_writer = None
+        
+        # Progress callbacks
+        self.progress_callbacks: List[Callable[[int, int], None]] = []
+        self._total_frames_processed: int = 0
+        self._total_frames: Optional[int] = None
 
         # Get number of workers
         if self.config.n_jobs == -1:
@@ -101,6 +106,32 @@ class BatchMotionCorrector:
         
         if not self.config.verbose:
             print(f"Using {executor_name} executor with {self.n_workers} workers")
+    
+    def register_progress_callback(self, callback: Callable[[int, int], None]) -> None:
+        """
+        Register a progress callback function.
+        
+        Args:
+            callback: Function that receives (current_frame, total_frames) as arguments.
+                      For multiprocessing, updates are batch-wise rather than frame-wise.
+        """
+        if callback not in self.progress_callbacks:
+            self.progress_callbacks.append(callback)
+    
+    def _notify_progress(self, frames_completed: int) -> None:
+        """
+        Notify all registered progress callbacks.
+        
+        Args:
+            frames_completed: Number of frames just completed (to add to total)
+        """
+        self._total_frames_processed += frames_completed
+        if self._total_frames and self.progress_callbacks:
+            for callback in self.progress_callbacks:
+                try:
+                    callback(self._total_frames_processed, self._total_frames)
+                except Exception as e:
+                    warnings.warn(f"Progress callback error: {e}")
 
     def _setup_io(self):
         """Setup I/O handlers."""
@@ -220,6 +251,12 @@ class BatchMotionCorrector:
         # Get interpolation method
         interp_method = getattr(self.options, 'interpolation_method', 'cubic')
         
+        # Create progress callback wrapper for executor if we have callbacks registered
+        executor_progress_callback = None
+        if self.progress_callbacks:
+            def executor_progress_callback(frames_completed: int):
+                self._notify_progress(frames_completed)
+        
         # Use executor to process batch
         return self.executor.process_batch(
             batch=batch,
@@ -230,6 +267,7 @@ class BatchMotionCorrector:
             get_displacement_func=get_displacement,
             imregister_func=imregister_wrapper,
             interpolation_method=interp_method,
+            progress_callback=executor_progress_callback,
             flow_params=flow_params
         )
 
@@ -299,6 +337,10 @@ class BatchMotionCorrector:
         # Setup
         self._setup_io()
         self._setup_reference(reference_frame)
+        
+        # Initialize total frames for progress tracking
+        self._total_frames = len(self.video_reader) if self.video_reader else None
+        self._total_frames_processed = 0
 
         if not self.config.verbose:
             quality = getattr(self.options, 'quality_setting', 'balanced')
@@ -331,7 +373,7 @@ class BatchMotionCorrector:
                 else:
                     current_w_init = self.w_init
 
-                # Process batch in parallel
+                # Process batch in parallel (progress callbacks handled internally)
                 registered, w = self._process_batch_parallel(batch, batch_proc, current_w_init)
 
                 # Update w_init for next batch
