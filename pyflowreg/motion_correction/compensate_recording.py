@@ -4,7 +4,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
-from typing import Any, Optional, Tuple, List, Callable
+from typing import Any, Optional, Tuple, List, Callable, Dict
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
@@ -55,8 +55,8 @@ class BatchMotionCorrector:
         
         # Progress callbacks
         self.progress_callbacks: List[Callable[[int, int], None]] = []
-        self._total_frames_processed: int = 0
-        self._total_frames: Optional[int] = None
+        # Task-based progress tracking: {task_id: (frames_processed, total_frames)}
+        self._progress_trackers: Dict[str, Tuple[int, Optional[int]]] = {}
 
         # Get number of workers
         if self.config.n_jobs == -1:
@@ -118,18 +118,30 @@ class BatchMotionCorrector:
         if callback not in self.progress_callbacks:
             self.progress_callbacks.append(callback)
     
-    def _notify_progress(self, frames_completed: int) -> None:
+    def _notify_progress(self, frames_completed: int, task_id: str = "main") -> None:
         """
-        Notify all registered progress callbacks.
+        Notify all registered progress callbacks for a specific task.
         
         Args:
             frames_completed: Number of frames just completed (to add to total)
+            task_id: Identifier for the task being tracked (default: "main")
         """
-        self._total_frames_processed += frames_completed
-        if self._total_frames and self.progress_callbacks:
+        # Initialize task tracker if needed
+        if task_id not in self._progress_trackers:
+            # For main task, use the total frames from video reader
+            total = self._total_frames if task_id == "main" else None
+            self._progress_trackers[task_id] = (0, total)
+        
+        # Update progress for this task
+        current, total = self._progress_trackers[task_id]
+        current += frames_completed
+        self._progress_trackers[task_id] = (current, total)
+        
+        # Only notify callbacks for the main task
+        if task_id == "main" and total and self.progress_callbacks:
             for callback in self.progress_callbacks:
                 try:
-                    callback(self._total_frames_processed, self._total_frames)
+                    callback(current, total)
                 except Exception as e:
                     warnings.warn(f"Progress callback error: {e}")
 
@@ -232,8 +244,15 @@ class BatchMotionCorrector:
 
 
     def _process_batch_parallel(self, batch: np.ndarray, batch_proc: np.ndarray,
-                                w_init: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Process batch using the configured executor."""
+                                w_init: np.ndarray, task_id: str = "main") -> Tuple[np.ndarray, np.ndarray]:
+        """Process batch using the configured executor.
+        
+        Args:
+            batch: Raw batch of frames
+            batch_proc: Preprocessed batch
+            w_init: Initial displacement field
+            task_id: Task identifier for progress tracking (default: "main")
+        """
         # Build flow parameters dictionary
         flow_params = {
             'alpha': self.options.alpha,
@@ -252,10 +271,11 @@ class BatchMotionCorrector:
         interp_method = getattr(self.options, 'interpolation_method', 'cubic')
         
         # Create progress callback wrapper for executor if we have callbacks registered
+        # Only track progress for "main" task
         executor_progress_callback = None
-        if self.progress_callbacks:
+        if self.progress_callbacks and task_id == "main":
             def executor_progress_callback(frames_completed: int):
-                self._notify_progress(frames_completed)
+                self._notify_progress(frames_completed, task_id)
         
         # Use executor to process batch
         return self.executor.process_batch(
@@ -278,12 +298,13 @@ class BatchMotionCorrector:
         if not self.config.verbose:
             print("Computing initial displacement field...")
 
-        # Process first n_init frames
+        # Process first n_init frames - use "initial_w" task to avoid counting toward main progress
         if n_init > 4:  # Use parallel for multiple frames
             _, w = self._process_batch_parallel(
                 first_batch[:n_init],
                 first_batch_proc[:n_init],
-                np.zeros((self.reference_proc.shape[0], self.reference_proc.shape[1], 2))
+                np.zeros((self.reference_proc.shape[0], self.reference_proc.shape[1], 2)),
+                task_id="initial_w"  # Don't count toward main progress
             )
         else:  # Serial for very few frames
             H, W = self.reference_proc.shape[:2]
@@ -340,7 +361,6 @@ class BatchMotionCorrector:
         
         # Initialize total frames for progress tracking
         self._total_frames = len(self.video_reader) if self.video_reader else None
-        self._total_frames_processed = 0
 
         if not self.config.verbose:
             quality = getattr(self.options, 'quality_setting', 'balanced')

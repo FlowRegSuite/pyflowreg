@@ -437,6 +437,162 @@ class TestCompensateArrPerformance:
         assert flow.shape == (T, H, W, 2)
 
 
+class TestProgressCallback:
+    """Test progress callback functionality."""
+    
+    def test_progress_callback_called(self):
+        """Test that progress callback is called during processing."""
+        # Create test data
+        T, H, W, C = 10, 16, 16, 2
+        video = np.random.rand(T, H, W, C).astype(np.float32)
+        reference = np.mean(video[:2], axis=0)
+        
+        # Track progress calls
+        progress_calls = []
+        
+        def progress_callback(current, total):
+            progress_calls.append((current, total))
+        
+        # Run compensation with callback
+        registered, flow = compensate_arr(video, reference, progress_callback=progress_callback)
+        
+        # Check callback was called
+        assert len(progress_calls) > 0, "Progress callback was not called"
+        
+        # Check final progress matches total frames
+        final_current, final_total = progress_calls[-1]
+        assert final_current == T, f"Final progress {final_current} != {T} frames"
+        assert final_total == T, f"Total frames {final_total} != {T}"
+        
+        # Check progress increments
+        for i, (current, total) in enumerate(progress_calls):
+            assert current > 0, f"Progress {i}: current={current} should be > 0"
+            assert current <= total, f"Progress {i}: current={current} > total={total}"
+            assert total == T, f"Progress {i}: total={total} != {T}"
+    
+    def test_progress_callback_with_batches(self):
+        """Test progress callback with batch processing."""
+        # Create test data with multiple batches
+        T, H, W, C = 50, 16, 16, 2
+        video = np.random.rand(T, H, W, C).astype(np.float32)
+        reference = np.mean(video[:5], axis=0)
+        
+        # Track progress
+        progress_calls = []
+        
+        def progress_callback(current, total):
+            progress_calls.append((current, total))
+        
+        # Force smaller batch size
+        options = OFOptions(buffer_size=10)
+        
+        # Run compensation
+        registered, flow = compensate_arr(video, reference, options, progress_callback)
+        
+        # Check progress was reported
+        assert len(progress_calls) > 0
+        
+        # Verify monotonic increase
+        previous_current = 0
+        for current, total in progress_calls:
+            assert current >= previous_current, "Progress should be monotonic"
+            previous_current = current
+        
+        # Final progress should match total frames
+        assert progress_calls[-1][0] == T
+    
+    def test_progress_callback_exception_handling(self):
+        """Test that exceptions in callback don't break processing."""
+        # Create test data
+        T, H, W, C = 5, 16, 16, 2
+        video = np.random.rand(T, H, W, C).astype(np.float32)
+        reference = np.mean(video[:2], axis=0)
+        
+        call_count = [0]
+        
+        def faulty_callback(current, total):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise ValueError("Test exception in callback")
+        
+        # Run with faulty callback - should complete despite exception
+        registered, flow = compensate_arr(video, reference, progress_callback=faulty_callback)
+        
+        # Check processing completed
+        assert registered.shape == video.shape
+        assert flow.shape == (T, H, W, 2)
+        assert call_count[0] >= 2  # Callback was called multiple times
+    
+    def test_progress_percentage(self):
+        """Test computing progress percentage from callback."""
+        # Create test data  
+        T, H, W, C = 20, 16, 16, 2
+        video = np.random.rand(T, H, W, C).astype(np.float32)
+        reference = np.mean(video[:3], axis=0)
+        
+        percentages = []
+        
+        def progress_callback(current, total):
+            if total > 0:
+                percent = (current / total) * 100
+                percentages.append(percent)
+        
+        # Run compensation
+        registered, flow = compensate_arr(video, reference, progress_callback=progress_callback)
+        
+        # Check percentages
+        assert len(percentages) > 0
+        assert percentages[-1] == 100.0, "Final progress should be 100%"
+        
+        # Check monotonic increase
+        for i in range(1, len(percentages)):
+            assert percentages[i] >= percentages[i-1], "Percentages should increase"
+    
+    def test_multiple_callbacks(self):
+        """Test registering multiple progress callbacks."""
+        # Create test data
+        T, H, W, C = 8, 16, 16, 2
+        video = np.random.rand(T, H, W, C).astype(np.float32)
+        reference = np.mean(video[:2], axis=0)
+        
+        # Track calls from multiple callbacks
+        calls1 = []
+        calls2 = []
+        
+        def callback1(current, total):
+            calls1.append((current, total))
+        
+        def callback2(current, total):
+            calls2.append((current, total))
+        
+        # Create options
+        options = OFOptions()
+        
+        # Note: compensate_arr only accepts one callback, but we can test
+        # that BatchMotionCorrector can handle multiple registrations
+        from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrector
+        
+        # Set up for array processing
+        options.input_file = video
+        options.reference_frames = reference
+        options.output_format = OutputFormat.ARRAY
+        options.save_w = True
+        options.save_meta_info = False
+        
+        # Create compensator and register multiple callbacks
+        compensator = BatchMotionCorrector(options)
+        compensator.register_progress_callback(callback1)
+        compensator.register_progress_callback(callback2)
+        
+        # Run
+        compensator.run()
+        
+        # Both callbacks should be called
+        assert len(calls1) > 0, "First callback not called"
+        assert len(calls2) > 0, "Second callback not called"
+        assert calls1 == calls2, "Both callbacks should receive same calls"
+
+
 class TestCompensateArrIntegration:
     """Integration tests with other components."""
     
