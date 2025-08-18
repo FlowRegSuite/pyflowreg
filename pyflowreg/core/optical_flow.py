@@ -143,7 +143,25 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, 
     else:
         weight = weight.astype(np.float64)
         if weight.ndim < 3:
-            weight = np.ones((m, n, n_channels), dtype=np.float64) * weight
+            # Handle 1D weight array
+            if weight.ndim == 1:
+                # If weight has fewer elements than channels, pad with 1/n_channels
+                if len(weight) < n_channels:
+                    # Use default value for missing channels (MATLAB behavior)
+                    default_weight = 1.0 / n_channels
+                    weight_expanded = np.full(n_channels, default_weight, dtype=np.float64)
+                    weight_expanded[:len(weight)] = weight
+                    weight = weight_expanded
+                elif len(weight) > n_channels:
+                    # Truncate if more weights than channels
+                    weight = weight[:n_channels]
+                # Normalize weights to sum to 1
+                weight = weight / weight.sum()
+                # Broadcast to spatial dimensions
+                weight = np.ones((m, n, n_channels), dtype=np.float64) * weight.reshape(1, 1, -1)
+            else:
+                # 2D spatial weight - broadcast to all channels
+                weight = np.ones((m, n, n_channels), dtype=np.float64) * weight[..., np.newaxis]
     if not isinstance(a_data, np.ndarray):
         a_data_arr = np.full(n_channels, a_data, dtype=np.float64)
     else:

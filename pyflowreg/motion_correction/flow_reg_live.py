@@ -110,7 +110,10 @@ class FlowRegLive:
         """
         if frames is not None:
             # Use provided frames
-            if frames.ndim == 3:
+            if frames.ndim == 2:
+                # Single 2D frame (H,W) - convert to 3D
+                self.reference_raw = frames[..., np.newaxis].copy()
+            elif frames.ndim == 3:
                 # Single frame (H,W,C)
                 self.reference_raw = frames.copy()
             else:

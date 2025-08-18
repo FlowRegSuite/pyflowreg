@@ -504,31 +504,3 @@ class TestCompensateArrIntegration:
         assert original_options.alpha == original_alpha
         assert original_options.save_w == original_save_w
         assert original_options.output_format == original_format  # Should not be changed to ARRAY
-
-
-# Additional test for future CompensateLive implementation
-class TestCompensateLivePlaceholder:
-    """Test CompensateLive placeholder (for future implementation)."""
-    
-    def test_compensate_live_exists(self):
-        """Test that CompensateLive class exists as placeholder."""
-        from pyflowreg.motion_correction.compensate_live import CompensateLive
-        
-        # Check class exists
-        assert CompensateLive is not None
-        
-        # Check it has expected methods (even if not implemented)
-        assert hasattr(CompensateLive, '__init__')
-        assert hasattr(CompensateLive, 'process_frame')
-        assert hasattr(CompensateLive, 'update_reference')
-    
-    def test_compensate_live_not_implemented(self):
-        """Test that CompensateLive raises NotImplementedError."""
-        from pyflowreg.motion_correction.compensate_live import CompensateLive
-        
-        # Create test reference
-        reference = np.random.rand(16, 16, 2).astype(np.float32)
-        
-        # Should raise NotImplementedError
-        with pytest.raises(NotImplementedError):
-            live = CompensateLive(reference)

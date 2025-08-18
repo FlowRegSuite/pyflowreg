@@ -50,20 +50,10 @@ Details on the method and video results can be found [here](https://www.snnu.uni
 
 If you use parts of this code or the plugin for your work, please cite
 
-> P. Flotho, S. Nomura, M. Flotho, A. Keller and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos and 3D scans,” arxiv, 2025. [doi:https://]()
+> P. Flotho, S. Nomura, M. Flotho, A. Keller and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos and 3D scans,” (in preparation), 2025. [doi:https://]()
 
-BibTeX entry
-```
-@article{flotea2025d,
-    author = {Flotho, P. and Nomura, S. and Flotho, M. and Keller, A. and Kuhn, B.},
-    title = {Software for Non-Parametric Image Registration of 2-Photon Imaging Data},
-    year = {2022},
-  journal = {J Biophotonics},
-  doi = {https://doi.org/}
-}
-```
 
-and with the Flow-Registration model additionally
+and for Flow-Registration
 
 > P. Flotho, S. Nomura, B. Kuhn and D. J. Strauss, “Software for Non-Parametric Image Registration of 2-Photon Imaging Data,” J Biophotonics, 2022. [doi:https://doi.org/10.1002/jbio.202100330](https://doi.org/10.1002/jbio.202100330)
 
