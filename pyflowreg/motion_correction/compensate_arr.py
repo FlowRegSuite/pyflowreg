@@ -44,6 +44,10 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
     squeezed = False
     original_shape = c1.shape
     
+    # Validate input is not empty
+    if c1.size == 0:
+        raise ValueError("Input array cannot be empty")
+    
     if c1.ndim == 3 and c_ref.ndim == 2:
         # Input is 3D, reference is 2D - add channel dimension
         c1 = c1[..., np.newaxis]
