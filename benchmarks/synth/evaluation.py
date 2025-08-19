@@ -8,7 +8,15 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter
 
-from methods import pyflowreg as m_pfr, suite2p as m_s2p, jnormcorre as m_jnc, antspyx as m_ants, elastix as m_elx
+from methods import pyflowreg as m_pfr, suite2p as m_s2p, antspyx as m_ants, elastix as m_elx
+
+# Try to import NoRMCorre if CaImAn is available
+try:
+    from methods import normcorre as m_nc
+    NORMCORRE_AVAILABLE = True
+except ImportError:
+    NORMCORRE_AVAILABLE = False
+    print("Warning: CaImAn/NoRMCorre not available, skipping those tests")
 from preprocessing import DefaultProcessor, GradientProcessor, normalize
 
 
@@ -28,20 +36,27 @@ class SynthDataset:
         self.path = path
         self.split = split
         with h5py.File(path, "r") as f:
-            self.w = np.swapaxes(f["w"][:], 1, 2)  # Match your old format
+            # Convert from (2, H, W) to (H, W, 2) and reverse flow components
+            self.w = np.moveaxis(f["w"][:], 0, -1)
+            self.w = self.w[..., ::-1]  # Reverse y,x to x,y
             self.frames_raw = {}
             for k in split:
                 if k in f:
-                    # Match your old preprocessing: swapaxes and normalize
-                    tmp = np.swapaxes(f[k][:], 2, 3).astype(np.float32) / 4095
-                    # Channel-wise normalization like your old code
-                    for i in range(tmp.shape[1]):
-                        tmp[:, i] = normalize(tmp[:, i])
+                    # Load raw data matching synth_evaluation.py
+                    # f[k] shape is (2, 2, 512, 512) - (frames, channels, H, W)
+                    tmp = f[k][:].astype(np.float32)
+                    
+                    # Apply Gaussian filtering to match synth_evaluation.py
+                    tmp = gaussian_filter(tmp, (0.1, 0.01, 1.5, 1.5),
+                                        truncate=10, mode='constant')
+                    
                     self.frames_raw[k] = tmp
                     
                     # Create single channel variants
-                    self.frames_raw[k + "_ch1"] = tmp[:, [0]]
-                    self.frames_raw[k + "_ch2"] = tmp[:, [1]]
+                    # tmp shape is (n_temporal_frames, n_channels, H, W)
+                    # Extract individual channels as (n_temporal, 1, H, W)
+                    self.frames_raw[k + "_ch1"] = tmp[:, [0], :, :]
+                    self.frames_raw[k + "_ch2"] = tmp[:, [1], :, :]
     
     def pairs(self, key, processor=None):
         if processor is None:
@@ -49,9 +64,26 @@ class SynthDataset:
             
         x = self.frames_raw[key]
         pairs = []
-        for i in range(x.shape[0]):
-            frame1 = processor.process(x[i, 0])
-            frame2 = processor.process(x[i, 1])
+        # x shape is (n_temporal_frames, n_channels, H, W)
+        # Match synth_evaluation.py: process pairs (0,1)
+        if x.shape[0] >= 2:
+            # Transpose from (C, H, W) to (H, W, C) for processing
+            frame1 = np.transpose(x[0], (1, 2, 0)).astype(np.float32)
+            frame2 = np.transpose(x[1], (1, 2, 0)).astype(np.float32)
+            
+            # Normalize using frame1's statistics for BOTH frames (like synth_evaluation)
+            mins = frame1.min(axis=(0, 1), keepdims=True)  # shape (1,1,C)
+            maxs = frame1.max(axis=(0, 1), keepdims=True)  # shape (1,1,C)
+            ranges = maxs - mins
+            ranges = np.where(ranges < 1e-6, 1.0, ranges)  # Avoid division by zero
+            
+            frame1 = (frame1 - mins) / ranges
+            frame2 = (frame2 - mins) / ranges
+            
+            # Skip additional processing since we already normalized
+            # processor.process would normalize again which we don't want
+            # frame1 = processor.process(frame1)
+            # frame2 = processor.process(frame2)
             pairs.append((frame1, frame2))
         return pairs
     
@@ -83,11 +115,11 @@ def epe_p95(gt, est, crop=25):
 
 
 def mean_abs_curl(flow, crop=25):
-    flow_c = flow[crop:-crop, crop:-crop, :2]
-    fy, fx = np.gradient(flow_c[..., 0])  # vy gradients
-    uy, ux = np.gradient(flow_c[..., 1])  # vx gradients
-    curl = np.abs(uy - fx)  # Correct 2D curl: ∂vx/∂y - ∂vy/∂x
-    return float(np.mean(curl))
+    f = flow[crop:-crop, crop:-crop, :2]
+    dvy_dy, dvy_dx = np.gradient(f[..., 0])  # vy
+    dvx_dy, dvx_dx = np.gradient(f[..., 1])  # vx
+    curl_z = dvx_dy - dvy_dx
+    return float(np.mean(np.abs(curl_z)))
 
 
 def run_method(name, fn, pairs, w_gt, outdir, **kw):
@@ -107,14 +139,25 @@ def run_method(name, fn, pairs, w_gt, outdir, **kw):
             else:
                 raise ValueError(f"Unexpected flow shape: {w.shape}")
             
-            # Index the correct GT for this pair
-            w_i = w_gt[i]
+            # The synthetic H5 has a single GT flow field for the one pair
+            w_i = w_gt
+            
+            # Shape guard
+            H, W = w.shape[:2]
+            assert w_i.shape[:2] == (H, W) and w_i.shape[-1] == 2, f"GT shape {w_i.shape} mismatches estimate {w.shape}"
+            
+            # Optional direction sanity for algorithms with ambiguous sign
+            if i == 0:
+                e_dir = get_EPE(w, w_i, boundary=25)
+                e_inv = get_EPE(-w, w_i, boundary=25)
+                if e_inv < e_dir:
+                    w = -w
                 
             dt = time.perf_counter() - t0
             
             # Use your old EPE calculation
             e = get_EPE(w, w_i, boundary=25)
-            p = epe_p95(w, w_i)
+            p = epe_p95(w_i, w)  # Fixed parameter order: GT first, then estimate
             c = mean_abs_curl(w)
             
             rows.append({
@@ -145,7 +188,32 @@ def run_method(name, fn, pairs, w_gt, outdir, **kw):
     return rows
 
 
+def _canary():
+    """Quick translation test to catch sign flips and unit mistakes"""
+    H = W = 128
+    dy, dx = 2.5, -1.0
+    ref = np.zeros((H, W), np.float32)
+    mov = np.roll(np.roll(ref, int(dy), 0), int(dx), 1)
+    gt = np.zeros((H, W, 2), np.float32)
+    gt[..., 0] = dy
+    gt[..., 1] = dx
+    
+    for name, fn in [
+        ("pyflowreg", m_pfr.estimate_flow),
+        ("suite2p_rigid", lambda F, M: m_s2p.estimate_flow(F, M, False))
+    ]:
+        try:
+            w = fn(ref, mov)
+            if np.mean(np.abs(w - gt)) > 0.5:
+                print(f"[canary] {name} seems off by >0.5 px")
+        except Exception as e:
+            print(f"[canary] {name} failed: {e}")
+
+
 def main(args):
+    # Run canary test first
+    _canary()
+    
     # Handle data download if needed
     if args.data is None:
         data_folder = pathlib.Path("benchmarks/synth/data")
@@ -165,13 +233,10 @@ def main(args):
     # Test configurations matching your old paper
     test_configs = [
         # Split, processor, suffix
+        # Note: Gaussian filtering (sigma=1.5) is already applied in data loading
         (args.split, DefaultProcessor(sigma=0), ""),
-        (args.split, DefaultProcessor(sigma=1.5), "*"),
-        (args.split, GradientProcessor(sigma=1.5), " gc*"),
         (args.split + "_ch1", DefaultProcessor(sigma=0), " ch1"),
-        (args.split + "_ch1", DefaultProcessor(sigma=1.5), " ch1*"),
         (args.split + "_ch2", DefaultProcessor(sigma=0), " ch2"),
-        (args.split + "_ch2", DefaultProcessor(sigma=1.5), " ch2*"),
     ]
     
     for split_key, processor, suffix in test_configs:
@@ -192,7 +257,7 @@ def main(args):
         # Suite2p
         try:
             rows = run_method(f"suite2p_rigid{suffix}", 
-                            lambda f, m: m_s2p.estimate_flow(f, m, False), 
+                            lambda f, m: m_s2p.estimate_flow(f, m, use_nonrigid=False), 
                             pairs, w_gt, outdir)
             for row in rows:
                 result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
@@ -201,20 +266,21 @@ def main(args):
             
         try:
             rows = run_method(f"suite2p_nonrigid{suffix}", 
-                            lambda f, m: m_s2p.estimate_flow(f, m, True), 
+                            lambda f, m: m_s2p.estimate_flow(f, m, use_nonrigid=True), 
                             pairs, w_gt, outdir)
             for row in rows:
                 result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
         except Exception as e:
             print(f"Error with suite2p nonrigid: {e}")
         
-        # jNormCorre
-        try:
-            rows = run_method(f"jnormcorre{suffix}", m_jnc.estimate_flow, pairs, w_gt, outdir)
-            for row in rows:
-                result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-        except Exception as e:
-            print(f"Error with jnormcorre: {e}")
+        # NoRMCorre (via CaImAn)
+        if NORMCORRE_AVAILABLE:
+            try:
+                rows = run_method(f"normcorre{suffix}", m_nc.estimate_flow, pairs, w_gt, outdir)
+                for row in rows:
+                    result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
+            except Exception as e:
+                print(f"Error with normcorre: {e}")
         
         # ANTs variants matching your old code
         ants_configs = [

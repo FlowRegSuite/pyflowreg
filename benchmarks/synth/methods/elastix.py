@@ -26,6 +26,8 @@ def estimate_flow(fixed, moving, params_path):
     d = itk.transformix_displacement_field(tx, f)
     a = itk.GetArrayFromImage(d).astype(np.float32)
     
-    v = np.stack([a[..., 1], a[..., 0]], 0)
+    # Return in (H, W, 2) format
+    # ITK returns (y, x) so we swap to (x, y)
+    v = np.stack([a[..., 1], a[..., 0]], axis=-1)
     
     return v

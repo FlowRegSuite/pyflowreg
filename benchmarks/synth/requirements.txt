@@ -1,8 +1,7 @@
 suite2p
 antspyx
 itk-elastix
-jnormcorre
-jax[cpu]>=0.4
+caiman
 h5py
 tifffile
 numpy

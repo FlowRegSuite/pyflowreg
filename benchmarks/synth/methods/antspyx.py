@@ -46,6 +46,7 @@ def estimate_flow(fixed, moving, transform="SyN", metric="CC", use_multichannel=
         transformlist=tx['fwdtransforms']
     ).numpy()
     
-    v = np.stack([Y_warped - Y, X_warped - X], 0).astype(np.float32)
+    # Return in (H, W, 2) format
+    v = np.stack([Y_warped - Y, X_warped - X], axis=-1).astype(np.float32)
     
     return v

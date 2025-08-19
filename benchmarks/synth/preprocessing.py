@@ -4,13 +4,13 @@ from scipy.ndimage import gaussian_filter
 
 
 def normalize(img):
-    img = img.astype(float)
-    img_min = np.amin(img)
-    img_max = np.amax(img)
-    if img_max - img_min < 1e-6:
-        return img * 0
-    img = (img - img_min) / (img_max - img_min)
-    return img
+    img = img.astype(np.float32)
+    mn, mx = img.min(), img.max()
+    rng = mx - mn
+    if rng < 1e-6:
+        return np.zeros_like(img, dtype=np.float32)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return (img - mn) / rng
 
 
 def imgaussfilt(img, sigma):

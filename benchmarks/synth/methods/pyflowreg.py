@@ -27,6 +27,5 @@ def estimate_flow(fixed, moving, **kw):
     
     w = pfr.get_displacement(fixed, moving, **base_params)
     
-    if w.shape[-1] == 2:
-        return w.astype(np.float32)
-    return np.moveaxis(w, -1, 0).astype(np.float32)
+    # pfr.get_displacement already returns (H, W, 2) format
+    return w.astype(np.float32)
