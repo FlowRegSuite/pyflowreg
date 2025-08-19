@@ -42,14 +42,11 @@ class SynthDataset:
             self.frames_raw = {}
             for k in split:
                 if k in f:
-                    # Load raw data matching synth_evaluation.py
+                    # Load raw data WITHOUT preprocessing
                     # f[k] shape is (2, 2, 512, 512) - (frames, channels, H, W)
                     tmp = f[k][:].astype(np.float32)
                     
-                    # Apply Gaussian filtering to match synth_evaluation.py
-                    tmp = gaussian_filter(tmp, (0.1, 0.01, 1.5, 1.5),
-                                        truncate=10, mode='constant')
-                    
+                    # Store raw data - let each method do its own preprocessing
                     self.frames_raw[k] = tmp
                     
                     # Create single channel variants
@@ -59,31 +56,21 @@ class SynthDataset:
                     self.frames_raw[k + "_ch2"] = tmp[:, [1], :, :]
     
     def pairs(self, key, processor=None):
-        if processor is None:
-            processor = DefaultProcessor()
-            
+        """
+        Get frame pairs for registration.
+        Note: This returns RAW frames without preprocessing.
+        Each method should apply its own preprocessing.
+        """
         x = self.frames_raw[key]
         pairs = []
         # x shape is (n_temporal_frames, n_channels, H, W)
-        # Match synth_evaluation.py: process pairs (0,1)
+        # Process pairs (0,1)
         if x.shape[0] >= 2:
             # Transpose from (C, H, W) to (H, W, C) for processing
             frame1 = np.transpose(x[0], (1, 2, 0)).astype(np.float32)
             frame2 = np.transpose(x[1], (1, 2, 0)).astype(np.float32)
             
-            # Normalize using frame1's statistics for BOTH frames (like synth_evaluation)
-            mins = frame1.min(axis=(0, 1), keepdims=True)  # shape (1,1,C)
-            maxs = frame1.max(axis=(0, 1), keepdims=True)  # shape (1,1,C)
-            ranges = maxs - mins
-            ranges = np.where(ranges < 1e-6, 1.0, ranges)  # Avoid division by zero
-            
-            frame1 = (frame1 - mins) / ranges
-            frame2 = (frame2 - mins) / ranges
-            
-            # Skip additional processing since we already normalized
-            # processor.process would normalize again which we don't want
-            # frame1 = processor.process(frame1)
-            # frame2 = processor.process(frame2)
+            # Return raw frames - let methods handle their own preprocessing
             pairs.append((frame1, frame2))
         return pairs
     
@@ -232,19 +219,18 @@ def main(args):
     
     # Test configurations matching your old paper
     test_configs = [
-        # Split, processor, suffix
-        # Note: Gaussian filtering (sigma=1.5) is already applied in data loading
-        (args.split, DefaultProcessor(sigma=0), ""),
-        (args.split + "_ch1", DefaultProcessor(sigma=0), " ch1"),
-        (args.split + "_ch2", DefaultProcessor(sigma=0), " ch2"),
+        # Split, suffix
+        (args.split, ""),
+        (args.split + "_ch1", " ch1"),
+        (args.split + "_ch2", " ch2"),
     ]
     
-    for split_key, processor, suffix in test_configs:
+    for split_key, suffix in test_configs:
         if split_key not in ds.available_keys():
             continue
             
-        print(f"\nTesting {split_key} with {processor.__class__.__name__}(sigma={getattr(processor, 'sigma', 'N/A')})")
-        pairs = ds.pairs(split_key, processor)
+        print(f"\nTesting {split_key}")
+        pairs = ds.pairs(split_key)
         
         # PyFlowReg
         try:
@@ -302,18 +288,18 @@ def main(args):
         # Elastix variants
         base = pathlib.Path(args.params)
         elastix_configs = [
-            ("bspline_multimetric_cc.txt", "elastix cc"),
-            ("bspline_multimetric_cc_gradient.txt", "elastix cc + gc"),
-            ("bspline_multimetric_mi.txt", "elastix mi"),
-            ("bspline_multimetric_mi_gradient.txt", "elastix mi + gc"),
+            ("bspline_multimetric_cc.txt", "elastix cc", False),  # No gradient
+            ("bspline_multimetric_cc_gradient.txt", "elastix cc + gc", True),  # With gradient
+            ("bspline_multimetric_mi.txt", "elastix mi", False),  # No gradient
+            ("bspline_multimetric_mi_gradient.txt", "elastix mi + gc", True),  # With gradient
         ]
         
-        for param_file, name in elastix_configs:
+        for param_file, name, use_gradient in elastix_configs:
             param_path = base / param_file
             if param_path.exists():
                 try:
                     rows = run_method(f"{name}{suffix}", 
-                                    lambda f, m, p=param_path: m_elx.estimate_flow(f, m, [p]), 
+                                    lambda f, m, p=param_path, g=use_gradient: m_elx.estimate_flow(f, m, [p], preprocess=True, use_gradient=g), 
                                     pairs, w_gt, outdir)
                     for row in rows:
                         result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
