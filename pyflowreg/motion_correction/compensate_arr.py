@@ -135,3 +135,26 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
         w = np.zeros((T, H, W, 2), dtype=np.float32)
     
     return c_reg, w
+
+
+def compensate_pair(frame1: np.ndarray, frame2: np.ndarray, options: Optional[OFOptions] = None) -> np.ndarray:
+    """
+    Compute optical flow between two frames.
+    
+    Args:
+        frame1: Reference frame, shape (H,W,C) or (H,W)
+        frame2: Moving frame to register to frame1, shape (H,W,C) or (H,W)
+        options: OF_options configuration. If None, uses defaults.
+    
+    Returns:
+        w: Displacement field, shape (H,W,2) with [u,v] components
+    """
+    if frame1.ndim == 2:
+        frame1 = frame1[..., np.newaxis]
+    if frame2.ndim == 2:
+        frame2 = frame2[..., np.newaxis]
+    
+    frames = np.stack([frame1, frame2], axis=0)
+    _, w = compensate_arr(frames, frame1, options)
+    
+    return w[1]

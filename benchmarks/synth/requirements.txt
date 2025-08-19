@@ -1,0 +1,11 @@
+suite2p
+antspyx
+itk-elastix
+jnormcorre
+jax[cpu]>=0.4
+h5py
+tifffile
+numpy
+scipy
+pandas
+opencv-python
