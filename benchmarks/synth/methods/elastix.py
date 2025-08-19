@@ -1,85 +1,168 @@
 import numpy as np
 import itk
 import pathlib
+import cv2
 from scipy.ndimage import gaussian_filter
 
 
-def preprocess_elastix(frame, apply_gaussian=True, sigma=1.0, compute_gradient=False):
-    """
-    Preprocess a frame for elastix matching the reference implementation.
-    
-    Args:
-        frame: Input frame (H, W) or (H, W, C)
-        apply_gaussian: If True, apply Gaussian filtering
-        sigma: Gaussian filter sigma
-        compute_gradient: If True, compute image gradients
-    
-    Returns:
-        Preprocessed frame
-    """
-    # Handle multi-channel input
-    if frame.ndim == 3 and frame.shape[-1] > 1:
-        # Process first channel only (elastix typically uses single channel)
-        frame = frame[..., 0]
-    elif frame.ndim == 3:
-        frame = frame[..., 0]
-    
-    # Normalize to [0, 1]
-    frame = frame.astype(np.float32)
-    frame = (frame - frame.min()) / (frame.max() - frame.min() + 1e-8)
-    
-    # Apply Gaussian filtering if requested
-    if apply_gaussian:
-        frame = gaussian_filter(frame, sigma, mode='constant')
-    
-    # Compute gradient if requested
-    if compute_gradient:
-        # Convert to ITK image for gradient computation
-        itk_img = itk.GetImageFromArray(frame)
-        gradient_filter = itk.GradientImageFilter.New(itk_img)
-        gradient_filter.Update()
-        gradient = itk.GetArrayFromImage(gradient_filter.GetOutput())
-        return gradient
-    
-    return frame
+def normalize(img):
+    """Normalize image to [0, 1] range matching reference."""
+    img = img.astype(np.float32)
+    img = img - np.amin(img)
+    img = img / (np.amax(img) + 0.00001)
+    return img
+
+
+def imgaussfilt(img, sigma):
+    """Apply Gaussian filter matching reference."""
+    return gaussian_filter(img, sigma, mode='constant')
+
+
+class DefaultProcessor:
+    def __init__(self, sigma=None):
+        self.sigma = sigma
+
+    def process(self, frame):
+        if self.sigma is None or self.sigma == 0:
+            return normalize(frame.astype(np.float32))
+        return normalize(imgaussfilt(frame, self.sigma).astype(np.float32))
+
+
+class GradientProcessor:
+    def __init__(self, sigma=1.5):
+        self.sigma = sigma
+
+    def process(self, frame):
+        if len(frame.shape) == 2:
+            frame = np.expand_dims(frame, 0)
+
+        result = []
+        for ch in frame:
+            # central differences:
+            f = normalize(imgaussfilt(ch, self.sigma))
+            
+            f = cv2.copyMakeBorder(f, 1, 1, 1, 1, cv2.BORDER_REFLECT_101)
+            fx = f[1:-1, 2:] - f[1:-1, 0:-2]
+            fx *= 0.5
+            fy = f[2:, 1:-1] - f[0:-2, 1:-1]
+            fy *= 0.5
+            result.append(np.stack([fx, fy], 0))
+
+        return np.concatenate(result, 0).astype(np.float32)
 
 
 def estimate_flow(fixed, moving, params_path, preprocess=True, use_gradient=False):
     """
-    Estimate optical flow using elastix.
+    Estimate optical flow using elastix, matching the reference implementation exactly.
     
     Args:
         fixed: Reference frame (H, W) or (H, W, C)
         moving: Moving frame (H, W) or (H, W, C)
         params_path: List of parameter file paths
         preprocess: If True, apply preprocessing
-        use_gradient: If True, register gradient images instead of intensities
+        use_gradient: If True, use gradient processor
     """
-    # Apply preprocessing if requested
+    # Handle multi-channel by taking channels separately
+    if fixed.ndim == 3 and fixed.shape[-1] > 1:
+        fixed_ch1 = fixed[..., 0]
+        fixed_ch2 = fixed[..., 1]
+        moving_ch1 = moving[..., 0]
+        moving_ch2 = moving[..., 1]
+        multi_channel = True
+    else:
+        if fixed.ndim == 3:
+            fixed = fixed[..., 0]
+        if moving.ndim == 3:
+            moving = moving[..., 0]
+        fixed_ch1 = fixed
+        moving_ch1 = moving
+        multi_channel = False
+    
+    # Apply preprocessing
     if preprocess:
-        # For gradient-based configs (matching reference elastix code)
         if use_gradient:
-            # Apply Gaussian with sigma=1 then compute gradients
-            fixed_processed = preprocess_elastix(fixed, apply_gaussian=True, sigma=1.0, compute_gradient=True)
-            moving_processed = preprocess_elastix(moving, apply_gaussian=True, sigma=1.0, compute_gradient=True)
+            # Use GradientProcessor for gradient configs
+            processor = GradientProcessor(sigma=1.5)
             
-            # For multi-channel data, process each channel
-            if fixed.ndim == 3 and fixed.shape[-1] > 1:
-                fixed2 = preprocess_elastix(fixed[..., 1:2], apply_gaussian=True, sigma=1.0, compute_gradient=True)
-                moving2 = preprocess_elastix(moving[..., 1:2], apply_gaussian=True, sigma=1.0, compute_gradient=True)
+            if multi_channel:
+                # Process each channel to get gradients
+                fixed_processed = processor.process(np.stack([fixed_ch1, fixed_ch2], 0))
+                moving_processed = processor.process(np.stack([moving_ch1, moving_ch2], 0))
                 
-                # Use multi-metric registration with both gradient images
-                f1 = itk.GetImageFromArray(fixed_processed.astype(np.float32))
-                m1 = itk.GetImageFromArray(moving_processed.astype(np.float32))
-                f2 = itk.GetImageFromArray(fixed2.astype(np.float32))
-                m2 = itk.GetImageFromArray(moving2.astype(np.float32))
+                # fixed_processed shape: (4, H, W) - [ch1_fx, ch1_fy, ch2_fx, ch2_fy]
+                # Pass each gradient component as a separate scalar image
+                f1 = itk.GetImageFromArray(fixed_processed[0].astype(np.float32))  # ch1_fx
+                m1 = itk.GetImageFromArray(moving_processed[0].astype(np.float32))
+                f2 = itk.GetImageFromArray(fixed_processed[1].astype(np.float32))  # ch1_fy
+                m2 = itk.GetImageFromArray(moving_processed[1].astype(np.float32))
+                f3 = itk.GetImageFromArray(fixed_processed[2].astype(np.float32))  # ch2_fx
+                m3 = itk.GetImageFromArray(moving_processed[2].astype(np.float32))
+                f4 = itk.GetImageFromArray(fixed_processed[3].astype(np.float32))  # ch2_fy
+                m4 = itk.GetImageFromArray(moving_processed[3].astype(np.float32))
                 
-                # Setup multi-metric elastix
+                # Multi-metric elastix registration
                 p = itk.ParameterObject.New()
                 for pfile in params_path:
                     p.AddParameterFile(str(pathlib.Path(pfile)))
                 
-                # Create elastix object with gradient images
+                elastix_object = itk.ElastixRegistrationMethod.New(f1, m1,
+                                                                  parameter_object=p,
+                                                                  log_to_console=False,
+                                                                  number_of_threads=12)
+                elastix_object.AddFixedImage(f2)
+                elastix_object.AddMovingImage(m2)
+                elastix_object.AddFixedImage(f3)
+                elastix_object.AddMovingImage(m3)
+                elastix_object.AddFixedImage(f4)
+                elastix_object.AddMovingImage(m4)
+                elastix_object.UpdateLargestPossibleRegion()
+                
+                tx = elastix_object.GetTransformParameterObject()
+            else:
+                # Single channel gradient processing
+                fixed_processed = processor.process(np.expand_dims(fixed_ch1, 0))
+                moving_processed = processor.process(np.expand_dims(moving_ch1, 0))
+                
+                # fixed_processed shape: (2, H, W) - [fx, fy]
+                # Pass each gradient component as a separate scalar image
+                f1 = itk.GetImageFromArray(fixed_processed[0].astype(np.float32))  # fx
+                m1 = itk.GetImageFromArray(moving_processed[0].astype(np.float32))
+                f2 = itk.GetImageFromArray(fixed_processed[1].astype(np.float32))  # fy
+                m2 = itk.GetImageFromArray(moving_processed[1].astype(np.float32))
+                
+                p = itk.ParameterObject.New()
+                for pfile in params_path:
+                    p.AddParameterFile(str(pathlib.Path(pfile)))
+                
+                elastix_object = itk.ElastixRegistrationMethod.New(f1, m1,
+                                                                  parameter_object=p,
+                                                                  log_to_console=False,
+                                                                  number_of_threads=12)
+                elastix_object.AddFixedImage(f2)
+                elastix_object.AddMovingImage(m2)
+                elastix_object.UpdateLargestPossibleRegion()
+                
+                tx = elastix_object.GetTransformParameterObject()
+        else:
+            # Use DefaultProcessor for non-gradient configs
+            processor = DefaultProcessor(sigma=1.5)
+            
+            if multi_channel:
+                # Process channels and use multi-metric registration
+                fixed1_processed = processor.process(fixed_ch1)
+                moving1_processed = processor.process(moving_ch1)
+                fixed2_processed = processor.process(fixed_ch2)
+                moving2_processed = processor.process(moving_ch2)
+                
+                f1 = itk.GetImageFromArray(fixed1_processed.astype(np.float32))
+                m1 = itk.GetImageFromArray(moving1_processed.astype(np.float32))
+                f2 = itk.GetImageFromArray(fixed2_processed.astype(np.float32))
+                m2 = itk.GetImageFromArray(moving2_processed.astype(np.float32))
+                
+                p = itk.ParameterObject.New()
+                for pfile in params_path:
+                    p.AddParameterFile(str(pathlib.Path(pfile)))
+                
                 elastix_object = itk.ElastixRegistrationMethod.New(f1, m1,
                                                                   parameter_object=p,
                                                                   log_to_console=False,
@@ -90,7 +173,10 @@ def estimate_flow(fixed, moving, params_path, preprocess=True, use_gradient=Fals
                 
                 tx = elastix_object.GetTransformParameterObject()
             else:
-                # Single channel gradient
+                # Single channel intensity processing
+                fixed_processed = processor.process(fixed_ch1)
+                moving_processed = processor.process(moving_ch1)
+                
                 f = itk.GetImageFromArray(fixed_processed.astype(np.float32))
                 m = itk.GetImageFromArray(moving_processed.astype(np.float32))
                 
@@ -99,31 +185,13 @@ def estimate_flow(fixed, moving, params_path, preprocess=True, use_gradient=Fals
                     p.AddParameterFile(str(pathlib.Path(pfile)))
                 
                 tx = itk.elastix_registration_method(f, m, parameter_object=p, log_to_console=False)
-        else:
-            # Standard intensity-based registration with Gaussian filtering
-            fixed_processed = preprocess_elastix(fixed, apply_gaussian=True, sigma=1.5, compute_gradient=False)
-            moving_processed = preprocess_elastix(moving, apply_gaussian=True, sigma=1.5, compute_gradient=False)
-            
-            f = itk.GetImageFromArray(fixed_processed.astype(np.float32))
-            m = itk.GetImageFromArray(moving_processed.astype(np.float32))
-            
-            p = itk.ParameterObject.New()
-            for pfile in params_path:
-                p.AddParameterFile(str(pathlib.Path(pfile)))
-            
-            tx = itk.elastix_registration_method(f, m, parameter_object=p, log_to_console=False)
     else:
-        # No preprocessing - use raw input
+        # No preprocessing
         if fixed.ndim == 3 and fixed.shape[-1] > 1:
-            fixed = np.sqrt((fixed**2).sum(axis=-1))
-        elif fixed.ndim == 3:
             fixed = fixed[..., 0]
-            
         if moving.ndim == 3 and moving.shape[-1] > 1:
-            moving = np.sqrt((moving**2).sum(axis=-1))
-        elif moving.ndim == 3:
             moving = moving[..., 0]
-        
+            
         f = itk.GetImageFromArray(fixed.astype(np.float32))
         m = itk.GetImageFromArray(moving.astype(np.float32))
         
@@ -133,8 +201,10 @@ def estimate_flow(fixed, moving, params_path, preprocess=True, use_gradient=Fals
         
         tx = itk.elastix_registration_method(f, m, parameter_object=p, log_to_console=False)
     
-    # Get displacement field
-    d = itk.transformix_displacement_field(tx, f if 'f' in locals() else itk.GetImageFromArray(fixed.astype(np.float32)))
+    # Get displacement field using transformix
+    # Need a reference image for the transformation
+    ref_image = f if 'f' in locals() else (f1 if 'f1' in locals() else itk.GetImageFromArray(fixed.astype(np.float32)))
+    d = itk.transformix_displacement_field(tx, ref_image)
     a = itk.GetArrayFromImage(d).astype(np.float32)
     
     # Return in (H, W, 2) format

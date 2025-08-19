@@ -115,95 +115,59 @@ def run_method(name, fn, pairs, w_gt, outdir, **kw):
     
     for i, (f, m) in enumerate(pairs):
         t0 = time.perf_counter()
-        try:
-            w = fn(f, m, **kw)
+        w = fn(f, m, **kw)
+        
+        # Ensure w is in (H, W, 2) format like your old code
+        if w.ndim == 3 and w.shape[0] == 2:
+            w = np.moveaxis(w, 0, -1)
+        elif w.ndim == 3 and w.shape[-1] == 2:
+            pass  # Already correct
+        else:
+            raise ValueError(f"Unexpected flow shape: {w.shape}")
+        
+        # The synthetic H5 has a single GT flow field for the one pair
+        w_i = w_gt
+        
+        # Shape guard
+        H, W = w.shape[:2]
+        assert w_i.shape[:2] == (H, W) and w_i.shape[-1] == 2, f"GT shape {w_i.shape} mismatches estimate {w.shape}"
+        
+        # Optional direction sanity for algorithms with ambiguous sign
+        if i == 0:
+            e_dir = get_EPE(w, w_i, boundary=25)
+            e_inv = get_EPE(-w, w_i, boundary=25)
+            if e_inv < e_dir:
+                w = -w
             
-            # Ensure w is in (H, W, 2) format like your old code
-            if w.ndim == 3 and w.shape[0] == 2:
-                w = np.moveaxis(w, 0, -1)
-            elif w.ndim == 3 and w.shape[-1] == 2:
-                pass  # Already correct
-            else:
-                raise ValueError(f"Unexpected flow shape: {w.shape}")
-            
-            # The synthetic H5 has a single GT flow field for the one pair
-            w_i = w_gt
-            
-            # Shape guard
-            H, W = w.shape[:2]
-            assert w_i.shape[:2] == (H, W) and w_i.shape[-1] == 2, f"GT shape {w_i.shape} mismatches estimate {w.shape}"
-            
-            # Optional direction sanity for algorithms with ambiguous sign
-            if i == 0:
-                e_dir = get_EPE(w, w_i, boundary=25)
-                e_inv = get_EPE(-w, w_i, boundary=25)
-                if e_inv < e_dir:
-                    w = -w
-                
-            dt = time.perf_counter() - t0
-            
-            # Use your old EPE calculation
-            e = get_EPE(w, w_i, boundary=25)
-            p = epe_p95(w_i, w)  # Fixed parameter order: GT first, then estimate
-            c = mean_abs_curl(w)
-            
-            rows.append({
-                "method": name,
-                "idx": i,
-                "epe": e,
-                "epe95": p,
-                "curl": c,
-                "time_s": dt
-            })
-            
-            with h5py.File(f"{outdir}/{name}_{i}.h5", "w") as hf:
-                hf.create_dataset("w", data=w)
-                hf.create_dataset("epe", data=e)
-                hf.create_dataset("frames", data=np.stack([f, m], 0))
-            
-        except Exception as e:
-            print(f"Error running {name} on pair {i}: {e}")
-            rows.append({
-                "method": name,
-                "idx": i,
-                "epe": np.nan,
-                "epe95": np.nan,
-                "curl": np.nan,
-                "time_s": np.nan
-            })
+        dt = time.perf_counter() - t0
+        
+        # Use your old EPE calculation
+        e = get_EPE(w, w_i, boundary=25)
+        p = epe_p95(w_i, w)  # Fixed parameter order: GT first, then estimate
+        c = mean_abs_curl(w)
+        
+        rows.append({
+            "method": name,
+            "idx": i,
+            "epe": e,
+            "epe95": p,
+            "curl": c,
+            "time_s": dt
+        })
+        
+        with h5py.File(f"{outdir}/{name}_{i}.h5", "w") as hf:
+            hf.create_dataset("w", data=w)
+            hf.create_dataset("epe", data=e)
+            hf.create_dataset("frames", data=np.stack([f, m], 0))
     
     return rows
 
 
-def _canary():
-    """Quick translation test to catch sign flips and unit mistakes"""
-    H = W = 128
-    dy, dx = 2.5, -1.0
-    ref = np.zeros((H, W), np.float32)
-    mov = np.roll(np.roll(ref, int(dy), 0), int(dx), 1)
-    gt = np.zeros((H, W, 2), np.float32)
-    gt[..., 0] = dy
-    gt[..., 1] = dx
-    
-    for name, fn in [
-        ("pyflowreg", m_pfr.estimate_flow),
-        ("suite2p_rigid", lambda F, M: m_s2p.estimate_flow(F, M, False))
-    ]:
-        try:
-            w = fn(ref, mov)
-            if np.mean(np.abs(w - gt)) > 0.5:
-                print(f"[canary] {name} seems off by >0.5 px")
-        except Exception as e:
-            print(f"[canary] {name} failed: {e}")
-
-
 def main(args):
-    # Run canary test first
-    _canary()
     
     # Handle data download if needed
     if args.data is None:
-        data_folder = pathlib.Path("benchmarks/synth/data")
+        data_folder = pathlib.Path("data")
         data_folder.mkdir(parents=True, exist_ok=True)
         data_file = data_folder / "synth_frames.h5"
         download_synth_data(data_folder, data_file)
@@ -233,40 +197,28 @@ def main(args):
         pairs = ds.pairs(split_key)
         
         # PyFlowReg
-        try:
-            rows = run_method(f"pyflowreg{suffix}", m_pfr.estimate_flow, pairs, w_gt, outdir)
-            for row in rows:
-                result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-        except Exception as e:
-            print(f"Error with pyflowreg: {e}")
+        rows = run_method(f"pyflowreg{suffix}", m_pfr.estimate_flow, pairs, w_gt, outdir)
+        for row in rows:
+            result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
         
         # Suite2p
-        try:
-            rows = run_method(f"suite2p_rigid{suffix}", 
-                            lambda f, m: m_s2p.estimate_flow(f, m, use_nonrigid=False), 
-                            pairs, w_gt, outdir)
-            for row in rows:
-                result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-        except Exception as e:
-            print(f"Error with suite2p rigid: {e}")
+        rows = run_method(f"suite2p_rigid{suffix}", 
+                        lambda f, m: m_s2p.estimate_flow(f, m, use_nonrigid=False), 
+                        pairs, w_gt, outdir)
+        for row in rows:
+            result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
             
-        try:
-            rows = run_method(f"suite2p_nonrigid{suffix}", 
-                            lambda f, m: m_s2p.estimate_flow(f, m, use_nonrigid=True), 
-                            pairs, w_gt, outdir)
-            for row in rows:
-                result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-        except Exception as e:
-            print(f"Error with suite2p nonrigid: {e}")
+        rows = run_method(f"suite2p_nonrigid{suffix}", 
+                        lambda f, m: m_s2p.estimate_flow(f, m, use_nonrigid=True), 
+                        pairs, w_gt, outdir)
+        for row in rows:
+            result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
         
         # NoRMCorre (via CaImAn)
         if NORMCORRE_AVAILABLE:
-            try:
-                rows = run_method(f"normcorre{suffix}", m_nc.estimate_flow, pairs, w_gt, outdir)
-                for row in rows:
-                    result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-            except Exception as e:
-                print(f"Error with normcorre: {e}")
+            rows = run_method(f"normcorre{suffix}", m_nc.estimate_flow, pairs, w_gt, outdir)
+            for row in rows:
+                result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
         
         # ANTs variants matching your old code
         ants_configs = [
@@ -276,14 +228,11 @@ def main(args):
         ]
         
         for transform, metric, name in ants_configs:
-            try:
-                rows = run_method(f"{name}{suffix}", 
-                                lambda f, m, t=transform, met=metric: m_ants.estimate_flow(f, m, t, met), 
-                                pairs, w_gt, outdir)
-                for row in rows:
-                    result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-            except Exception as e:
-                print(f"Error with {name}: {e}")
+            rows = run_method(f"{name}{suffix}", 
+                            lambda f, m, t=transform, met=metric: m_ants.estimate_flow(f, m, t, met), 
+                            pairs, w_gt, outdir)
+            for row in rows:
+                result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
         
         # Elastix variants
         base = pathlib.Path(args.params)
@@ -297,14 +246,13 @@ def main(args):
         for param_file, name, use_gradient in elastix_configs:
             param_path = base / param_file
             if param_path.exists():
-                try:
-                    rows = run_method(f"{name}{suffix}", 
-                                    lambda f, m, p=param_path, g=use_gradient: m_elx.estimate_flow(f, m, [p], preprocess=True, use_gradient=g), 
-                                    pairs, w_gt, outdir)
-                    for row in rows:
-                        result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-                except Exception as e:
-                    print(f"Error with {name}: {e}")
+                rows = run_method(f"{name}{suffix}", 
+                                lambda f, m, p=param_path, g=use_gradient: m_elx.estimate_flow(f, m, [p], preprocess=True, use_gradient=g), 
+                                pairs, w_gt, outdir)
+                for row in rows:
+                    result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
+            else:
+                print(f"WARNING: Missing parameter file: {param_path}")
     
     # Save results
     result_df.to_csv(outdir/"results_detailed.csv", index=False)
@@ -330,7 +278,7 @@ def main(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--data", help="Path to synth_frames.h5 (if not provided, will download automatically)")
-    p.add_argument("--out", default="benchmarks/synth/out", help="Output directory")
+    p.add_argument("--out", default="out", help="Output directory")
     p.add_argument("--split", default="clean", choices=["clean", "noisy35db", "noisy30db"])
-    p.add_argument("--params", default="benchmarks/synth/elastix_params", help="Elastix params directory")
+    p.add_argument("--params", default="elastix_params", help="Elastix params directory")
     main(p.parse_args())

@@ -65,15 +65,15 @@ base_params = dict(
     iterations=100,
     a_data=0.45,
     a_smooth=1.0,
-    weight=np.array([0.6, 0.4], np.float32),
+    weight=np.array([0.5, 0.5], np.float32),
     levels=50,
     eta=0.8,
     update_lag=5,
 )
 
 for name, data in datasets:
-    data = gaussian_filter(data, (0.1, 0.01, 1.5, 1.5),
-                           truncate=10, mode='constant')
+    data = gaussian_filter(data, (0.00001, 0.00001, 1, 1),
+                           truncate=4)
     #for i in range(data.shape[1]):
     #    data[:, i, :, :] = gaussian_filter(data[:, i, :, :],
     #                                       (0.1, 1.5, 1.5),  # 3D sigmas only

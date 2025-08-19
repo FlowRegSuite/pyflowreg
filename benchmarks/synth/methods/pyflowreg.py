@@ -3,7 +3,7 @@ import pyflowreg as pfr
 from scipy.ndimage import gaussian_filter
 
 
-def preprocess_pyflowreg(frame1, frame2, apply_gaussian=True, sigma=1.5):
+def preprocess_pyflowreg(frame1, frame2, apply_gaussian=True, sigma=1):
     """
     Preprocess frames for PyFlowReg matching synth_evaluation.py exactly.
     
@@ -55,7 +55,7 @@ def estimate_flow(fixed, moving, preprocess=True, **kw):
     if preprocess:
         # Note: For benchmarks, Gaussian filtering is already applied in data loading
         # So we only apply normalization here
-        fixed, moving = preprocess_pyflowreg(fixed, moving, apply_gaussian=False)
+        fixed, moving = preprocess_pyflowreg(fixed, moving, apply_gaussian=True)
     
     # Adapt weights to number of channels
     C = fixed.shape[-1]
