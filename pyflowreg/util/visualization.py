@@ -275,7 +275,9 @@ def multispectral_mapping(img: np.ndarray) -> np.ndarray:
 
 
 def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float = 1.0, 
-                                 downsample: float = 0.03, show_streamlines: bool = True) -> np.ndarray:
+                                 downsample: float = 0.03, show_streamlines: bool = True,
+                                 quiver_color: Tuple[int, int, int] = (255, 255, 255),
+                                 streamline_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
     """
     Create quiver visualization using OpenCV backend (no matplotlib required).
     
@@ -284,7 +286,9 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
         flow: Displacement field with shape (H, W, 2)
         scale: Scale factor for quiver arrows
         downsample: Downsampling factor for quiver display
-        show_streamlines: Whether to show streamlines (currently not supported in OpenCV)
+        show_streamlines: Whether to show streamlines
+        quiver_color: RGB color for quiver arrows (default white)
+        streamline_color: RGB color for streamlines (default black)
         
     Returns:
         Visualization image as numpy array with shape (H, W, 3)
@@ -362,26 +366,88 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
                 line_type=cv2.LINE_AA
             )
             
-            # Draw white arrow on top
+            # Draw colored arrow on top
             cv2.arrowedLine(
                 result,
                 start_point,
                 end_point,
-                color=(255, 255, 255),  # White center
+                color=quiver_color,
                 thickness=1,
                 tipLength=0.2,
                 line_type=cv2.LINE_AA
             )
             
-    # Note: Streamlines are not implemented in OpenCV backend yet
-    # Could potentially use cv2.polylines to approximate streamlines in future
+    # Add streamlines if requested
+    if show_streamlines:
+        # Create streamlines using line integral convolution approach
+        # We'll trace particles through the flow field
+        h, w = flow.shape[:2]
+        
+        # Create seed points in a grid (similar to matplotlib)
+        grid_spacing = max(h, w) // 20  # Adjust density as needed
+        seed_points = []
+        for y in range(grid_spacing//2, h, grid_spacing):
+            for x in range(grid_spacing//2, w, grid_spacing):
+                seed_points.append([x, y])
+        
+        # Trace streamlines from each seed point
+        for seed in seed_points:
+            streamline = []
+            x, y = float(seed[0]), float(seed[1])
+            
+            # Trace forward through the flow field
+            for _ in range(50):  # Max 50 steps per streamline
+                if x < 0 or x >= w-1 or y < 0 or y >= h-1:
+                    break
+                    
+                # Get flow at current position (bilinear interpolation)
+                ix, iy = int(x), int(y)
+                fx, fy = x - ix, y - iy
+                
+                # Bilinear interpolation of flow
+                if ix < w-1 and iy < h-1:
+                    u00 = flow[iy, ix, 0]
+                    u10 = flow[iy, ix+1, 0]
+                    u01 = flow[iy+1, ix, 0]
+                    u11 = flow[iy+1, ix+1, 0]
+                    u = (1-fx)*(1-fy)*u00 + fx*(1-fy)*u10 + (1-fx)*fy*u01 + fx*fy*u11
+                    
+                    v00 = flow[iy, ix, 1]
+                    v10 = flow[iy, ix+1, 1]
+                    v01 = flow[iy+1, ix, 1]
+                    v11 = flow[iy+1, ix+1, 1]
+                    v = (1-fx)*(1-fy)*v00 + fx*(1-fy)*v10 + (1-fx)*fy*v01 + fx*fy*v11
+                else:
+                    u = flow[iy, ix, 0]
+                    v = flow[iy, ix, 1]
+                
+                # Scale the step
+                step_size = 0.5 / scale
+                
+                # Add point to streamline
+                streamline.append((int(x), int(y)))
+                
+                # Move to next position
+                x += u * step_size
+                y += v * step_size
+                
+                # Stop if displacement is too small
+                if abs(u) < 0.1 and abs(v) < 0.1:
+                    break
+            
+            # Draw streamline if it has enough points
+            if len(streamline) > 2:
+                points = np.array(streamline, dtype=np.int32)
+                cv2.polylines(result, [points], False, streamline_color, 1, cv2.LINE_AA)
     
     return result
 
 
 def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, 
                         downsample: float = 0.03, show_streamlines: bool = True,
-                        backend: str = "matplotlib", return_array: bool = True) -> np.ndarray:
+                        backend: str = "matplotlib", return_array: bool = True,
+                        quiver_color: Tuple[int, int, int] = (255, 255, 255),
+                        streamline_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
     """
     Create quiver visualization of displacement field overlaid on image.
     Automatically detects number of channels and applies appropriate mapping.
@@ -391,9 +457,11 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         w: Displacement field with shape (H, W, 2)
         scale: Scale factor for quiver arrows
         downsample: Downsampling factor for quiver display (default 0.03)
-        show_streamlines: Whether to show streamlines (only for matplotlib backend)
+        show_streamlines: Whether to show streamlines
         backend: Visualization backend - "matplotlib" or "opencv"
         return_array: If True, return numpy array; if False, display plot
+        quiver_color: RGB color for quiver arrows (default white)
+        streamline_color: RGB color for streamlines (default black)
         
     Returns:
         Visualization image as numpy array if return_array=True
@@ -413,7 +481,8 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
     
     # Use OpenCV backend if specified
     if backend == "opencv":
-        return _quiver_visualization_opencv(img, w, scale, downsample, show_streamlines)
+        return _quiver_visualization_opencv(img, w, scale, downsample, show_streamlines, 
+                                           quiver_color, streamline_color)
     
     # Otherwise use matplotlib backend
     # Ensure image is 3D
@@ -472,12 +541,14 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         seed_points = np.column_stack([X_seeds.ravel(), Y_seeds.ravel()])
 
         # Add streamlines with explicit seed points
+        # Convert RGB color tuple to matplotlib color (0-1 range)
+        stream_color = tuple(c/255.0 for c in streamline_color)
         try:
             ax.streamplot(x, y, w_small[:, :, 0], w_small[:, :, 1], 
-                         start_points=seed_points, color='black', alpha=0.75, 
-                         density=1.0, linewidth=1, arrowsize=0)
-        except:
-            pass  # Skip streamlines if they fail
+                         start_points=seed_points, color=stream_color,
+                         density=1.0, linewidth=1, arrowsize=1.5)
+        except Exception as e:
+            print(f"Warning: Streamlines failed to render: {e}")
 
     # Remove edge points for quiver
     if len(x) > 2 and len(y) > 2:
@@ -489,12 +560,18 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         X_quiv, Y_quiv = np.meshgrid(x_quiv, y_quiv)
 
         # Add quiver plot
+        # Convert RGB color tuple to matplotlib color (0-1 range)
+        quiv_color = tuple(c/255.0 for c in quiver_color)
         ax.quiver(X_quiv, Y_quiv, w_quiv[:, :, 0], w_quiv[:, :, 1], scale_units='xy', scale=1.0 / scale, width=0.003,
-                  color='white', alpha=0.9)
+                  color=quiv_color, alpha=0.9)
 
     ax.set_xlim(0, w_width)
     ax.set_ylim(h, 0)
     ax.axis('off')
+    
+    # Remove padding/margins
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    ax.margins(0, 0)
 
     if return_array:
         # Convert to array

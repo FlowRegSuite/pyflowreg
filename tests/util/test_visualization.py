@@ -446,6 +446,37 @@ class TestQuiverVisualization:
         # Should handle small images gracefully
         result = quiver_visualization(img, flow, return_array=True)
         assert result.shape == (H, W, 3)
+    
+    def test_quiver_visualization_custom_colors(self):
+        """Test custom colors for quivers and streamlines."""
+        H, W = 64, 64
+        img = np.random.rand(H, W, 2).astype(np.float32)
+        
+        # Create circular flow
+        Y, X = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+        u = -(Y - H/2) * 0.3
+        v = (X - W/2) * 0.3
+        flow = np.stack([u, v], axis=-1).astype(np.float32)
+        
+        # Test matplotlib backend with custom colors
+        result_matplotlib = quiver_visualization(
+            img, flow, 
+            backend="matplotlib",
+            quiver_color=(255, 0, 0),  # Red quivers
+            streamline_color=(0, 0, 255),  # Blue streamlines
+            show_streamlines=True
+        )
+        assert result_matplotlib.shape == (H, W, 3)
+        
+        # Test OpenCV backend with custom colors
+        result_opencv = quiver_visualization(
+            img, flow, 
+            backend="opencv",
+            quiver_color=(0, 255, 0),  # Green quivers
+            streamline_color=(255, 0, 0),  # Red streamlines
+            show_streamlines=True
+        )
+        assert result_opencv.shape == (H, W, 3)
 
 
 class TestFlowToColor:
