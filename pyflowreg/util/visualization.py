@@ -393,12 +393,12 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
         # Scale density based on image size for better visual results
         base_size = 500  # Reference image size
         size_factor = np.sqrt((h * w) / (base_size * base_size))
-        density = max(0.5, min(2.0, size_factor))  # Clamp between 0.5 and 2.0
-        grid_nx = int(30 * density)
-        grid_ny = int(30 * density)
-        cell_size_x = max(1, w // grid_nx)
-        cell_size_y = max(1, h // grid_ny)
-        visited_grid = np.zeros((grid_ny + 1, grid_nx + 1), dtype=bool)
+        density = max(1.5, min(5.0, size_factor))  # Clamp between 0.5 and 2.0
+        grid_nx = max(2, int(30 * density))
+        grid_ny = max(2, int(30 * density))
+        cell_size_x = max(1, int(np.ceil(w / grid_nx)))
+        cell_size_y = max(1, int(np.ceil(h / grid_ny)))
+        visited_grid = np.zeros((grid_ny, grid_nx), dtype=bool)
         
         # Create seed points in a grid (similar to matplotlib)
         # Use finer spacing for seed points to get more streamlines
@@ -412,75 +412,65 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
         
         # Trace streamlines from each seed point
         for seed in seed_points:
-            streamline = []
-            x, y = float(seed[0]), float(seed[1])
-            
-            # Check if starting cell is already visited
-            cell_x, cell_y = int(x // cell_size_x), int(y // cell_size_y)
-            if cell_x < visited_grid.shape[1] and cell_y < visited_grid.shape[0]:
+            for direction in (1.0, -1.0):
+                streamline = []
+                x, y = float(seed[0]), float(seed[1])
+
+                cell_x = min(grid_nx - 1, int(x // cell_size_x))
+                cell_y = min(grid_ny - 1, int(y // cell_size_y))
                 if visited_grid[cell_y, cell_x]:
-                    continue  # Skip if cell already has a streamline
-            
-            # Trace forward through the flow field
-            for _ in range(50):  # Max 50 steps per streamline
-                if x < 0 or x >= w-1 or y < 0 or y >= h-1:
-                    break
-                    
-                # Mark current cell as visited
-                cell_x, cell_y = int(x // cell_size_x), int(y // cell_size_y)
-                if cell_x < visited_grid.shape[1] and cell_y < visited_grid.shape[0]:
-                    if visited_grid[cell_y, cell_x]:
-                        break  # Stop if entering an already visited cell
-                    visited_grid[cell_y, cell_x] = True
-                    
-                # Get flow at current position (bilinear interpolation on smoothed field)
-                ix, iy = int(x), int(y)
-                fx, fy = x - ix, y - iy
-                
-                # Bilinear interpolation of smoothed flow
-                if ix < w-1 and iy < h-1:
-                    u00 = flow_smooth[iy, ix, 0]
-                    u10 = flow_smooth[iy, ix+1, 0]
-                    u01 = flow_smooth[iy+1, ix, 0]
-                    u11 = flow_smooth[iy+1, ix+1, 0]
-                    u = (1-fx)*(1-fy)*u00 + fx*(1-fy)*u10 + (1-fx)*fy*u01 + fx*fy*u11
-                    
-                    v00 = flow_smooth[iy, ix, 1]
-                    v10 = flow_smooth[iy, ix+1, 1]
-                    v01 = flow_smooth[iy+1, ix, 1]
-                    v11 = flow_smooth[iy+1, ix+1, 1]
-                    v = (1-fx)*(1-fy)*v00 + fx*(1-fy)*v10 + (1-fx)*fy*v01 + fx*fy*v11
-                else:
-                    u = flow_smooth[iy, ix, 0]
-                    v = flow_smooth[iy, ix, 1]
-                
-                # Scale the step
-                step_size = 0.5 / scale
-                
-                # Add point to streamline
-                streamline.append((int(x), int(y)))
-                
-                # Move to next position
-                x += u * step_size
-                y += v * step_size
-                
-                # Stop if displacement is too small
-                if abs(u) < 0.1 and abs(v) < 0.1:
-                    break
-            
-            # Draw streamline if it has enough points
-            if len(streamline) > 3:
-                # Apply light smoothing to streamline path for better aesthetics
-                points = np.array(streamline, dtype=np.float32)
-                if len(points) > 5:
-                    # Simple moving average smoothing (very light)
-                    smoothed = np.copy(points)
-                    for i in range(1, len(points)-1):
-                        smoothed[i] = 0.5 * points[i] + 0.25 * points[i-1] + 0.25 * points[i+1]
-                    points = smoothed.astype(np.int32)
-                else:
-                    points = points.astype(np.int32)
-                cv2.polylines(result, [points], False, streamline_color, 1, cv2.LINE_AA)
+                    if direction == 1.0:
+                        continue
+                    else:
+                        break
+                visited_grid[cell_y, cell_x] = True
+                cur_cx, cur_cy = cell_x, cell_y
+
+                for _ in range(200):
+                    if x < 0 or x >= w - 1 or y < 0 or y >= h - 1:
+                        break
+
+                    ix, iy = int(x), int(y)
+                    fx, fy = x - ix, y - iy
+
+                    if ix < w - 1 and iy < h - 1:
+                        u00 = flow_smooth[iy, ix, 0];
+                        u10 = flow_smooth[iy, ix + 1, 0]
+                        u01 = flow_smooth[iy + 1, ix, 0];
+                        u11 = flow_smooth[iy + 1, ix + 1, 0]
+                        u = (1 - fx) * (1 - fy) * u00 + fx * (1 - fy) * u10 + (1 - fx) * fy * u01 + fx * fy * u11
+
+                        v00 = flow_smooth[iy, ix, 1];
+                        v10 = flow_smooth[iy, ix + 1, 1]
+                        v01 = flow_smooth[iy + 1, ix, 1];
+                        v11 = flow_smooth[iy + 1, ix + 1, 1]
+                        v = (1 - fx) * (1 - fy) * v00 + fx * (1 - fy) * v10 + (1 - fx) * fy * v01 + fx * fy * v11
+                    else:
+                        u = flow_smooth[iy, ix, 0];
+                        v = flow_smooth[iy, ix, 1]
+
+                    step_size = 0.35 * min(cell_size_x, cell_size_y)
+                    nx, ny = x + direction * u * step_size, y + direction * v * step_size
+                    if nx < 0 or nx >= w - 1 or ny < 0 or ny >= h - 1:
+                        break
+
+                    next_cx = min(grid_nx - 1, int(nx // cell_size_x))
+                    next_cy = min(grid_ny - 1, int(ny // cell_size_y))
+                    if (next_cx, next_cy) != (cur_cx, cur_cy):
+                        if visited_grid[next_cy, next_cx]:
+                            break
+                        visited_grid[next_cy, next_cx] = True
+                        cur_cx, cur_cy = next_cx, next_cy
+
+                    streamline.append((int(x), int(y)))
+                    x, y = nx, ny
+
+                    if abs(u) < 0.02 and abs(v) < 0.02:
+                        break
+
+                if len(streamline) > 3:
+                    pts = np.asarray(streamline, dtype=np.int32)
+                    cv2.polylines(result, [pts], False, streamline_color, 1, cv2.LINE_AA)
     
     return result
 
