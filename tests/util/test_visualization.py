@@ -479,6 +479,64 @@ class TestQuiverVisualization:
         assert result_opencv.shape == (H, W, 3)
 
 
+    def test_quiver_visualization_adaptive_density(self):
+        """Test that streamline density adapts to different image sizes."""
+        def create_circular_flow(h, w):
+            """Create a circular flow pattern for testing."""
+            flow = np.zeros((h, w, 2), dtype=np.float32)
+            center_x, center_y = w // 2, h // 2
+            
+            for y in range(h):
+                for x in range(w):
+                    dx = x - center_x
+                    dy = y - center_y
+                    r = np.sqrt(dx**2 + dy**2)
+                    if r > 0 and r < min(h, w) * 0.4:
+                        # Tangential flow (counter-clockwise rotation)
+                        flow[y, x, 0] = -dy / r * 5  # U component
+                        flow[y, x, 1] = dx / r * 5   # V component
+            return flow
+        
+        # Test different image sizes
+        sizes = [(100, 100), (200, 200), (500, 500)]
+        
+        for h, w in sizes:
+            # Create test image
+            img = np.zeros((h, w), dtype=np.uint8)
+            img[h//4:3*h//4, w//4:3*w//4] = 255  # White square in center
+            
+            # Create flow pattern
+            flow = create_circular_flow(h, w)
+            
+            # Test OpenCV backend with streamlines
+            result_opencv = quiver_visualization(
+                img, flow,
+                scale=2.0, 
+                downsample=0.1,
+                backend="opencv",
+                show_streamlines=True,
+                quiver_color=(255, 0, 0),  # Red quivers
+                streamline_color=(0, 255, 0)  # Green streamlines
+            )
+            
+            assert result_opencv.shape == (h, w, 3)
+            assert result_opencv.dtype == np.uint8
+            
+            # Test matplotlib backend
+            result_matplotlib = quiver_visualization(
+                img, flow,
+                scale=2.0,
+                downsample=0.1, 
+                backend="matplotlib",
+                show_streamlines=True,
+                quiver_color=(255, 0, 0),
+                streamline_color=(0, 255, 0)
+            )
+            
+            assert result_matplotlib.shape == (h, w, 3)
+            assert result_matplotlib.dtype == np.uint8
+
+
 class TestFlowToColor:
     """Test flow_to_color function."""
     

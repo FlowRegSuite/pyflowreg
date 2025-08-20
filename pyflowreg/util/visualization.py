@@ -383,11 +383,31 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
         # We'll trace particles through the flow field
         h, w = flow.shape[:2]
         
+        # Apply light Gaussian smoothing to flow field for smoother streamlines
+        # Very small kernel to maintain accuracy while reducing noise
+        flow_smooth = cv2.GaussianBlur(flow, (3, 3), 0.5)
+        
+        # Create density grid to track visited cells (similar to matplotlib)
+        # This prevents overlapping streamlines
+        # Match matplotlib's approach: 30x30 grid at density=1
+        # Scale density based on image size for better visual results
+        base_size = 500  # Reference image size
+        size_factor = np.sqrt((h * w) / (base_size * base_size))
+        density = max(0.5, min(2.0, size_factor))  # Clamp between 0.5 and 2.0
+        grid_nx = int(30 * density)
+        grid_ny = int(30 * density)
+        cell_size_x = max(1, w // grid_nx)
+        cell_size_y = max(1, h // grid_ny)
+        visited_grid = np.zeros((grid_ny + 1, grid_nx + 1), dtype=bool)
+        
         # Create seed points in a grid (similar to matplotlib)
-        grid_spacing = max(h, w) // 20  # Adjust density as needed
+        # Use finer spacing for seed points to get more streamlines
+        # Seed spacing should be finer than the density grid
+        seed_spacing_x = max(2, cell_size_x // 2)
+        seed_spacing_y = max(2, cell_size_y // 2)
         seed_points = []
-        for y in range(grid_spacing//2, h, grid_spacing):
-            for x in range(grid_spacing//2, w, grid_spacing):
+        for y in range(seed_spacing_y//2, h, seed_spacing_y):
+            for x in range(seed_spacing_x//2, w, seed_spacing_x):
                 seed_points.append([x, y])
         
         # Trace streamlines from each seed point
@@ -395,31 +415,44 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
             streamline = []
             x, y = float(seed[0]), float(seed[1])
             
+            # Check if starting cell is already visited
+            cell_x, cell_y = int(x // cell_size_x), int(y // cell_size_y)
+            if cell_x < visited_grid.shape[1] and cell_y < visited_grid.shape[0]:
+                if visited_grid[cell_y, cell_x]:
+                    continue  # Skip if cell already has a streamline
+            
             # Trace forward through the flow field
             for _ in range(50):  # Max 50 steps per streamline
                 if x < 0 or x >= w-1 or y < 0 or y >= h-1:
                     break
                     
-                # Get flow at current position (bilinear interpolation)
+                # Mark current cell as visited
+                cell_x, cell_y = int(x // cell_size_x), int(y // cell_size_y)
+                if cell_x < visited_grid.shape[1] and cell_y < visited_grid.shape[0]:
+                    if visited_grid[cell_y, cell_x]:
+                        break  # Stop if entering an already visited cell
+                    visited_grid[cell_y, cell_x] = True
+                    
+                # Get flow at current position (bilinear interpolation on smoothed field)
                 ix, iy = int(x), int(y)
                 fx, fy = x - ix, y - iy
                 
-                # Bilinear interpolation of flow
+                # Bilinear interpolation of smoothed flow
                 if ix < w-1 and iy < h-1:
-                    u00 = flow[iy, ix, 0]
-                    u10 = flow[iy, ix+1, 0]
-                    u01 = flow[iy+1, ix, 0]
-                    u11 = flow[iy+1, ix+1, 0]
+                    u00 = flow_smooth[iy, ix, 0]
+                    u10 = flow_smooth[iy, ix+1, 0]
+                    u01 = flow_smooth[iy+1, ix, 0]
+                    u11 = flow_smooth[iy+1, ix+1, 0]
                     u = (1-fx)*(1-fy)*u00 + fx*(1-fy)*u10 + (1-fx)*fy*u01 + fx*fy*u11
                     
-                    v00 = flow[iy, ix, 1]
-                    v10 = flow[iy, ix+1, 1]
-                    v01 = flow[iy+1, ix, 1]
-                    v11 = flow[iy+1, ix+1, 1]
+                    v00 = flow_smooth[iy, ix, 1]
+                    v10 = flow_smooth[iy, ix+1, 1]
+                    v01 = flow_smooth[iy+1, ix, 1]
+                    v11 = flow_smooth[iy+1, ix+1, 1]
                     v = (1-fx)*(1-fy)*v00 + fx*(1-fy)*v10 + (1-fx)*fy*v01 + fx*fy*v11
                 else:
-                    u = flow[iy, ix, 0]
-                    v = flow[iy, ix, 1]
+                    u = flow_smooth[iy, ix, 0]
+                    v = flow_smooth[iy, ix, 1]
                 
                 # Scale the step
                 step_size = 0.5 / scale
@@ -436,8 +469,17 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
                     break
             
             # Draw streamline if it has enough points
-            if len(streamline) > 2:
-                points = np.array(streamline, dtype=np.int32)
+            if len(streamline) > 3:
+                # Apply light smoothing to streamline path for better aesthetics
+                points = np.array(streamline, dtype=np.float32)
+                if len(points) > 5:
+                    # Simple moving average smoothing (very light)
+                    smoothed = np.copy(points)
+                    for i in range(1, len(points)-1):
+                        smoothed[i] = 0.5 * points[i] + 0.25 * points[i-1] + 0.25 * points[i+1]
+                    points = smoothed.astype(np.int32)
+                else:
+                    points = points.astype(np.int32)
                 cv2.polylines(result, [points], False, streamline_color, 1, cv2.LINE_AA)
     
     return result
@@ -544,7 +586,9 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         # Convert RGB color tuple to matplotlib color (0-1 range)
         stream_color = tuple(c/255.0 for c in streamline_color)
         try:
-            ax.streamplot(x, y, w_small[:, :, 0], w_small[:, :, 1], 
+            # Note: Negate V component because image coordinates have y increasing downward
+            # while matplotlib display has y increasing upward (due to extent and ylim settings)
+            ax.streamplot(x, y, w_small[:, :, 0], w_small[:, :, 1],
                          start_points=seed_points, color=stream_color,
                          density=1.0, linewidth=1, arrowsize=1.5)
         except Exception as e:
@@ -562,7 +606,8 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         # Add quiver plot
         # Convert RGB color tuple to matplotlib color (0-1 range)
         quiv_color = tuple(c/255.0 for c in quiver_color)
-        ax.quiver(X_quiv, Y_quiv, w_quiv[:, :, 0], w_quiv[:, :, 1], scale_units='xy', scale=1.0 / scale, width=0.003,
+        # Note: Negate V component to match image coordinate system
+        ax.quiver(X_quiv, Y_quiv, w_quiv[:, :, 0], -w_quiv[:, :, 1], scale_units='xy', scale=1.0 / scale, width=0.003,
                   color=quiv_color, alpha=0.9)
 
     ax.set_xlim(0, w_width)
