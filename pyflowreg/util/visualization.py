@@ -1,9 +1,19 @@
 from typing import Optional, Tuple
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.decomposition import PCA
+
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_SUPPORTED = True
+except ImportError:
+    MATPLOTLIB_SUPPORTED = False
+
+try:
+    from sklearn.decomposition import PCA
+    SKLEARN_SUPPORTED = True
+except ImportError:
+    SKLEARN_SUPPORTED = False
 
 
 def color_map_numpy_2ch(img_in: np.ndarray, scaling_left: Optional[Tuple[float, float]] = None,
@@ -246,6 +256,9 @@ def multispectral_mapping(img: np.ndarray) -> np.ndarray:
 
     else:
         # More than 3 bands - use PCA to reduce to 3 components
+        if not SKLEARN_SUPPORTED:
+            raise ImportError("Multispectral mapping with >3 channels requires 'scikit-learn' library")
+            
         # Reshape for PCA
         img_reshaped = img.reshape(m * n, n_bands)
 
@@ -274,7 +287,12 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, ret
         
     Returns:
         Visualization image as numpy array if return_array=True
+    
+    Raises:
+        ImportError: If matplotlib is not available
     """
+    if not MATPLOTLIB_SUPPORTED:
+        raise ImportError("Quiver visualization requires 'matplotlib' library")
     # Ensure image is 3D
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
