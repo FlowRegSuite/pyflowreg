@@ -274,7 +274,114 @@ def multispectral_mapping(img: np.ndarray) -> np.ndarray:
     return np.clip(rgb, 0, 1)
 
 
-def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, return_array: bool = True) -> np.ndarray:
+def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float = 1.0, 
+                                 downsample: float = 0.03, show_streamlines: bool = True) -> np.ndarray:
+    """
+    Create quiver visualization using OpenCV backend (no matplotlib required).
+    
+    Args:
+        img: Input image (H, W) or (H, W, C)
+        flow: Displacement field with shape (H, W, 2)
+        scale: Scale factor for quiver arrows
+        downsample: Downsampling factor for quiver display
+        show_streamlines: Whether to show streamlines (currently not supported in OpenCV)
+        
+    Returns:
+        Visualization image as numpy array with shape (H, W, 3)
+    """
+    # Ensure correct shapes
+    if img.ndim == 2:
+        img = img[:, :, np.newaxis]
+        
+    h, w, n_channels = img.shape
+    
+    # Prepare background image based on number of channels
+    if n_channels == 1:
+        # Grayscale to RGB
+        img_rgb = np.stack([img[:, :, 0]] * 3, axis=-1)
+    elif n_channels == 2:
+        # Use get_visualization for 2-channel
+        img_rgb = get_visualization(img[:, :, 0], img[:, :, 1])
+    elif n_channels == 3:
+        img_rgb = img.copy()
+    else:
+        # Use first 3 channels or multispectral mapping
+        if n_channels > 3:
+            # For >3 channels, could use multispectral_mapping but that requires sklearn
+            # So just use first 3 channels as fallback
+            img_rgb = img[:, :, :3].copy()
+        else:
+            img_rgb = multispectral_mapping(img)
+            
+    # Normalize to 0-255 range
+    if img_rgb.max() <= 1.0:
+        img_rgb = (img_rgb * 255).astype(np.uint8)
+    else:
+        img_rgb = np.clip(img_rgb, 0, 255).astype(np.uint8)
+        
+    # Create a copy for drawing
+    result = img_rgb.copy()
+    
+    # Downsample for quiver
+    new_h = max(2, int(h * downsample))
+    new_w = max(2, int(w * downsample))
+    
+    # Create sampling grid
+    y_indices = np.linspace(0, h-1, new_h, dtype=int)
+    x_indices = np.linspace(0, w-1, new_w, dtype=int)
+    
+    # Draw arrows
+    arrow_scale = 1.0 / scale
+    
+    # Remove edge points (similar to matplotlib version)
+    if len(y_indices) > 2 and len(x_indices) > 2:
+        y_indices = y_indices[1:-1]
+        x_indices = x_indices[1:-1]
+    
+    for y in y_indices:
+        for x in x_indices:
+            u = flow[y, x, 0] * arrow_scale
+            v = flow[y, x, 1] * arrow_scale
+            
+            # Skip very small displacements
+            if abs(u) < 0.5 and abs(v) < 0.5:
+                continue
+                
+            # Draw arrow
+            start_point = (int(x), int(y))
+            end_point = (int(x + u), int(y + v))
+            
+            # Draw black outline for visibility
+            cv2.arrowedLine(
+                result,
+                start_point,
+                end_point,
+                color=(0, 0, 0),  # Black outline
+                thickness=2,
+                tipLength=0.2,
+                line_type=cv2.LINE_AA
+            )
+            
+            # Draw white arrow on top
+            cv2.arrowedLine(
+                result,
+                start_point,
+                end_point,
+                color=(255, 255, 255),  # White center
+                thickness=1,
+                tipLength=0.2,
+                line_type=cv2.LINE_AA
+            )
+            
+    # Note: Streamlines are not implemented in OpenCV backend yet
+    # Could potentially use cv2.polylines to approximate streamlines in future
+    
+    return result
+
+
+def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, 
+                        downsample: float = 0.03, show_streamlines: bool = True,
+                        backend: str = "matplotlib", return_array: bool = True) -> np.ndarray:
     """
     Create quiver visualization of displacement field overlaid on image.
     Automatically detects number of channels and applies appropriate mapping.
@@ -283,16 +390,32 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, ret
         img: Input image (H, W) or (H, W, C)
         w: Displacement field with shape (H, W, 2)
         scale: Scale factor for quiver arrows
+        downsample: Downsampling factor for quiver display (default 0.03)
+        show_streamlines: Whether to show streamlines (only for matplotlib backend)
+        backend: Visualization backend - "matplotlib" or "opencv"
         return_array: If True, return numpy array; if False, display plot
         
     Returns:
         Visualization image as numpy array if return_array=True
     
     Raises:
-        ImportError: If matplotlib is not available
+        ImportError: If matplotlib is not available when using matplotlib backend
+        ValueError: If invalid backend is specified
     """
-    if not MATPLOTLIB_SUPPORTED:
-        raise ImportError("Quiver visualization requires 'matplotlib' library")
+    if backend not in ["matplotlib", "opencv"]:
+        raise ValueError(f"Backend must be 'matplotlib' or 'opencv', got '{backend}'")
+    
+    if backend == "matplotlib" and not MATPLOTLIB_SUPPORTED:
+        raise ImportError("Matplotlib backend requires 'matplotlib' library")
+    # Ensure displacement field has correct shape
+    if w.ndim != 3 or w.shape[2] != 2:
+        raise ValueError(f"Displacement field must have shape (H, W, 2), got {w.shape}")
+    
+    # Use OpenCV backend if specified
+    if backend == "opencv":
+        return _quiver_visualization_opencv(img, w, scale, downsample, show_streamlines)
+    
+    # Otherwise use matplotlib backend
     # Ensure image is 3D
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
@@ -324,14 +447,9 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, ret
         print(f"Using multispectral mapping for {n_channels} channels")
         img_rgb = multispectral_mapping(img)
 
-    # Ensure displacement field has correct shape
-    if w.ndim != 3 or w.shape[2] != 2:
-        raise ValueError(f"Displacement field must have shape (H, W, 2), got {w.shape}")
-
     # Downsample displacement field for visualization
-    scale_factor = 0.03
-    new_h = max(2, int(h * scale_factor))
-    new_w = max(2, int(w_width * scale_factor))
+    new_h = max(2, int(h * downsample))
+    new_w = max(2, int(w_width * downsample))
     w_small = cv2.resize(w, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
     # Create figure
@@ -346,7 +464,7 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, ret
     y = np.linspace(0, h, h_small)
 
     # Adjust grid for streamlines (add half spacing)
-    if len(x) > 1 and len(y) > 1:
+    if show_streamlines and len(x) > 1 and len(y) > 1:
         dx = (x[1] - x[0]) * 0.5
         dy = (y[1] - y[0]) * 0.5
         # Create seed points at half-grid offsets (matching MATLAB behavior)

@@ -368,6 +368,66 @@ class TestQuiverVisualization:
         assert result1.shape == (H, W, 3)
         assert result2.shape == (H, W, 3)
     
+    def test_quiver_visualization_opencv_backend(self):
+        """Test quiver visualization with OpenCV backend."""
+        H, W = 40, 40
+        img = np.random.rand(H, W, 2).astype(np.float32)
+        flow = np.random.randn(H, W, 2).astype(np.float32) * 2
+        
+        # Test with OpenCV backend
+        result = quiver_visualization(img, flow, backend="opencv")
+        assert result.shape == (H, W, 3)
+        assert result.dtype == np.uint8
+        
+    def test_quiver_visualization_backends_comparison(self):
+        """Test that both backends produce valid output."""
+        H, W = 32, 32
+        img = np.random.rand(H, W, 2).astype(np.float32)
+        flow = np.random.randn(H, W, 2).astype(np.float32) * 2
+        
+        # Test OpenCV backend
+        result_cv = quiver_visualization(img, flow, backend="opencv", scale=2.0)
+        assert result_cv.shape == (H, W, 3)
+        assert result_cv.dtype == np.uint8
+        
+        # Test matplotlib backend  
+        result_mpl = quiver_visualization(img, flow, backend="matplotlib", scale=2.0)
+        assert result_mpl.shape == (H, W, 3)
+        assert result_mpl.dtype == np.uint8
+        
+    def test_quiver_visualization_downsample_parameter(self):
+        """Test custom downsample parameter."""
+        H, W = 64, 64
+        img = np.random.rand(H, W, 2).astype(np.float32)
+        flow = np.random.randn(H, W, 2).astype(np.float32) * 2
+        
+        # Test with different downsample values
+        result1 = quiver_visualization(img, flow, downsample=0.05, backend="opencv")
+        result2 = quiver_visualization(img, flow, downsample=0.01, backend="opencv") 
+        
+        # Both should produce valid output
+        assert result1.shape == (H, W, 3)
+        assert result2.shape == (H, W, 3)
+        
+    def test_quiver_visualization_no_streamlines(self):
+        """Test disabling streamlines in matplotlib backend."""
+        H, W = 32, 32
+        img = np.random.rand(H, W, 2).astype(np.float32)
+        flow = np.random.randn(H, W, 2).astype(np.float32) * 2
+        
+        result = quiver_visualization(img, flow, show_streamlines=False, backend="matplotlib")
+        assert result.shape == (H, W, 3)
+        assert result.dtype == np.uint8
+        
+    def test_quiver_visualization_invalid_backend(self):
+        """Test error handling for invalid backend."""
+        H, W = 32, 32
+        img = np.random.rand(H, W, 2).astype(np.float32)
+        flow = np.random.randn(H, W, 2).astype(np.float32)
+        
+        with pytest.raises(ValueError, match="Backend must be"):
+            quiver_visualization(img, flow, backend="invalid")
+    
     def test_quiver_visualization_invalid_flow_shape(self):
         """Test error handling for invalid flow field shape."""
         H, W = 32, 32
