@@ -349,11 +349,15 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, ret
     if len(x) > 1 and len(y) > 1:
         dx = (x[1] - x[0]) * 0.5
         dy = (y[1] - y[0]) * 0.5
-        X, Y = np.meshgrid(x + dx, y + dy)
+        # Create seed points at half-grid offsets (matching MATLAB behavior)
+        X_seeds, Y_seeds = np.meshgrid(x[:-1] + dx, y[:-1] + dy)
+        seed_points = np.column_stack([X_seeds.ravel(), Y_seeds.ravel()])
 
-        # Add streamlines
+        # Add streamlines with explicit seed points
         try:
-            ax.streamplot(x, y, w_small[:, :, 0], w_small[:, :, 1], color='black', alpha=0.75, density=1.5, linewidth=1)
+            ax.streamplot(x, y, w_small[:, :, 0], w_small[:, :, 1], 
+                         start_points=seed_points, color='black', alpha=0.75, 
+                         density=1.0, linewidth=1, arrowsize=0)
         except:
             pass  # Skip streamlines if they fail
 
