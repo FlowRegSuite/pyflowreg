@@ -44,6 +44,4 @@ vis = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["pyflowreg*"]
-exclude = ["tests*", "docs*", "examples*"]
+where = ["src"]
