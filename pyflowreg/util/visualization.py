@@ -335,7 +335,8 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
     x_indices = np.linspace(0, w-1, new_w, dtype=int)
     
     # Draw arrows
-    arrow_scale = 1.0 / scale
+    # Note: scale parameter increases arrow length (unlike matplotlib where it decreases)
+    arrow_scale = scale
     
     # Remove edge points (similar to matplotlib version)
     if len(y_indices) > 2 and len(x_indices) > 2:
@@ -553,8 +554,28 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
     new_w = max(2, int(w_width * downsample))
     w_small = cv2.resize(w, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # Create figure with aspect ratio matching the image
+    # Calculate figure size based on image aspect ratio
+    aspect_ratio = w_width / h
+    if aspect_ratio >= 1:
+        # Wide image: fix height, adjust width
+        fig_width = 10 * aspect_ratio
+        fig_height = 10
+    else:
+        # Tall image: fix width, adjust height
+        fig_width = 10
+        fig_height = 10 / aspect_ratio
+    
+    # Limit maximum figure size to avoid memory issues
+    max_size = 20
+    if fig_width > max_size:
+        fig_width = max_size
+        fig_height = max_size / aspect_ratio
+    if fig_height > max_size:
+        fig_height = max_size
+        fig_width = max_size * aspect_ratio
+    
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
     # Display image
     ax.imshow(img_rgb, extent=[0, w_width, h, 0])
