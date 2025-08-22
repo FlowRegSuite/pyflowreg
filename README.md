@@ -1,3 +1,11 @@
+## 🚧 Under Development
+
+This project is still in an **alpha stage**. Expect rapid changes, incomplete features, and possible breaking updates between releases. 
+
+- The API may evolve as we stabilize core functionality.  
+- Documentation and examples are incomplete.  
+- Feedback and bug reports are especially valuable at this stage.  
+
 # <img src="img/flowreglogo.png" alt="FlowReg logo" height="64"> PyFlowReg
 
 Python bindings & CLI for Flow-Registration - variational optical-flow motion correction for 2-photon (2P) microscopy videos and volumetric 3D scans.
@@ -15,7 +23,7 @@ Derived from the Flow-Registration toolbox for compensation and stabilization of
 
 ## Requirements
 
-This code requires python 3.10 and cuda 11.8 for the gpu version. 
+This code requires python 3.10. 
 
 Initialize the environment with
 
@@ -41,24 +49,33 @@ conda create --name pyflowreg python=3.10
 pip install pyflowreg
 ```
 
+To install the project with full visualization support, you can install the `napari` plugin:
+
+```bash
+pip install pyflowreg[vis]
+```
+
 ## Getting started
 
-This repository contains the demo scripts ```demos/jupiter.m``` and ```demos/jupiter_minimal_example.m``` which run out of the box and compensate the jitter in an amateur recording of a meteor impact on jupiter. The folder ```demos/examples``` contains examples that illustrate use cases of the toolbox and ```demos/reproduce_journal_results``` contains scripts that replicate the evaluations from our paper.
+This repository contains demo scripts under ```experiments``` and 
+demo notebooks under ```notebooks```. The demos with the jupiter sequence should run out of the box.
 
-The plugin supports most of the commonly used file types such as HDF5, tiff stacks and matlab mat files. To run the motion compensation, the options need to be defined into a ```OF_options``` object such as
+The plugin supports most of the commonly used file types such as HDF5, tiff stacks and matlab mat files. To run the motion compensation, the options need to be defined into a ```OF_options``` object.
+
+The python version of Flow-Registration aims at full MATLAB compatibility, any missing functionality should be reported as an issue. The API is designed to be similar to the original MATLAB code, with some adjustments for Python conventions.
 
 
 ## Dataset
 
-The dataset which we used for our evaluations is available as [2-Photon Movies with Motion Artifacts](https://www.datadryad.org).
+The dataset which we used for our evaluations is available as [2-Photon Movies with Motion Artifacts](https://drive.google.com/drive/folders/1fPdzQo5SiA-62k4eHF0ZaKJDt1vmTVed?usp=sharing).
 
 ## Citation
 
-Details on the method and video results can be found [here](https://www.snnu.uni-saarland.de/flow-registration/).
+Details on the original method and video results can be found [here](https://www.snnu.uni-saarland.de/flow-registration/).
 
 If you use parts of this code or the plugin for your work, please cite
 
-> P. Flotho, S. Nomura, M. Flotho, A. Keller and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos and 3D scans,” (in preparation), 2025. [doi:https://]()
+> “Pyflowreg,” (in preparation), 2025.
 
 
 and for Flow-Registration
