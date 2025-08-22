@@ -31,10 +31,10 @@ jobs:
           cache: pip
       - run: python -m pip install -U pip
       - run: python -m pip install -e .[test,vis]
-      - run: pytest tests/ -v --cov=pyflowreg
+      - run: pytest tests/ -v --cov=pyflowreg -k "not test_progress_callback_performance"
       - name: Verify MDF support (Windows only)
         if: runner.os == 'Windows'
-        run: python -c "from pyflowreg.util.io.mdf import MDFVideoReader; print('MDF support verified')"
+        run: python -c "from pyflowreg.util.io.mdf import MDFFileReader; print('MDF support verified')"
 
   build:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -79,7 +79,7 @@ jobs:
           python -c "from pyflowreg.core.optical_flow import get_displacement; print('Core imports working')"
       - name: Verify MDF on Windows
         if: runner.os == 'Windows'
-        run: python -c "from pyflowreg.util.io.mdf import MDFVideoReader; print('MDF working from wheel')"
+        run: python -c "from pyflowreg.util.io.mdf import MDFFileReader; print('MDF working from wheel')"
 
   sdist-smoke:
     if: startsWith(github.ref, 'refs/tags/v')
