@@ -1,0 +1,101 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e .
+      - run: python -m pip install pytest pytest-cov
+      - run: pytest tests/ -v --cov=pyflowreg
+      - name: Verify MDF support (Windows only)
+        if: runner.os == 'Windows'
+        run: |
+          python -c "from pyflowreg.util.io.mdf import MDFVideoReader; print('MDF support verified')"
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -U build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+  wheel-smoke:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install dist/*.whl
+      - run: |
+          python -c "import pyflowreg; print(f'PyFlowReg version: {pyflowreg.__version__}')"
+          python -c "from pyflowreg.core.optical_flow import get_displacement; print('Core imports working')"
+      - name: Verify MDF on Windows
+        if: runner.os == 'Windows'
+        run: python -c "from pyflowreg.util.io.mdf import MDFVideoReader; print('MDF working from wheel')"
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wheel-smoke]
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+      - name: Publish RCs to TestPyPI
+        if: contains(github.ref_name, 'rc')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+      - name: Publish to PyPI
+        if: "!contains(github.ref_name, 'rc')"
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
