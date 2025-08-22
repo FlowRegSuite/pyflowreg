@@ -1,3 +1,10 @@
+[![PyPI - Version](https://img.shields.io/pypi/v/pyflowreg)](https://pypi.org/project/pyflowreg/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyflowreg)](https://pypi.org/project/pyflowreg/)
+[![PyPI - License](https://img.shields.io/pypi/l/pyflowreg)](LICENSE)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/pyflowreg)](https://pypistats.org/packages/pyflowreg)
+[![GitHub Actions](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml)
+[![codecov](https://codecov.io/gh/FlowRegSuite/pyflowreg/branch/main/graph/badge.svg)](https://codecov.io/gh/FlowRegSuite/pyflowreg)
+
 ## 🚧 Under Development
 
 This project is still in an **alpha stage**. Expect rapid changes, incomplete features, and possible breaking updates between releases. 
