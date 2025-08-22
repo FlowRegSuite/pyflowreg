@@ -8,7 +8,7 @@ Derived from the Flow-Registration toolbox for compensation and stabilization of
 - Original Flow-Registration repo: https://github.com/FlowRegSuite/flow_registration
 - ImageJ/Fiji plugin: https://github.com/FlowRegSuite/flow_registration_IJ
 - Napari plugin: https://github.com/FlowRegSuite/napari-flowreg
-- MCP tools for LLM workflows: https://github.com/FlowRegSuite/pyflowreg-mcp
+
 
 ![Fig1](img/bg.jpg)
 
@@ -20,11 +20,19 @@ This code requires python 3.10 and cuda 11.8 for the gpu version.
 Initialize the environment with
 
 ```bash
-conda create --name raft2p python=3.10
-conda activate raft2p
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+conda create --name pyflowreg python=3.10
+conda activate pyflowreg
 pip install -r requirements.txt
 ```
+
+or on windows
+
+```bash
+pip install -r requirements.txt
+```
+
+to enable Sutter MDF file support.
+
 
 ## Installation via pip and conda
 

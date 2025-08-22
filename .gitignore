@@ -83,3 +83,5 @@ _skbuild
 
 *.egg-info
 /CLAUDE.md
+
+src/pyflowreg/_version.py

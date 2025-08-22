@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=80", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyflowreg"
-version = "0.0.0-alpha.1"
+dynamic = ["version"]
 description = "Variational optical-flow motion correction for 2-photon microscopy videos and 3D scans"
 readme = "README.md"
 authors = [
@@ -42,6 +42,14 @@ vis = [
     "matplotlib>=3.8.0",
     "scikit-learn>=1.5.0",
 ]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+version_file = "src/pyflowreg/_version.py"
+local_scheme = "no-local-version"
