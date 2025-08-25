@@ -93,10 +93,11 @@ def download_demo_data(demo_name: str, output_folder: Optional[Union[str, Path]]
         raise ValueError(f"Unknown demo data: {demo_name}. Available: {available}")
 
     if output_folder is None:
-        # Use the same data folder path as synth_evaluation.py
-        # Go up from pyflowreg/util to project root, then to data/
+        # Use the data folder at project root
+        # Go up from src/pyflowreg/util to project root, then to data/
         current_file = Path(__file__)
-        project_root = current_file.parent.parent.parent
+        # __file__ is in src/pyflowreg/util/, so go up 3 levels to get to project root
+        project_root = current_file.parent.parent.parent.parent
         output_folder = project_root / "data"
 
     url = DEMO_DATA_URLS[demo_name]

@@ -85,3 +85,5 @@ _skbuild
 /CLAUDE.md
 
 src/pyflowreg/_version.py
+
+jupiter_demo/*

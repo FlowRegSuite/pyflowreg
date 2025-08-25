@@ -43,58 +43,59 @@ def run(flow_params, f1, f2):
     return w
 
 
-# Download data to data/ folder (default location)
-data_file = download_demo_data("synth_frames.h5")
+if __name__ == "__main__":
+    # Download data to data/ folder (default location)
+    data_file = download_demo_data("synth_frames.h5")
 
-with h5py.File(data_file, "r") as f:
-    clean = f["clean"][:]
-    n35 = f["noisy35db"][:]
-    n30 = f["noisy30db"][:]
-    w_ref = np.moveaxis(f["w"][:], 0, -1)
-    w_ref = w_ref[..., ::-1]
+    with h5py.File(data_file, "r") as f:
+        clean = f["clean"][:]
+        n35 = f["noisy35db"][:]
+        n30 = f["noisy30db"][:]
+        w_ref = np.moveaxis(f["w"][:], 0, -1)
+        w_ref = w_ref[..., ::-1]
 
-datasets = [("clean", clean), ("noise35db", n35), ("noise30db", n30)]
-b = 25
+    datasets = [("clean", clean), ("noise35db", n35), ("noise30db", n30)]
+    b = 25
 
-cold_f1 = np.zeros((32, 32, 2), np.float32)
-pfr.get_displacement(cold_f1, cold_f1, alpha=(2, 2),
-            levels=50,
-            min_level=5,
-            iterations=50,
-            a_data=0.45,
-            a_smooth=1,
-            weight=np.array([0.6, 0.4])
-        )
+    cold_f1 = np.zeros((32, 32, 2), np.float32)
+    pfr.get_displacement(cold_f1, cold_f1, alpha=(2, 2),
+                levels=50,
+                min_level=5,
+                iterations=50,
+                a_data=0.45,
+                a_smooth=1,
+                weight=np.array([0.6, 0.4])
+            )
 
-base_params = dict(
-    alpha=(8, 8),
-    iterations=100,
-    a_data=0.45,
-    a_smooth=1.0,
-    weight=np.array([0.5, 0.5], np.float32),
-    levels=50,
-    eta=0.8,
-    update_lag=5,
-)
+    base_params = dict(
+        alpha=(8, 8),
+        iterations=100,
+        a_data=0.45,
+        a_smooth=1.0,
+        weight=np.array([0.5, 0.5], np.float32),
+        levels=50,
+        eta=0.8,
+        update_lag=5,
+    )
 
-for name, data in datasets:
-    data = gaussian_filter(data, (0.00001, 0.00001, 1, 1),
-                           truncate=4)
+    for name, data in datasets:
+        data = gaussian_filter(data, (0.00001, 0.00001, 1, 1),
+                               truncate=4)
 
-    f1, f2 = preprocess(data)
+        f1, f2 = preprocess(data)
 
-    w = run({**base_params, "min_level": 0}, f1, f2)
-    print(f"{epe(w_ref, w, b):.2f} for {name}, default, ch 1 + 2")
+        w = run({**base_params, "min_level": 0}, f1, f2)
+        print(f"{epe(w_ref, w, b):.2f} for {name}, default, ch 1 + 2")
 
-    w = run({**base_params, "min_level": 5}, f1, f2)
-    print(f"{epe(w_ref, w, b):.2f} for {name}, fast, ch 1 + 2")
+        w = run({**base_params, "min_level": 5}, f1, f2)
+        print(f"{epe(w_ref, w, b):.2f} for {name}, fast, ch 1 + 2")
 
-    for ch in (0, 1):
-        f1c = f1[..., ch : ch + 1]
-        f2c = f2[..., ch : ch + 1]
+        for ch in (0, 1):
+            f1c = f1[..., ch : ch + 1]
+            f2c = f2[..., ch : ch + 1]
 
-        w = run({**base_params, "min_level": 0}, f1c, f2c)
-        print(f"{epe(w_ref, w, b):.2f} for {name}, default, ch {ch+1}")
+            w = run({**base_params, "min_level": 0}, f1c, f2c)
+            print(f"{epe(w_ref, w, b):.2f} for {name}, default, ch {ch+1}")
 
-        w = run({**base_params, "min_level": 5}, f1c, f2c)
-        print(f"{epe(w_ref, w, b):.2f} for {name}, fast, ch {ch+1}")
+            w = run({**base_params, "min_level": 5}, f1c, f2c)
+            print(f"{epe(w_ref, w, b):.2f} for {name}, fast, ch {ch+1}")
