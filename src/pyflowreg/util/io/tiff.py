@@ -13,6 +13,7 @@ except ImportError:
 
 from pyflowreg.util.io._base import VideoReader, VideoWriter
 from pyflowreg.util.io._ds_io import DSFileReader, DSFileWriter
+from pyflowreg.util.io._scanimage import parse_scanimage_metadata, interpret_scanimage_dimensions
 
 
 class TIFFFileReader(VideoReader):
@@ -57,6 +58,11 @@ class TIFFFileReader(VideoReader):
         self._tiff_series = None
         self._sample_mode = False
         self._page_indices = None
+        
+        # ScanImage metadata
+        self._scanimage_metadata = None
+        self._is_scanimage = False
+        self._z_stack_info = None
 
         # Validate file
         if not os.path.isfile(file_path):
@@ -67,6 +73,9 @@ class TIFFFileReader(VideoReader):
         try:
             # Open with tifffile
             self._tiff_file = tifffile.TiffFile(self.file_path)
+            
+            # Check if it's a ScanImage file
+            self._check_scanimage_metadata()
 
             # Check if it's an ImageJ or OME-TIFF with series
             if len(self._tiff_file.series) > 0:
@@ -78,28 +87,95 @@ class TIFFFileReader(VideoReader):
 
         except Exception as e:
             raise IOError(f"Failed to open TIFF file: {e}")
+    
+    def _check_scanimage_metadata(self):
+        """Check if this is a ScanImage TIFF and parse metadata if so."""
+        try:
+            # First check if tifffile directly identifies it as ScanImage
+            if hasattr(self._tiff_file, 'is_scanimage'):
+                self._is_scanimage = self._tiff_file.is_scanimage
+            else:
+                self._is_scanimage = False
+            
+            # If it's ScanImage, parse detailed metadata
+            if self._is_scanimage:
+                # Try to get metadata from tifffile first
+                if hasattr(self._tiff_file, 'scanimage_metadata'):
+                    si_metadata = self._tiff_file.scanimage_metadata
+                    
+                    # Parse framesPerSlice and numSlices
+                    if 'SI' in si_metadata and 'hStackManager' in si_metadata['SI']:
+                        stack = si_metadata['SI']['hStackManager']
+                        slices = stack.get('actualNumSlices', stack.get('numSlices', 1))
+                        frames_per_slice = stack.get('framesPerSlice', 1)
+                        volumes = stack.get('actualNumVolumes', stack.get('numVolumes', 1))
+                        z_step = stack.get('stackZStepSize', stack.get('actualStackZStepSize', None))
+                        
+                        # Parse channel information
+                        channels_saved = 1
+                        if 'hChannels' in si_metadata['SI']:
+                            chan_info = si_metadata['SI']['hChannels']
+                            if 'channelSave' in chan_info:
+                                channels_saved = len(chan_info['channelSave'])
+                        
+                        # Check if we need to auto-deinterleave for ScanImage
+                        # ScanImage often stores channels as interleaved pages
+                        if channels_saved > 1 and self.deinterleave == 1:
+                            # Check if page count suggests interleaved channels
+                            expected_pages = slices * frames_per_slice * volumes * channels_saved
+                            actual_pages = len(self._tiff_file.pages)
+                            
+                            if actual_pages == expected_pages:
+                                print(f"ScanImage channel interleaving detected: auto-setting deinterleave={channels_saved}")
+                                self.deinterleave = channels_saved
+                        
+                        if slices > 1 or frames_per_slice > 1:
+                            self._z_stack_info = {
+                                'volumes': volumes,
+                                'slices_per_volume': slices,
+                                'frames_per_slice': frames_per_slice,
+                                'total_frames_flattened': slices * frames_per_slice * volumes,
+                                'z_step': z_step,
+                                'interpretation': 'z_stack',
+                                'channels_saved': channels_saved
+                            }
+                            print(f"ScanImage Z-stack detected from metadata:")
+                            print(f"  {slices} slices × {frames_per_slice} frames/slice × {volumes} volume(s)")
+                            print(f"  = {slices * frames_per_slice * volumes} total frames")
+                            print(f"  Channels: {channels_saved}")
+                            if z_step:
+                                print(f"  Z step: {z_step} µm")
+                else:
+                    # Fallback to parsing from file
+                    self._scanimage_metadata = parse_scanimage_metadata(self.file_path)
+                    
+                    if self._scanimage_metadata.get('is_scanimage'):
+                        slices = self._scanimage_metadata.get('slices_per_volume', 1)
+                        volumes = self._scanimage_metadata.get('volumes', 1)
+                        
+                        if slices > 1 or volumes > 1:
+                            self._z_stack_info = {
+                                'volumes': volumes,
+                                'slices_per_volume': slices,
+                                'total_frames_flattened': volumes * slices,
+                                'z_step': self._scanimage_metadata.get('z_step'),
+                                'interpretation': self._scanimage_metadata.get('interpretation', 'z_stack')
+                            }
+                            print(f"ScanImage Z-stack detected: {volumes} volume(s), {slices} slice(s) per volume")
+                            print(f"  Treating as {volumes * slices} individual frames for motion correction")
+                            
+        except Exception as e:
+            # If parsing fails, treat as regular TIFF
+            print(f"Warning: Error parsing ScanImage metadata: {e}")
+            self._is_scanimage = False
+            self._scanimage_metadata = None
 
     def _setup_from_series(self):
         """Setup reader from tifffile series (standard multi-page format)."""
         shape = self._tiff_series.shape
         axes = self._tiff_series.axes
 
-        # Parse axes to understand data layout
-        # Common patterns: 'TYX', 'TCYX', 'YXS', 'ZCYX'
-        if 'T' in axes:
-            # Time series
-            time_idx = axes.index('T')
-            self.frame_count = shape[time_idx]
-        elif 'Z' in axes:
-            # Z-stack treated as time
-            time_idx = axes.index('Z')
-            self.frame_count = shape[time_idx]
-        else:
-            # Single frame or special format
-            self.frame_count = len(self._tiff_file.pages)
-            time_idx = None
-
-        # Get spatial dimensions
+        # Get spatial dimensions first
         y_idx = axes.index('Y') if 'Y' in axes else 0
         x_idx = axes.index('X') if 'X' in axes else 1
         self.height = shape[y_idx]
@@ -116,9 +192,49 @@ class TIFFFileReader(VideoReader):
         else:
             self.n_channels = 1
 
-        # Apply deinterleaving if specified
+        # For ScanImage files with channels, auto-enable deinterleaving
+        # ScanImage stores multi-channel data as interleaved pages
+        if self._is_scanimage and 'C' in axes and shape[axes.index('C')] > 1:
+            if self.deinterleave == 1:  # Only auto-set if not manually specified
+                self.deinterleave = shape[axes.index('C')]
+                print(f"ScanImage multi-channel detected: auto-setting deinterleave={self.deinterleave}")
+                # When deinterleaving, we treat pages as interleaved channels
+                self.n_channels = self.deinterleave
+
+        # Handle frame count based on whether this is ScanImage with Z-stacks
+        if self._is_scanimage and self._z_stack_info:
+            # For ScanImage Z-stacks, flatten volumes * slices into frames
+            self.frame_count = self._z_stack_info['total_frames_flattened']
+        else:
+            # Standard TIFF handling - but check for ScanImage-style ZTCYX
+            # Common patterns: 'TYX', 'TCYX', 'YXS', 'ZCYX', 'ZTCYX'
+            if 'Z' in axes and 'T' in axes:
+                # Both Z and T present (like ScanImage ZTCYX)
+                z_idx = axes.index('Z')
+                t_idx = axes.index('T')
+                
+                # For ScanImage files, even without explicit metadata, 
+                # we should flatten Z*T as total frames
+                if self._is_scanimage:
+                    self.frame_count = shape[z_idx] * shape[t_idx]
+                    print(f"ScanImage ZTCYX detected: {shape[z_idx]} Z-slices × {shape[t_idx]} frames/slice = {self.frame_count} total frames")
+                else:
+                    # For non-ScanImage, T is primary time dimension
+                    self.frame_count = shape[t_idx]
+            elif 'T' in axes:
+                # Time series only
+                time_idx = axes.index('T')
+                self.frame_count = shape[time_idx]
+            elif 'Z' in axes:
+                # Z-stack only, treated as time
+                z_idx = axes.index('Z')
+                self.frame_count = shape[z_idx]
+            else:
+                # Single frame or special format
+                self.frame_count = len(self._tiff_file.pages)
+
+        # Apply deinterleaving to frame count if needed
         if self.deinterleave > 1:
-            self.n_channels = self.deinterleave
             self.frame_count = self.frame_count // self.deinterleave
 
         # Get data type
@@ -146,7 +262,12 @@ class TIFFFileReader(VideoReader):
                 self.width = first_page.imagewidth
         else:
             # Multi-page format
-            self.frame_count = len(pages)
+            # For ScanImage with Z-stacks, override frame count
+            if self._is_scanimage and self._z_stack_info:
+                self.frame_count = self._z_stack_info['total_frames_flattened']
+            else:
+                self.frame_count = len(pages)
+                
             self.height = first_page.imagelength
             self.width = first_page.imagewidth
 
@@ -327,8 +448,15 @@ class TIFFFileReader(VideoReader):
             "unbinned_shape": self.unbinned_shape,
             "dtype": str(self.dtype),
             "sample_mode": self._sample_mode,
-            "deinterleave": self.deinterleave
+            "deinterleave": self.deinterleave,
+            "is_scanimage": self._is_scanimage
         }
+        
+        # Add ScanImage Z-stack information if present
+        if self._z_stack_info:
+            metadata['z_stack_info'] = self._z_stack_info
+            metadata['scanimage_version'] = self._scanimage_metadata.get('version')
+            metadata['z_step_microns'] = self._z_stack_info.get('z_step')
 
         # Add TIFF-specific metadata if available
         if self._tiff_file:
@@ -337,7 +465,7 @@ class TIFFFileReader(VideoReader):
                 # Extract common tags
                 tags = first_page.tags
                 if 'ImageDescription' in tags:
-                    metadata['description'] = str(tags['ImageDescription'].value)
+                    metadata['description'] = str(tags['ImageDescription'].value)[:500]  # Limit length
                 if 'Software' in tags:
                     metadata['software'] = str(tags['Software'].value)
                 if 'DateTime' in tags:
