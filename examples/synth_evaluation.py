@@ -1,3 +1,8 @@
+"""
+Evaluate pyflowreg on synthetic data with known ground truth. Replicates the
+evaluation in the original paper.
+"""
+
 import time
 from os.path import join, dirname
 import os
@@ -74,11 +79,7 @@ base_params = dict(
 for name, data in datasets:
     data = gaussian_filter(data, (0.00001, 0.00001, 1, 1),
                            truncate=4)
-    #for i in range(data.shape[1]):
-    #    data[:, i, :, :] = gaussian_filter(data[:, i, :, :],
-    #                                       (0.1, 1.5, 1.5),  # 3D sigmas only
-    #                                       truncate=10,
-    #                                       mode='constant')
+
     f1, f2 = preprocess(data)
 
     w = run({**base_params, "min_level": 0}, f1, f2)
