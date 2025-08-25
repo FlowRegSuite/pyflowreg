@@ -43,42 +43,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - run: python -m pip install -U build twine
-      - name: Rewrite README image links for PyPI
+      - name: Fail if README contains relative image links
         run: |
           python - <<'PY'
-          import os, re, pathlib
-          src = pathlib.Path("README.md")
-          text = src.read_text(encoding="utf-8")
-          repo = os.environ["GITHUB_REPOSITORY"]           # e.g. FlowRegSuite/pyflowreg
-          ref  = os.environ["GITHUB_REF_NAME"]             # e.g. v0.3.2 when building on a tag
-          raw  = f"https://raw.githubusercontent.com/{repo}/{ref}/"
-          # Handle Markdown image syntax ![alt](url)
-          text = re.sub(r'(!\[[^\]]*\]\()((?!https?://)[^)]+)(\))',
-                        lambda m: m.group(1) + raw + m.group(2).lstrip("./") + m.group(3),
-                        text)
-          # Handle HTML img tags <img src="url">
-          text = re.sub(r'(<img\s+[^>]*src=")([^"]+)("[^>]*>)',
-                        lambda m: m.group(1) + (raw + m.group(2).lstrip("./") if not m.group(2).startswith(('http://', 'https://')) else m.group(2)) + m.group(3),
-                        text)
-          pathlib.Path("README-pypi.md").write_text(text, encoding="utf-8")
+          import re, sys, pathlib
+          t = pathlib.Path("README.md").read_text(encoding="utf-8")
+          # Check for relative links in Markdown or HTML img tags
+          bad = re.search(r'!\[[^\]]*\]\((?!https?://)[^)]+\)|<img[^>]*src="(?!https?://)', t)
+          if bad:
+              print(f"ERROR: README.md contains relative image links: {bad.group(0)}")
+              print("Please ensure README image links are normalized before tagging a release.")
+              sys.exit(1)
+          else:
+              print("✓ README.md has properly normalized image links")
           PY
-      - name: Swap README for build
-        run: |
-          mv README.md README.dev.md
-          mv README-pypi.md README.md
+      - run: python -m pip install -U build twine
       - run: python -m build
-      - name: Restore original README
-        if: always()
-        run: |
-          if [ -f README.dev.md ]; then
-            mv README.dev.md README.md
-          fi
       - run: python -m twine check dist/*
       - uses: actions/upload-artifact@v4
         with:
