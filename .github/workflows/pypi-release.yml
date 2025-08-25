@@ -49,7 +49,31 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install -U build twine
+      - name: Rewrite README image links for PyPI
+        run: |
+          python - <<'PY'
+          import os, re, pathlib
+          src = pathlib.Path("README.md")
+          text = src.read_text(encoding="utf-8")
+          repo = os.environ["GITHUB_REPOSITORY"]           # e.g. FlowRegSuite/pyflowreg
+          ref  = os.environ["GITHUB_REF_NAME"]             # e.g. v0.3.2 when building on a tag
+          raw  = f"https://raw.githubusercontent.com/{repo}/{ref}/"
+          text = re.sub(r'(!\[[^\]]*\]\()((?!https?://)[^)]+)(\))',
+                        lambda m: m.group(1) + raw + m.group(2).lstrip("./") + m.group(3),
+                        text)
+          pathlib.Path("README-pypi.md").write_text(text, encoding="utf-8")
+          PY
+      - name: Swap README for build
+        run: |
+          mv README.md README.dev.md
+          mv README-pypi.md README.md
       - run: python -m build
+      - name: Restore original README
+        if: always()
+        run: |
+          if [ -f README.dev.md ]; then
+            mv README.dev.md README.md
+          fi
       - run: python -m twine check dist/*
       - uses: actions/upload-artifact@v4
         with:
