@@ -12,7 +12,7 @@ This project is still in an **alpha stage**. Expect rapid changes, incomplete fe
 - Documentation and examples are incomplete.  
 - Feedback and bug reports are especially valuable at this stage.  
 
-# <img src="img/flowreglogo.png" alt="FlowReg logo" height="64"> PyFlowReg
+# <img src="https://raw.githubusercontent.com/FlowRegSuite/pyflowreg/refs/heads/main/img/flowreglogo.png" alt="FlowReg logo" height="64"> PyFlowReg
 
 Python bindings for Flow-Registration - variational optical-flow motion correction for 2-photon (2P) microscopy videos and volumetric 3D scans.
 
@@ -24,7 +24,7 @@ Derived from the Flow-Registration toolbox for compensation and stabilization of
 - Napari plugin: https://github.com/FlowRegSuite/napari-flowreg
 
 
-![Fig1](img/bg.jpg)
+![Fig1](https://raw.githubusercontent.com/FlowRegSuite/pyflowreg/refs/heads/main/img/bg.jpg)
 
 
 ## Requirements
