@@ -30,7 +30,7 @@ except ImportError:
 from pyflowreg.util.io._base import VideoReader, VideoWriter
 from pyflowreg.util.io.hdf5 import HDF5FileReader, HDF5FileWriter
 from pyflowreg.util.io.mdf import MDFFileReader
-from pyflowreg.util.io.tiff import TIFFStackReader, TIFFStackWriter
+from pyflowreg.util.io.tiff import TIFFFileReader, TIFFFileWriter
 
 
 # Enums
