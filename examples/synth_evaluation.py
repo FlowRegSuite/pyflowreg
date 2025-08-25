@@ -4,28 +4,12 @@ evaluation in the original paper.
 """
 
 import time
-from os.path import join, dirname
-import os
-import urllib.request
-from pathlib import Path
 
 import h5py
 import numpy as np
 import pyflowreg as pfr
 from scipy.ndimage import gaussian_filter
-
-
-def download_synth_data(data_file: Path) -> None:
-    """Download synthetic evaluation data if not already present."""
-    if not data_file.exists():
-        print("Downloading synthetic evaluation data...")
-        # Google Drive download link for synth_frames.h5
-        url = "https://drive.usercontent.google.com/download?id=10YxHVSdnz0L4WMLR0eIHH6bMxaojpVdY&export=download&authuser=0"
-        data_file.parent.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(url, data_file)
-        print(f"Downloaded to {data_file}")
-    else:
-        print(f"Synthetic data already exists at {data_file}")
+from pyflowreg.util.download import download_demo_data
 
 
 def preprocess(frame):
@@ -59,11 +43,8 @@ def run(flow_params, f1, f2):
     return w
 
 
-input_folder = Path(dirname(os.path.dirname(os.path.abspath(__file__)))) / "data"
-data_file = input_folder / "synth_frames.h5"
-
-# Download data if needed
-download_synth_data(data_file)
+# Download data to data/ folder (default location)
+data_file = download_demo_data("synth_frames.h5")
 
 with h5py.File(data_file, "r") as f:
     clean = f["clean"][:]

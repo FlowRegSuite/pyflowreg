@@ -8,36 +8,17 @@ with framerate display for performance monitoring.
 import os
 import time
 from pathlib import Path
-import urllib.request
 import numpy as np
 import cv2
 from pyflowreg.motion_correction.OF_options import OFOptions, QualitySetting
 from pyflowreg.motion_correction.flow_reg_live import FlowRegLive
 from pyflowreg.util.io.factory import get_video_file_reader
-
-
-def download_jupiter_data(output_folder: Path, input_file: Path) -> None:
-    """Download jupiter demo data if not already present."""
-    if not input_file.exists():
-        print("Downloading jupiter demo data...")
-        # Google Drive download link for jupiter.tiff
-        url = "https://drive.usercontent.google.com/download?id=12lEhahzKtOZsFgxLzwxnT8JsVBErvzJH&export=download&authuser=0"
-        urllib.request.urlretrieve(url, input_file)
-        print(f"Downloaded to {input_file}")
-    else:
-        print(f"Jupiter data already exists at {input_file}")
+from pyflowreg.util.download import download_demo_data
 
 
 def main():
-    # Prepare output directory
-    output_folder = Path("jupiter_demo")
-    output_folder.mkdir(exist_ok=True)
-    
-    # Input file path
-    input_file = output_folder / "jupiter.tiff"
-    
-    # Download data if needed
-    download_jupiter_data(output_folder, input_file)
+    # Download data to data/ folder (default location)
+    input_file = download_demo_data("jupiter.tiff")
     
     # Read the entire video into memory
     print("\nReading jupiter video into memory...")
