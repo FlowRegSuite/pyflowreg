@@ -29,7 +29,7 @@ Derived from the Flow-Registration toolbox for compensation and stabilization of
 
 ## Requirements
 
-This code requires python 3.10. 
+This code requires python 3.10 or higher.
 
 Initialize the environment with
 
