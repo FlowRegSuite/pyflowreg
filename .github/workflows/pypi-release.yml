@@ -58,8 +58,13 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]           # e.g. FlowRegSuite/pyflowreg
           ref  = os.environ["GITHUB_REF_NAME"]             # e.g. v0.3.2 when building on a tag
           raw  = f"https://raw.githubusercontent.com/{repo}/{ref}/"
+          # Handle Markdown image syntax ![alt](url)
           text = re.sub(r'(!\[[^\]]*\]\()((?!https?://)[^)]+)(\))',
                         lambda m: m.group(1) + raw + m.group(2).lstrip("./") + m.group(3),
+                        text)
+          # Handle HTML img tags <img src="url">
+          text = re.sub(r'(<img\s+[^>]*src=")([^"]+)(?<!https?://)([^"]*"[^>]*>)',
+                        lambda m: m.group(1) + (raw + m.group(2).lstrip("./") if not m.group(2).startswith(('http://', 'https://')) else m.group(2)) + m.group(3),
                         text)
           pathlib.Path("README-pypi.md").write_text(text, encoding="utf-8")
           PY
