@@ -26,27 +26,11 @@ try:
 except ImportError:
     gaussian_filter = None
 
-# Optional IO backends
-try:
-    from pyflowreg.util.io.hdf5 import HDF5FileReader, HDF5FileWriter
-    from pyflowreg.util.io.mdf import MDFFileReader
-    from pyflowreg.util.io._base import VideoReader, VideoWriter
-    from pyflowreg.util.io.tiff import TIFFStackReader, TIFFStackWriter
-except ImportError:
-    # Use placeholder classes instead of object to avoid isinstance() always returning True
-    class _VideoReaderPlaceholder: 
-        """Placeholder when VideoReader is not available."""
-        pass
-    class _VideoWriterPlaceholder: 
-        """Placeholder when VideoWriter is not available."""
-        pass
-    VideoReader = _VideoReaderPlaceholder
-    VideoWriter = _VideoWriterPlaceholder
-    HDF5FileReader = None
-    HDF5FileWriter = None
-    MDFFileReader = None
-    TIFFStackReader = None
-    TIFFStackWriter = None
+# Import IO backends - these are always available as part of the package
+from pyflowreg.util.io._base import VideoReader, VideoWriter
+from pyflowreg.util.io.hdf5 import HDF5FileReader, HDF5FileWriter
+from pyflowreg.util.io.mdf import MDFFileReader
+from pyflowreg.util.io.tiff import TIFFFileReader, TIFFFileWriter
 
 
 # Enums
