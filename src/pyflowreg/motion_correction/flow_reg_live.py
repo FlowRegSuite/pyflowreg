@@ -68,6 +68,9 @@ class FlowRegLive:
         self.options = options
         self.truncate = truncate
         
+        # Resolve displacement function from options
+        self._get_disp = self.options.resolve_get_displacement()
+        
         # Reference buffer
         self.reference_buffer = deque(maxlen=reference_buffer_size)
         
@@ -263,7 +266,7 @@ class FlowRegLive:
         # Ensure weight is numpy array
         if 'weight' in flow_params and isinstance(flow_params['weight'], list):
             flow_params['weight'] = np.array(flow_params['weight'])
-        flow = get_displacement(
+        flow = self._get_disp(
             self.reference_proc,
             frame_proc,
             uv=self.last_flow,  # Use previous flow as initialization

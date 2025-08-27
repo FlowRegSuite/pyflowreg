@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Callable, List, Optional, Tuple, Union
+from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import tifffile
@@ -138,8 +138,14 @@ class OFOptions(BaseModel):
     naming_convention: NamingConvention = Field(NamingConvention.DEFAULT, description="Output filename style")
     constancy_assumption: ConstancyAssumption = Field(ConstancyAssumption.GRADIENT, description="Constancy assumption")
 
+    # Backend configuration
+    flow_backend: str = Field("flowreg", description="Flow backend name")
+    backend_params: Dict[str, Any] = Field(default_factory=dict, description="Backend-specific parameters")
+    
     # Non-serializable/runtime
     preproc_funct: Optional[Callable] = Field(None, exclude=True)
+    get_displacement_impl: Optional[Callable] = Field(None, exclude=True, description="Direct displacement callable")
+    get_displacement_factory: Optional[Callable[..., Callable]] = Field(None, exclude=True, description="Factory for displacement callable")
 
     # Private attributes (using PrivateAttr for Pydantic v2)
     _video_reader: Optional[VideoReader] = PrivateAttr(default=None)
@@ -512,6 +518,31 @@ class OFOptions(BaseModel):
 
         return cls(**data)
 
+    def resolve_get_displacement(self) -> Callable:
+        """
+        Resolve the displacement computation function based on configuration.
+        
+        Priority order:
+        1. get_displacement_impl (direct callable)
+        2. get_displacement_factory with backend_params
+        3. flow_backend from registry with backend_params
+        
+        Returns:
+            Callable for computing optical flow
+        """
+        # Priority 1: Direct implementation override
+        if self.get_displacement_impl is not None:
+            return self.get_displacement_impl
+        
+        # Priority 2: Factory override
+        if self.get_displacement_factory is not None:
+            return self.get_displacement_factory(**self.backend_params)
+        
+        # Priority 3: Registry backend
+        from pyflowreg.core.backend_registry import get_backend
+        factory = get_backend(self.flow_backend)
+        return factory(**self.backend_params)
+    
     def to_dict(self) -> dict:
         """Get parameters dict for optical flow functions."""
         return {

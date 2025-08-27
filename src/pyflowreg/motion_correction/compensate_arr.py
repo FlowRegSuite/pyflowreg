@@ -3,7 +3,7 @@ Array-based motion compensation using the same pipeline as file-based processing
 Provides MATLAB compensate_inplace equivalent functionality.
 """
 
-from typing import Optional, Tuple, Callable
+from typing import Optional, Tuple, Callable, Dict, Any
 import numpy as np
 
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
@@ -11,7 +11,11 @@ from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrecto
 
 
 def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOptions] = None, 
-                   progress_callback: Optional[Callable[[int, int], None]] = None) -> Tuple[np.ndarray, np.ndarray]:
+                   progress_callback: Optional[Callable[[int, int], None]] = None,
+                   *, flow_backend: Optional[str] = None,
+                   backend_params: Optional[Dict[str, Any]] = None,
+                   get_displacement: Optional[Callable] = None,
+                   get_displacement_factory: Optional[Callable[..., Callable]] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
     Process arrays in memory matching MATLAB compensate_inplace functionality.
     
@@ -26,6 +30,10 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
         options: OF_options configuration. If None, uses defaults.
         progress_callback: Optional callback function that receives (current_frame, total_frames)
             for progress updates. Note: For multiprocessing executor, updates are batch-wise.
+        flow_backend: Backend name override (e.g., 'diso', 'flowreg')
+        backend_params: Backend-specific parameters override
+        get_displacement: Direct displacement callable override
+        get_displacement_factory: Factory function override for creating displacement callable
     
     Returns:
         Tuple of:
@@ -71,6 +79,19 @@ def compensate_arr(c1: np.ndarray, c_ref: np.ndarray, options: Optional[OFOption
     else:
         # Make a copy to avoid modifying user's options
         options = options.copy()
+    
+    # Apply backend overrides
+    if flow_backend is not None:
+        options.flow_backend = flow_backend
+    if backend_params is not None:
+        if options.backend_params:
+            options.backend_params.update(backend_params)
+        else:
+            options.backend_params = backend_params
+    if get_displacement is not None:
+        options.get_displacement_impl = get_displacement
+    if get_displacement_factory is not None:
+        options.get_displacement_factory = get_displacement_factory
     
     # Set up for array I/O
     options.input_file = c1  # Will be wrapped by factory into ArrayReader
