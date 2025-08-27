@@ -42,7 +42,7 @@ pip install -r requirements.txt
 or on windows
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements_win.txt
 ```
 
 to enable Sutter MDF file support.
@@ -55,7 +55,7 @@ conda create --name pyflowreg python=3.10
 pip install pyflowreg
 ```
 
-To install the project with full visualization support, you can install the `napari` plugin:
+To install the project with full visualization support, you can install it with the ```vis``` extra:
 
 ```bash
 pip install pyflowreg[vis]
