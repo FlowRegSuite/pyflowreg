@@ -16,6 +16,14 @@ from pyflowreg.motion_correction.compensate_arr import compensate_arr
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
 from pyflowreg.util.io._arr import ArrayReader, ArrayWriter
 from tests.fixtures import create_simple_test_data, cleanup_temp_files
+from pyflowreg.core import list_backends
+
+# Define test backends - simple list
+TEST_BACKENDS = ["flowreg"]  # Default backend
+
+# Add DISO if available
+if "diso" in list_backends():
+    TEST_BACKENDS.append("diso")
 
 
 class TestCompensateArrBasics:
@@ -28,16 +36,21 @@ class TestCompensateArrBasics:
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
         
-        # Run compensation
-        registered, flow = compensate_arr(video, reference)
-        
-        # Check output shapes
-        assert registered.shape == video.shape
-        assert flow.shape == (T, H, W, 2)
-        
-        # Check data types
-        assert isinstance(registered, np.ndarray)
-        assert isinstance(flow, np.ndarray)
+        # Test with all available backends
+        for backend_name in TEST_BACKENDS:
+            # Run compensation with backend
+            registered, flow = compensate_arr(
+                video, reference, 
+                flow_backend=backend_name
+            )
+            
+            # Check output shapes
+            assert registered.shape == video.shape, f"Failed for backend {backend_name}"
+            assert flow.shape == (T, H, W, 2), f"Failed for backend {backend_name}"
+            
+            # Check data types
+            assert isinstance(registered, np.ndarray)
+            assert isinstance(flow, np.ndarray)
     
     def test_single_channel_3d_input(self):
         """Test handling of single-channel 3D input (T,H,W)."""

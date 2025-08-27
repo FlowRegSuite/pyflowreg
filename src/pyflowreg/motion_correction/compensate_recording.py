@@ -9,10 +9,10 @@ from typing import Any, Optional, Tuple, List, Callable, Dict
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from pyflowreg import get_displacement
-from pyflowreg.core.optical_flow import imregister_wrapper
+from pyflowreg.core.optical_flow import get_displacement, imregister_wrapper
 from pyflowreg._runtime import RuntimeContext
 from pyflowreg.util.image_processing import normalize, apply_gaussian_filter
+from pyflowreg.motion_correction.OF_options import OutputFormat, ChannelNormalization
 
 # Import to trigger executor registration (side effect)
 import pyflowreg.motion_correction.parallelization
@@ -67,6 +67,9 @@ class BatchMotionCorrector:
 
         # Initialize executor from RuntimeContext
         self._setup_executor()
+        
+        # Resolve displacement function
+        self._resolve_displacement_func()
 
     def _setup_executor(self):
         """Setup the parallelization executor based on configuration."""
@@ -106,6 +109,10 @@ class BatchMotionCorrector:
         
         if not self.config.verbose:
             print(f"Using {executor_name} executor with {self.n_workers} workers")
+    
+    def _resolve_displacement_func(self):
+        """Resolve the displacement function to use based on options."""
+        self._get_disp = self.options.resolve_get_displacement()
     
     def register_progress_callback(self, callback: Callable[[int, int], None]) -> None:
         """
@@ -159,10 +166,10 @@ class BatchMotionCorrector:
                 from pyflowreg.util.io.factory import get_video_file_writer
                 
                 # Use ArrayWriter for displacements when main output is ARRAY
-                if self.options.output_format == 'ARRAY':
+                if self.options.output_format == OutputFormat.ARRAY:
                     self.w_writer = get_video_file_writer(
                         None,  # Path ignored for ARRAY format
-                        'ARRAY'
+                        OutputFormat.ARRAY.value
                     )
                 else:
                     # Use HDF5 for file-based output (preserves double precision)
@@ -206,10 +213,20 @@ class BatchMotionCorrector:
     def _preprocess_frames(self, frames: np.ndarray) -> np.ndarray:
         """Preprocess frames: normalize -> filter (MATLAB order)."""
         # First normalize
+        # Map enum to expected string: JOINT -> 'together', SEPARATE -> 'separate'
+        if hasattr(self.options, 'channel_normalization'):
+            norm_mode = self.options.channel_normalization
+            if norm_mode == ChannelNormalization.JOINT:
+                norm_value = 'together'
+            else:
+                norm_value = 'separate'
+        else:
+            norm_value = 'together'
+        
         normalized = normalize(
             frames,
             ref=None,
-            channel_normalization=getattr(self.options, 'channel_normalization', 'together')
+            channel_normalization=norm_value
         )
         # Then filter
         filtered = apply_gaussian_filter(
@@ -240,7 +257,7 @@ class BatchMotionCorrector:
             flow_params['uv'] = w_init
 
         # Note: get_displacement expects (reference, moving)
-        return get_displacement(ref_proc, frame_proc, **flow_params)
+        return self._get_disp(ref_proc, frame_proc, **flow_params)
 
 
     def _process_batch_parallel(self, batch: np.ndarray, batch_proc: np.ndarray,
@@ -284,7 +301,7 @@ class BatchMotionCorrector:
             reference_raw=self.reference_raw,
             reference_proc=self.reference_proc,
             w_init=w_init,
-            get_displacement_func=get_displacement,
+            get_displacement_func=self._get_disp,
             imregister_func=imregister_wrapper,
             interpolation_method=interp_method,
             progress_callback=executor_progress_callback,
