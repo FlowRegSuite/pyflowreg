@@ -427,30 +427,34 @@ class OFOptions(BaseModel):
             # Mean as initial reference
             ref_mean = np.mean(frames_norm, axis=3)
 
-            # Compensate if pyflowreg available
-            try:
-                from pyflowreg import compensate_sequence
-
-                # Use stronger regularization for preregistration
-                alpha_prereg = tuple(a + 2.0 for a in self.alpha) if isinstance(self.alpha, tuple) else self.alpha + 2.0
-
-                compensated = compensate_sequence(
-                    frames_norm, ref_mean,
-                    weight=weight_2d,
-                    alpha=alpha_prereg,
-                    levels=self.levels,
-                    min_level=self.effective_min_level,
-                    eta=self.eta,
-                    update_lag=self.update_lag,
-                    iterations=self.iterations,
-                    a_smooth=self.a_smooth,
-                    a_data=self.a_data,
-                    constancy_assumption=self.constancy_assumption.value
-                )
-                reference = np.mean(compensated, axis=3)
-            except ImportError:
-                # Fallback to simple mean
-                reference = ref_mean
+            # Compensate using stronger regularization for preregistration
+            from pyflowreg.motion_correction.compensate_arr import compensate_arr
+            
+            # Use stronger regularization for preregistration
+            alpha_prereg = tuple(a + 2.0 for a in self.alpha) if isinstance(self.alpha, tuple) else self.alpha + 2.0
+            
+            # Create a temporary OFOptions for preregistration
+            prereg_options = OFOptions(
+                alpha=alpha_prereg,
+                levels=self.levels,
+                min_level=self.effective_min_level,
+                eta=self.eta,
+                update_lag=self.update_lag,
+                iterations=self.iterations,
+                a_smooth=self.a_smooth,
+                a_data=self.a_data,
+                constancy_assumption=self.constancy_assumption,
+                weight=weight_2d
+            )
+            
+            # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
+            frames_for_compensation = np.transpose(frames_norm, (3, 0, 1, 2))
+            
+            # Compensate all frames against the mean reference
+            compensated, _ = compensate_arr(frames_for_compensation, ref_mean, options=prereg_options)
+            
+            # Calculate mean of compensated frames as the reference
+            reference = np.mean(compensated, axis=0)
 
             if self.verbose:
                 print("Finished pre-registration of the reference frames.")
