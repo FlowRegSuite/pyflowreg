@@ -5,7 +5,7 @@ Base executor abstract class for parallelization strategies.
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
-from ..._runtime import RuntimeContext
+from pyflowreg._runtime import RuntimeContext
 
 
 class BaseExecutor(ABC):
@@ -33,6 +33,37 @@ class BaseExecutor(ABC):
         """
         self.n_workers = n_workers or RuntimeContext.get('max_workers', 1)
         self.name = self.__class__.__name__.replace('Executor', '').lower()
+    
+    @staticmethod
+    def _as2d(x):
+        """Convert single-channel 3D array to 2D."""
+        return x[..., 0] if x.ndim == 3 and x.shape[2] == 1 else x
+    
+    @staticmethod
+    def _as3d(x):
+        """Ensure array has channel dimension (H,W,C)."""
+        return x[..., None] if x.ndim == 2 else x
+    
+    @staticmethod
+    def _as4d(x):
+        """Ensure array has time and channel dimensions (T,H,W,C)."""
+        return x[..., None] if x.ndim == 3 else x
+    
+    def _normalize_inputs(self, batch, batch_proc, reference_raw, reference_proc, w_init):
+        """
+        Normalize input dimensions to ensure consistency across executors.
+        
+        Ensures:
+        - batch and batch_proc are 4D (T,H,W,C)
+        - reference_raw and reference_proc are 3D (H,W,C)
+        - All arrays are contiguous float32
+        """
+        batch = np.ascontiguousarray(self._as4d(batch).astype(np.float32, copy=False))
+        batch_proc = np.ascontiguousarray(self._as4d(batch_proc).astype(np.float32, copy=False))
+        reference_raw = np.ascontiguousarray(self._as3d(reference_raw).astype(np.float32, copy=False))
+        reference_proc = np.ascontiguousarray(self._as3d(reference_proc).astype(np.float32, copy=False))
+        w_init = np.ascontiguousarray(w_init.astype(np.float32, copy=False))
+        return batch, batch_proc, reference_raw, reference_proc, w_init
         
     @abstractmethod
     def process_batch(

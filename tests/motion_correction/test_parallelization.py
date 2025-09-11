@@ -23,12 +23,13 @@ class TestParallelizationExecutors:
         # Check if other executors are registered
         print(f"Available executors: {available}")
     
-    def test_sequential_executor(self):
-        """Test sequential executor processing."""
+    @pytest.mark.parametrize("n_channels", [1, 2, 3])
+    def test_sequential_executor(self, n_channels):
+        """Test sequential executor processing with different channel counts."""
         from pyflowreg.motion_correction.parallelization.sequential import SequentialExecutor
         
         # Create test data
-        T, H, W, C = 5, 16, 16, 2
+        T, H, W, C = 5, 16, 16, n_channels
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
         
@@ -60,15 +61,16 @@ class TestParallelizationExecutors:
         assert registered.shape == video.shape
         assert flow is not None and flow.shape == (T, H, W, 2)
     
-    def test_threading_executor(self):
-        """Test threading executor if available."""
+    @pytest.mark.parametrize("n_channels", [1, 2, 3])
+    def test_threading_executor(self, n_channels):
+        """Test threading executor with different channel counts."""
         available = RuntimeContext.get('available_parallelization', set())
         
         if 'threading' not in available:
             pytest.skip("Threading executor not available")
         
         # Create test data
-        T, H, W, C = 10, 16, 16, 2
+        T, H, W, C = 10, 16, 16, n_channels
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:3], axis=0)
         
@@ -100,15 +102,16 @@ class TestParallelizationExecutors:
         assert registered.shape == video.shape
         assert flow is not None and flow.shape == (T, H, W, 2)
     
-    def test_multiprocessing_executor(self):
-        """Test multiprocessing executor if available."""
+    @pytest.mark.parametrize("n_channels", [1, 2, 3])
+    def test_multiprocessing_executor(self, n_channels):
+        """Test multiprocessing executor with different channel counts."""
         available = RuntimeContext.get('available_parallelization', set())
         
         if 'multiprocessing' not in available:
             pytest.skip("Multiprocessing executor not available")
         
         # Create test data
-        T, H, W, C = 10, 16, 16, 2
+        T, H, W, C = 10, 16, 16, n_channels
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:3], axis=0)
         
@@ -140,12 +143,13 @@ class TestParallelizationExecutors:
         assert registered.shape == video.shape
         assert flow is not None and flow.shape == (T, H, W, 2)
     
-    def test_executor_consistency(self):
-        """Test that all executors produce consistent results."""
+    @pytest.mark.parametrize("n_channels", [1, 2])
+    def test_executor_consistency(self, n_channels):
+        """Test that all executors produce consistent results with different channel counts."""
         available = RuntimeContext.get('available_parallelization', set())
         
         # Create test data
-        T, H, W, C = 8, 16, 16, 2
+        T, H, W, C = 8, 16, 16, n_channels
         np.random.seed(42)  # Fixed seed for reproducibility
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)

@@ -134,6 +134,8 @@ class OFOptions(BaseModel):
     channel_normalization: ChannelNormalization = Field(ChannelNormalization.JOINT, description="Normalization mode")
     interpolation_method: InterpolationMethod = Field(InterpolationMethod.CUBIC, description="Warp interpolation")
     cc_initialization: bool = Field(False, description="Cross-correlation initialization")
+    cc_hw: Union[int, Tuple[int, int]] = Field(256, description="Target HW size for CC projections")
+    cc_up: int = Field(1, ge=1, description="Upsampling factor for subpixel CC accuracy")
     update_initialization_w: bool = Field(True, description="Propagate flow init across batches")
     naming_convention: NamingConvention = Field(NamingConvention.DEFAULT, description="Output filename style")
     constancy_assumption: ConstancyAssumption = Field(ConstancyAssumption.GRADIENT, description="Constancy assumption")
