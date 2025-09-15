@@ -123,6 +123,8 @@ def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, 
 
 def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8,
                      a_smooth=0.5, a_data=0.45, const_assumption='gc', uv=None, weight=None):
+    # Ensure fixed and moving have the same number of dimensions
+    assert fixed.ndim == moving.ndim, f"Fixed and moving must have same dimensions: fixed.shape={fixed.shape}, moving.shape={moving.shape}"
     fixed = fixed.astype(np.float64)
     moving = moving.astype(np.float64)
     if fixed.ndim == 3:

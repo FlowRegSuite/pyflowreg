@@ -10,6 +10,16 @@ import numpy as np
 from .base import BaseExecutor
 
 
+# Helper functions for dimension conversion (needed in worker processes)
+def _as2d(x):
+    """Convert single-channel 3D array to 2D."""
+    return x[..., 0] if x.ndim == 3 and x.shape[2] == 1 else x
+
+def _as3d(x):
+    """Ensure array has channel dimension (H,W,C)."""
+    return x[..., None] if x.ndim == 2 else x
+
+
 # Global dictionary to store shared memory references in worker processes
 _SHM: Dict[str, Tuple[shared_memory.SharedMemory, np.ndarray]] = {}
 
@@ -62,34 +72,90 @@ def _process_frame_worker(
     batch_proc = _SHM['batch_proc'][1]
     registered = _SHM['registered'][1]
     w_out = _SHM['flow_fields'][1]
-    ref_proc = _SHM['ref_proc'][1]
-    ref_raw = _SHM['ref_raw'][1]
+    reference_proc = _SHM['reference_proc'][1]
+    reference_raw = _SHM['reference_raw'][1]
     w_init = _SHM['w_init'][1]
     
-    # Reconstruct flow parameters with weight array if present
-    flow_params = dict(flow_param_scalars)
+    # Extract CC parameters and remove them from flow_params
+    use_cc = bool(flow_param_scalars.get('cc_initialization', False))
+    cc_hw = flow_param_scalars.get('cc_hw', 256)
+    cc_up = int(flow_param_scalars.get('cc_up', 1))
+    
+    # Import prealignment function only if needed
+    if use_cc:
+        from pyflowreg.util.xcorr_prealignment import estimate_rigid_xcorr_2d
+    
+    # Create flow_params without CC parameters
+    flow_params = {k: v for k, v in flow_param_scalars.items() 
+                   if k not in ['cc_initialization', 'cc_hw', 'cc_up']}
     if 'weight' in _SHM:
         flow_params['weight'] = _SHM['weight'][1]
     
-    # Compute optical flow with all parameters
-    flow = get_displacement(
-        ref_proc,
-        batch_proc[t],
-        uv=w_init.copy(),
-        **flow_params
-    )
+    # Check if cross-correlation initialization is enabled
+    if use_cc:
+        target_hw = cc_hw
+        if isinstance(target_hw, int):
+            target_hw = (target_hw, target_hw)
+        weight = _SHM['weight'][1] if 'weight' in _SHM else None
+        
+        # Step 1: Backward warp mov by w_init to get partially aligned
+        mov_partial = imregister_wrapper(
+            batch_proc[t],
+            w_init[..., 0],  # dx
+            w_init[..., 1],  # dy
+            reference_proc,
+            interpolation_method='linear'
+        )
+        
+        # Use 2D views for CC
+        ref_for_cc = _as2d(reference_proc)
+        mov_for_cc = _as2d(mov_partial)
+        
+        # Step 2: Estimate rigid residual between ref and partially aligned mov
+        w_cross = estimate_rigid_xcorr_2d(ref_for_cc, mov_for_cc, target_hw=target_hw, up=cc_up, weight=weight)
+        
+        # Step 3: Combine w_init + w_cross
+        w_combined = w_init.copy()
+        w_combined[..., 0] += w_cross[0]
+        w_combined[..., 1] += w_cross[1]
+        
+        # Step 4: Backward warp original mov by combined field
+        mov_aligned = imregister_wrapper(
+            batch_proc[t],
+            w_combined[..., 0],
+            w_combined[..., 1],
+            reference_proc,
+            interpolation_method='linear'
+        )
+        
+        # Ensure mov_aligned has channel dimension (imregister_wrapper strips it for single channel)
+        mov_aligned = _as3d(mov_aligned)
+        
+        # Step 5: Get residual non-rigid displacement
+        w_residual = get_displacement(reference_proc, mov_aligned, uv=np.zeros_like(w_init), **flow_params)
+        
+        # Step 6: Total flow is w_combined + w_residual
+        flow = (w_combined + w_residual).astype(np.float32, copy=False)
+    else:
+        # Compute optical flow without prealignment
+        flow = get_displacement(
+            reference_proc,
+            batch_proc[t],
+            uv=w_init.copy(),
+            **flow_params
+        ).astype(np.float32, copy=False)
     
     # Apply flow field to register the frame
     reg_frame = imregister_wrapper(
         batch[t],
         flow[..., 0],
         flow[..., 1],
-        ref_raw,
+        reference_raw,
         interpolation_method=interpolation_method
     )
     
     # Store results directly in shared memory
-    w_out[t] = flow.astype(np.float32, copy=False)
+    w_out[t] = flow
     
     # Handle case where registered frame might have fewer channels
     if reg_frame.ndim < registered.ndim - 1:
@@ -211,6 +277,10 @@ class MultiprocessingExecutor(BaseExecutor):
         Returns:
             Tuple of (registered_frames, flow_fields)
         """
+        # Normalize inputs to ensure consistent dimensions
+        batch, batch_proc, reference_raw, reference_proc, w_init = \
+            self._normalize_inputs(batch, batch_proc, reference_raw, reference_proc, w_init)
+        
         T, H, W, C = batch.shape
         
         # Get flow parameters from kwargs
@@ -222,8 +292,8 @@ class MultiprocessingExecutor(BaseExecutor):
         # Input arrays (read-only in workers)
         self._create_shared_input('batch', batch, shm_specs)
         self._create_shared_input('batch_proc', batch_proc, shm_specs)
-        self._create_shared_input('ref_raw', reference_raw, shm_specs)
-        self._create_shared_input('ref_proc', reference_proc, shm_specs)
+        self._create_shared_input('reference_raw', reference_raw, shm_specs)
+        self._create_shared_input('reference_proc', reference_proc, shm_specs)
         self._create_shared_input('w_init', w_init.astype(np.float32), shm_specs)
         
         # Handle weight array separately if present in flow_params
