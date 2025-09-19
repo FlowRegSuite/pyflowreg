@@ -210,8 +210,14 @@ class BatchMotionCorrector:
         # Preprocess reference (MATLAB order: normalize then filter)
         self.reference_proc = self._preprocess_frames(self.reference_raw)
 
-    def _preprocess_frames(self, frames: np.ndarray) -> np.ndarray:
-        """Preprocess frames: normalize -> filter (MATLAB order)."""
+    def _preprocess_frames(self, frames: np.ndarray, normalization_ref: Optional[np.ndarray] = None) -> np.ndarray:
+        """Preprocess frames: normalize -> filter (MATLAB order).
+
+        Args:
+            frames: Frames to preprocess
+            normalization_ref: Reference array for normalization. If None, uses frames' own min/max.
+                              Should be the raw reference to ensure consistent normalization.
+        """
         # First normalize
         # Map enum to expected string: JOINT -> 'together', SEPARATE -> 'separate'
         if hasattr(self.options, 'channel_normalization'):
@@ -222,10 +228,10 @@ class BatchMotionCorrector:
                 norm_value = 'separate'
         else:
             norm_value = 'together'
-        
+
         normalized = normalize(
             frames,
-            ref=None,
+            ref=normalization_ref,
             channel_normalization=norm_value
         )
         # Then filter
@@ -398,7 +404,8 @@ class BatchMotionCorrector:
                 batch = self.video_reader.read_batch()  # (T,H,W,C)
 
                 # Preprocess entire batch (normalize -> filter)
-                batch_proc = self._preprocess_frames(batch)
+                # CRITICAL: Use reference_raw for normalization to ensure consistency!
+                batch_proc = self._preprocess_frames(batch, normalization_ref=self.reference_raw)
 
                 # First batch: compute w_init
                 if batch_idx == 1:
