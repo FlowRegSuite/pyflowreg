@@ -77,7 +77,6 @@ options = OFOptions(
 # Manual executor selection
 config = RegistrationConfig(
     n_jobs=-1,                  # Use all CPU cores (-1) or specify number
-    batch_size=100,             # Frames per batch
     parallelization="threading" # "sequential", "threading", or "multiprocessing"
 )
 

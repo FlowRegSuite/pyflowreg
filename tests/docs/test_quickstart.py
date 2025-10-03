@@ -107,24 +107,20 @@ class TestQuickstartParallelProcessing:
         # Manual executor selection as shown in quickstart
         config = RegistrationConfig(
             n_jobs=-1,
-            batch_size=100,
             parallelization=parallelization
         )
 
         # Verify config is correctly set
         assert config.n_jobs == -1
-        assert config.batch_size == 100
         assert config.parallelization == parallelization
 
     def test_registration_config_auto_selection(self):
         """Test auto-selection of parallelization backend."""
         # Default behavior - auto-select best available backend
         config = RegistrationConfig(
-            n_jobs=-1,
-            batch_size=100
+            n_jobs=-1
         )
 
         # Verify config uses default auto-selection
         assert config.n_jobs == -1
-        assert config.batch_size == 100
         # parallelization will be auto-selected

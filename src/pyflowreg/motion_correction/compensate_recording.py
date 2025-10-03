@@ -22,7 +22,6 @@ import pyflowreg.motion_correction.parallelization
 class RegistrationConfig:
     """Simplified configuration."""
     n_jobs: int = -1  # -1 = all cores
-    batch_size: int = 100
     verbose: bool = False
     parallelization: Optional[str] = None  # None = auto-select, or 'sequential', 'threading', 'multiprocessing'
 
@@ -388,7 +387,7 @@ class BatchMotionCorrector:
         if not self.config.verbose:
             quality = getattr(self.options, 'quality_setting', 'balanced')
             print(f"\nStarting compensation with quality={quality}")
-            print(f"Batch size: {self.config.batch_size}, Workers: {self.n_workers}")
+            print(f"Buffer size: {self.options.buffer_size}, Workers: {self.n_workers}")
 
         # Process batches
         batch_idx = 0
@@ -549,7 +548,6 @@ if __name__ == "__main__":
 
         config = RegistrationConfig(
             n_jobs=-1,  # Use all cores
-            batch_size=100,
         )
 
         ref = compensate_recording(options, config=config)
