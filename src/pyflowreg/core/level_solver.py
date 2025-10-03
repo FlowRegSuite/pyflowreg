@@ -1,3 +1,42 @@
+"""
+Pyramid Level Solver for Variational Optical Flow
+==================================================
+
+This module implements the computationally intensive solver for optical flow
+estimation at each pyramid level. All functions are numba-optimized with JIT
+compilation for high performance.
+
+The solver uses successive over-relaxation (SOR) to iteratively solve the
+linearized optical flow equations with non-linear diffusion regularization.
+The implementation follows the generalized Charbonnier penalty framework for
+robustness to noise and motion discontinuities.
+
+Functions
+---------
+compute_flow
+    Main iterative solver for flow field computation at a pyramid level
+set_boundary_2d
+    Apply Neumann boundary conditions to 2D arrays
+nonlinearity_smoothness_2d
+    Compute non-linearity weights for smoothness term
+
+Notes
+-----
+All functions use numba JIT compilation with cache=True for performance.
+The cache is beneficial since these functions are called repeatedly for each
+image, but it means the functions will fail if dtypes change between calls.
+
+For optimal performance, input arrays should be contiguous in memory. Numba
+performs significantly better with contiguous arrays and can be slow with
+non-contiguous data due to inability to use optimized SIMD instructions.
+
+The solver implements coupled updates for the u and v components of the flow
+field using SOR with OMEGA=1.95.
+
+See Also
+--------
+pyflowreg.core.optical_flow : High-level optical flow computation
+"""
 from linecache import cache
 
 import numpy as np
@@ -6,6 +45,19 @@ from numba import njit, prange
 
 @njit(fastmath=True, cache=True)
 def set_boundary_2d(f):
+    """
+    Apply Neumann boundary conditions to 2D array in-place.
+
+    Replicates edge values to provide zero-derivative (Neumann) boundary
+    conditions for the flow solver. This enables one-sided finite differences
+    at boundaries (forward differences at left/top edges, backward differences
+    at right/bottom edges) without going out of bounds.
+
+    Parameters
+    ----------
+    f : ndarray
+        2D array to apply boundary conditions to (modified in-place).
+    """
     m, n = f.shape
     for i in range(n):
         f[0, i] = f[1, i]
@@ -17,6 +69,37 @@ def set_boundary_2d(f):
 
 @njit(fastmath=True, cache=True)
 def nonlinearity_smoothness_2d(psi_smooth, u, du, v, dv, m, n, a, hx, hy):
+    """
+    Compute derivative of smoothness penalty (non-linearity weights).
+
+    Calculates ψ(s²) = a(s² + ε)^(a-1), the derivative of the Charbonnier
+    smoothness penalty ρ(s²) = (s² + ε)^a, where s² = ||∇u||² + ||∇v||².
+    This non-linearity arises from the variational derivative of the energy
+    functional.
+
+    Parameters
+    ----------
+    psi_smooth : ndarray
+        Output array for smoothness weights (m, n), modified in-place.
+    u : ndarray
+        Current u-component of flow field (m, n).
+    du : ndarray
+        Incremental update to u-component (m, n).
+    v : ndarray
+        Current v-component of flow field (m, n).
+    dv : ndarray
+        Incremental update to v-component (m, n).
+    m : int
+        Height of arrays.
+    n : int
+        Width of arrays.
+    a : float
+        Charbonnier penalty exponent for smoothness term.
+    hx : float
+        Spatial grid spacing in x-direction.
+    hy : float
+        Spatial grid spacing in y-direction.
+    """
     eps = 0.00001
     u_full = u + du
     v_full = v + dv
@@ -75,6 +158,48 @@ def compute_flow(
     iterations, update_lag,
     a_data, a_smooth, hx, hy
 ):
+    """
+    Iterative solver for optical flow at a single pyramid level.
+
+    Solves the linearized optical flow equations using successive over-relaxation
+    (SOR) with non-linear diffusion regularization. The solver minimizes an energy
+    functional combining data fidelity (from motion tensor) and smoothness terms,
+    both with generalized Charbonnier penalties.
+
+    Parameters
+    ----------
+    J11, J22, J33, J12, J13, J23 : ndarray
+        Motion tensor components, shape (m, n, n_channels). Encode the linearized
+        gradient constancy constraints.
+    weight : ndarray
+        Channel weights for multi-channel data, shape (m, n, n_channels).
+    u, v : ndarray
+        Initial flow field components from coarser pyramid level, shape (m, n).
+    alpha_x, alpha_y : float
+        Regularization weights for smoothness term in x and y directions.
+    iterations : int
+        Number of SOR iterations to perform.
+    update_lag : int
+        Update non-linearity weights every update_lag iterations.
+    a_data : ndarray
+        Charbonnier exponents for data term, length n_channels.
+    a_smooth : float
+        Charbonnier exponent for smoothness term.
+    hx, hy : float
+        Spatial grid spacing in x and y directions.
+
+    Returns
+    -------
+    flow : ndarray
+        Computed flow field, shape (m, n, 2) where flow[:,:,0] is u-component
+        and flow[:,:,1] is v-component.
+
+    Notes
+    -----
+    Uses SOR with relaxation parameter OMEGA=1.95 for convergence acceleration.
+    The solver updates flow increments (du, dv) relative to the input (u, v)
+    using a coupled Gauss-Seidel scheme with immediate u-updates affecting v.
+    """
     m, n, n_channels = J11.shape
     du = np.zeros((m,n))
     dv = np.zeros((m,n))

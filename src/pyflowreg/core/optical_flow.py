@@ -45,6 +45,45 @@ resize = imresize_fused_gauss_cubic
 
 
 def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
+    """
+    Backward warp of moving image using displacement field.
+
+    Performs backward registration by warping f2_level toward f1_level using
+    displacement field (u, v) with bicubic or bilinear interpolation via cv2.remap.
+    Out-of-bounds pixels are replaced with corresponding pixels from f1_level.
+
+    Parameters
+    ----------
+    f2_level : np.ndarray
+        Moving image to warp, shape (H, W) or (H, W, C)
+    u : np.ndarray
+        Horizontal displacement field, shape (H, W)
+    v : np.ndarray
+        Vertical displacement field, shape (H, W)
+    f1_level : np.ndarray
+        Fixed (reference) image, shape (H, W) or (H, W, C)
+    interpolation_method : str, default='cubic'
+        Interpolation method: 'cubic' (bicubic) or 'linear' (bilinear).
+        Defaults to bicubic following Sun et al. best practices.
+
+    Returns
+    -------
+    warped : np.ndarray
+        Backward-warped image, shape (H, W) or (H, W, C)
+
+    Notes
+    -----
+    The displacement convention is: warped_pos = original_pos + (u, v)
+    Out-of-bounds regions use values from f1_level to maintain continuity.
+
+    Bicubic interpolation is more accurate than bilinear for optical flow
+    estimation and is the recommended default.
+
+    References
+    ----------
+    .. [1] Sun, D., Roth, S., and Black, M. J. "Secrets of Optical Flow
+       Estimation and Their Principles", CVPR 2010.
+    """
     if f2_level.ndim == 2:
         f2_level = f2_level[:, :, None]
         f1_level = f1_level[:, :, None]
@@ -78,6 +117,38 @@ def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
 
 
 def warpingDepth(eta, levels, m, n):
+    """
+    Calculate maximum pyramid depth for given dimension and warping factor.
+
+    Determines how many pyramid levels can be computed given the downsampling
+    factor eta before the dimension becomes too small (< 10 pixels) for
+    reliable optical flow estimation. At pyramid level i, the dimension size
+    is dim * eta^i, where dim = min(m, n).
+
+    Parameters
+    ----------
+    eta : float
+        Pyramid downsampling factor per level (0 < eta <= 1)
+    levels : int
+        Maximum number of levels to attempt
+    m : int
+        First dimension
+    n : int
+        Second dimension
+
+    Returns
+    -------
+    warpingdepth : int
+        Maximum pyramid depth satisfying: round(dim * eta^i) >= 10,
+        where dim = min(m, n). Approximately floor(log(10/dim) / log(eta)).
+
+    Notes
+    -----
+    When called from get_displacement with (m, m) for height and (n, n) for
+    width, this enables independent pyramid depth computation per dimension,
+    allowing narrow ROIs to achieve large displacements along their longer
+    dimension without being limited by the shorter dimension.
+    """
     min_dim = min(m, n)
     warpingdepth = 0
     for _ in range(levels):
@@ -89,10 +160,76 @@ def warpingDepth(eta, levels, m, n):
 
 
 def add_boundary(f):
+    """
+    Add 1-pixel boundary padding with edge replication.
+
+    Pads array with 1 pixel on all sides by replicating edge values,
+    implementing Neumann boundary conditions for the flow solver.
+
+    Parameters
+    ----------
+    f : np.ndarray
+        Input array to pad
+
+    Returns
+    -------
+    padded : np.ndarray
+        Padded array with shape increased by 2 in each dimension
+
+    Notes
+    -----
+    Uses np.pad with mode='edge', which replicates the values at the edges
+    to provide Neumann (zero-derivative) boundary conditions.
+    """
     return np.pad(f, 1, mode='edge')
 
 
 def get_motion_tensor_gc(f1, f2, hy, hx):
+    """
+    Compute motion tensor components for gradient constancy assumption.
+
+    Calculates the motion tensor components that describe the linearized
+    optical flow constraints under the gradient constancy assumption, where
+    image gradients are assumed to remain constant between frames. The motion
+    tensor encodes motion through temporal derivatives and frame-averaged
+    spatial derivatives between f1 and f2.
+
+    Parameters
+    ----------
+    f1 : ndarray
+        Reference frame (2D array).
+    f2 : ndarray
+        Moving frame (2D array).
+    hy : float
+        Spatial grid spacing in y-direction.
+    hx : float
+        Spatial grid spacing in x-direction.
+
+    Returns
+    -------
+    J11, J22, J33, J12, J13, J23 : ndarray
+        Motion tensor components used in the optical flow solver. These
+        components encode the linearized gradient constancy constraints
+        with adaptive regularization based on local gradient structure.
+
+    Notes
+    -----
+    The gradient constancy assumption extends the classic brightness constancy
+    by requiring that spatial gradients also remain constant during motion.
+    This provides additional robustness in textured regions.
+
+    The tensor components are computed with adaptive regularization that
+    weights contributions based on local gradient magnitudes, making the
+    estimation robust to noise while preserving motion details.
+
+    References
+    ----------
+    .. [1] Brox, T., Bruhn, A., Papenberg, N., and Weickert, J. "High
+       Accuracy Optical Flow Estimation Based on a Theory for Warping",
+       ECCV 2004.
+    .. [2] Flotho, P., et al. "Software for Non-Parametric Image
+       Registration of 2-Photon Imaging Data", J. Biophotonics, 2022.
+    """
     f1p = np.pad(f1, ((1, 1), (1, 1)), mode='symmetric')
     f2p = np.pad(f2, ((1, 1), (1, 1)), mode='symmetric')
     _, fx1p = np.gradient(f1p, hy, hx)
