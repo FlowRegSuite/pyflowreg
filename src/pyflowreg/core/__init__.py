@@ -1,3 +1,48 @@
+"""
+Core Optical Flow Computation Module
+=====================================
+
+This module provides the core variational optical flow computation engine
+for PyFlowReg, implementing pyramid-based multi-scale flow estimation with
+non-linear diffusion regularization.
+
+The module includes:
+- Main optical flow solver (get_displacement via backend system)
+- Low-level flow computation at each pyramid level (compute_flow)
+- Backend registration system for multiple flow implementations
+
+Available Backends
+------------------
+flowreg : Default variational optical flow implementation
+    Full-featured gradient constancy optical flow with pyramid scheme
+diso : Planned numba-based reimplementation
+gpu : Planned GPU-accelerated implementation
+
+Functions
+---------
+compute_flow
+    Low-level numba-optimized flow field solver
+register_backend
+    Register new optical flow backend
+get_backend
+    Retrieve registered backend by name
+list_backends
+    List all available backends
+is_backend_available
+    Check if a specific backend is available
+
+See Also
+--------
+pyflowreg.core.optical_flow : Main optical flow implementation
+pyflowreg.core.level_solver : Pyramid level solver
+
+Notes
+-----
+The core implementation maintains algorithmic compatibility with the
+MATLAB Flow-Registration toolbox while leveraging numba optimization
+for performance.
+"""
+
 from .level_solver import compute_flow
 from .backend_registry import register_backend, get_backend, list_backends, is_backend_available
 
