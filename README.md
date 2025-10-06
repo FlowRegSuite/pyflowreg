@@ -34,8 +34,8 @@ This code requires python 3.10 or higher.
 Initialize the environment with
 
 ```bash
-conda create --name pyflowreg python=3.10
-conda activate pyflowreg
+mamba create --name pyflowreg python=3.10
+mamba activate pyflowreg
 pip install -r requirements.txt
 ```
 
@@ -48,10 +48,10 @@ pip install -r requirements_win.txt
 to enable Sutter MDF file support.
 
 
-## Installation via pip and conda
+## Installation via pip and mamba
 
 ```bash
-conda create --name pyflowreg python=3.10
+mamba create --name pyflowreg python=3.10
 pip install pyflowreg
 ```
 

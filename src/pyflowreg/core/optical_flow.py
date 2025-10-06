@@ -1,3 +1,37 @@
+"""
+Optical Flow Implementation
+============================
+
+This module implements the variational optical flow computation using
+a pyramid-based multi-scale approach with gradient constancy assumption.
+
+This is the default 'flowreg' backend implementation that maintains
+compatibility with the MATLAB Flow-Registration toolbox.
+
+Functions
+---------
+get_displacement
+    Main API function for computing optical flow between two frames
+get_motion_tensor_gc
+    Compute motion tensor components for gradient constancy
+imregister_wrapper
+    Warp an image using computed displacement fields
+warpingDepth
+    Calculate pyramid depth based on image dimensions
+add_boundary
+    Add boundary padding to arrays
+
+Notes
+-----
+The implementation uses a coarse-to-fine pyramid scheme where flow is
+computed at progressively finer resolutions, with each level initialized
+from the previous coarser level.
+
+See Also
+--------
+pyflowreg.core.level_solver.compute_flow : Low-level flow solver
+"""
+
 import cv2
 import numpy as np
 from scipy.ndimage import median_filter
@@ -7,21 +41,49 @@ from pyflowreg.core import compute_flow
 from pyflowreg.util.resize_util import imresize_numba, imresize_fused_gauss_cubic
 
 
-def matlab_gradient(f, spacing):
-    """Match MATLAB's gradient exactly"""
-    grad = np.zeros_like(f)
-    # Interior: central differences
-    grad[1:-1] = (f[2:] - f[:-2]) / (2 * spacing)
-    # Boundaries: one-sided (MATLAB style)
-    grad[0] = (f[1] - f[0]) / spacing
-    grad[-1] = (f[-1] - f[-2]) / spacing
-    return grad
-
-
 resize = imresize_fused_gauss_cubic
 
 
 def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
+    """
+    Backward warp of moving image using displacement field.
+
+    Performs backward registration by warping f2_level toward f1_level using
+    displacement field (u, v) with bicubic or bilinear interpolation via cv2.remap.
+    Out-of-bounds pixels are replaced with corresponding pixels from f1_level.
+
+    Parameters
+    ----------
+    f2_level : np.ndarray
+        Moving image to warp, shape (H, W) or (H, W, C)
+    u : np.ndarray
+        Horizontal displacement field, shape (H, W)
+    v : np.ndarray
+        Vertical displacement field, shape (H, W)
+    f1_level : np.ndarray
+        Fixed (reference) image, shape (H, W) or (H, W, C)
+    interpolation_method : str, default='cubic'
+        Interpolation method: 'cubic' (bicubic) or 'linear' (bilinear).
+        Defaults to bicubic following Sun et al. best practices.
+
+    Returns
+    -------
+    warped : np.ndarray
+        Backward-warped image, shape (H, W) or (H, W, C)
+
+    Notes
+    -----
+    The displacement convention is: warped_pos = original_pos + (u, v)
+    Out-of-bounds regions use values from f1_level to maintain continuity.
+
+    Bicubic interpolation is more accurate than bilinear for optical flow
+    estimation and is the recommended default.
+
+    References
+    ----------
+    .. [1] Sun, D., Roth, S., and Black, M. J. "Secrets of Optical Flow
+       Estimation and Their Principles", CVPR 2010.
+    """
     if f2_level.ndim == 2:
         f2_level = f2_level[:, :, None]
         f1_level = f1_level[:, :, None]
@@ -55,6 +117,38 @@ def imregister_wrapper(f2_level, u, v, f1_level, interpolation_method='cubic'):
 
 
 def warpingDepth(eta, levels, m, n):
+    """
+    Calculate maximum pyramid depth for given dimension and warping factor.
+
+    Determines how many pyramid levels can be computed given the downsampling
+    factor eta before the dimension becomes too small (< 10 pixels) for
+    reliable optical flow estimation. At pyramid level i, the dimension size
+    is dim * eta^i, where dim = min(m, n).
+
+    Parameters
+    ----------
+    eta : float
+        Pyramid downsampling factor per level (0 < eta <= 1)
+    levels : int
+        Maximum number of levels to attempt
+    m : int
+        First dimension
+    n : int
+        Second dimension
+
+    Returns
+    -------
+    warpingdepth : int
+        Maximum pyramid depth satisfying: round(dim * eta^i) >= 10,
+        where dim = min(m, n). Approximately floor(log(10/dim) / log(eta)).
+
+    Notes
+    -----
+    When called from get_displacement with (m, m) for height and (n, n) for
+    width, this enables independent pyramid depth computation per dimension,
+    allowing narrow ROIs to achieve large displacements along their longer
+    dimension without being limited by the shorter dimension.
+    """
     min_dim = min(m, n)
     warpingdepth = 0
     for _ in range(levels):
@@ -66,10 +160,76 @@ def warpingDepth(eta, levels, m, n):
 
 
 def add_boundary(f):
+    """
+    Add 1-pixel boundary padding with edge replication.
+
+    Pads array with 1 pixel on all sides by replicating edge values,
+    implementing Neumann boundary conditions for the flow solver.
+
+    Parameters
+    ----------
+    f : np.ndarray
+        Input array to pad
+
+    Returns
+    -------
+    padded : np.ndarray
+        Padded array with shape increased by 2 in each dimension
+
+    Notes
+    -----
+    Uses np.pad with mode='edge', which replicates the values at the edges
+    to provide Neumann (zero-derivative) boundary conditions.
+    """
     return np.pad(f, 1, mode='edge')
 
 
 def get_motion_tensor_gc(f1, f2, hy, hx):
+    """
+    Compute motion tensor components for gradient constancy assumption.
+
+    Calculates the motion tensor components that describe the linearized
+    optical flow constraints under the gradient constancy assumption, where
+    image gradients are assumed to remain constant between frames. The motion
+    tensor encodes motion through temporal derivatives and frame-averaged
+    spatial derivatives between f1 and f2.
+
+    Parameters
+    ----------
+    f1 : ndarray
+        Reference frame (2D array).
+    f2 : ndarray
+        Moving frame (2D array).
+    hy : float
+        Spatial grid spacing in y-direction.
+    hx : float
+        Spatial grid spacing in x-direction.
+
+    Returns
+    -------
+    J11, J22, J33, J12, J13, J23 : ndarray
+        Motion tensor components used in the optical flow solver. These
+        components encode the linearized gradient constancy constraints
+        with adaptive regularization based on local gradient structure.
+
+    Notes
+    -----
+    The gradient constancy assumption extends the classic brightness constancy
+    by requiring that spatial gradients also remain constant during motion.
+    This provides additional robustness in textured regions.
+
+    The tensor components are computed with adaptive regularization that
+    weights contributions based on local gradient magnitudes, making the
+    estimation robust to noise while preserving motion details.
+
+    References
+    ----------
+    .. [1] Brox, T., Bruhn, A., Papenberg, N., and Weickert, J. "High
+       Accuracy Optical Flow Estimation Based on a Theory for Warping",
+       ECCV 2004.
+    .. [2] Flotho, P., et al. "Software for Non-Parametric Image
+       Registration of 2-Photon Imaging Data", J. Biophotonics, 2022.
+    """
     f1p = np.pad(f1, ((1, 1), (1, 1)), mode='symmetric')
     f2p = np.pad(f2, ((1, 1), (1, 1)), mode='symmetric')
     _, fx1p = np.gradient(f1p, hy, hx)
@@ -121,8 +281,94 @@ def level_solver(J11, J22, J33, J12, J13, J23, weight, u, v, alpha, iterations, 
     return du, dv
 
 
-def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, min_level=0, levels=50, eta=0.8,
-                     a_smooth=0.5, a_data=0.45, const_assumption='gc', uv=None, weight=None):
+def get_displacement(fixed, moving, alpha=(2, 2), update_lag=5, iterations=50, min_level=0, levels=50, eta=0.8,
+                     a_smooth=1.0, a_data=0.45, const_assumption='gc', uv=None, weight=None):
+    """
+    Compute optical flow displacement field using variational approach.
+
+    This function implements the main pyramid-based variational optical flow
+    algorithm using gradient constancy assumption with non-linear diffusion
+    regularization. Flow is computed from coarse to fine scales, with each
+    level initialized from the upsampled result of the previous coarser level.
+
+    Parameters
+    ----------
+    fixed : np.ndarray
+        Reference (fixed) image, shape (H, W) or (H, W, C)
+    moving : np.ndarray
+        Moving image to register, shape (H, W) or (H, W, C)
+    alpha : tuple of float, default=(2, 2)
+        Regularization strength (alpha_x, alpha_y) controlling smoothness.
+        Larger values enforce smoother flow fields.
+    update_lag : int, default=5
+        Number of iterations between updates of non-linearity weights (psi).
+        Smaller values update more frequently (slower, potentially more accurate).
+        Larger values update less frequently (faster convergence).
+    iterations : int, default=50
+        Number of SOR iterations per pyramid level
+    min_level : int, default=0
+        Minimum (finest) pyramid level to compute. 0 = full resolution.
+    levels : int, default=50
+        Maximum number of pyramid levels attempted
+    eta : float, default=0.8
+        Pyramid downsampling factor per level (0 < eta <= 1).
+        Each level is eta times the size of the previous level.
+    a_smooth : float, default=1.0
+        Exponent for generalized Charbonnier penalty on smoothness term.
+        Controls robustness of smoothness regularization via ρ(s²) = (s²)^a:
+        - a = 1.0: quadratic (L2) penalty, assumes smooth flow everywhere
+        - a = 0.5: linear (L1) penalty
+        - 0.5 < a < 1.0: sublinear, robust to local discontinuities
+    a_data : float, default=0.45
+        Exponent for generalized Charbonnier penalty on data term.
+        Controls robustness to noise and outliers via ρ(d²) = (d²)^a:
+        - a = 1.0: quadratic (L2) penalty
+        - a = 0.5: linear (L1) penalty
+        - a = 0.45: sublinear, robust to noisy microscopy data
+    const_assumption : str, default='gc'
+        Constancy assumption: 'gc' for gradient constancy (only option implemented)
+    uv : np.ndarray, optional
+        Initial displacement field (H, W, 2) with [u, v] components to initialize
+        the coarsest (highest) pyramid level. If None, initializes with zeros.
+    weight : np.ndarray or list, optional
+        Channel weights for multi-channel registration. Can be:
+        - 1D array of length C: per-channel weights (normalized to sum to 1)
+        - 2D array (H, W): spatial weights broadcast to all channels
+        - 3D array (H, W, C): full spatial and channel weights
+        If None, uses equal weights (1/C) for all channels.
+
+    Returns
+    -------
+    flow : np.ndarray
+        Displacement field, shape (H, W, 2) where [:, :, 0] is horizontal (u)
+        and [:, :, 1] is vertical (v) displacement in pixels
+
+    Notes
+    -----
+    The pyramid depth is computed independently for each dimension (height and width),
+    stopping when that dimension becomes < 10 pixels. This allows narrow ROIs to
+    achieve large displacements along their longer dimension without being limited
+    by the shorter dimension.
+
+    The algorithm uses successive over-relaxation (SOR) with omega=1.95 for
+    fast convergence at each pyramid level.
+
+    When a_smooth=1.0 (quadratic), the smoothness penalty computation is
+    optimized by skipping weight updates (psi_smooth = 1.0).
+
+    This implementation maintains compatibility with MATLAB Flow-Registration.
+
+    See Also
+    --------
+    pyflowreg.motion_correction.compensate_arr : High-level API with OFOptions
+    get_motion_tensor_gc : Compute motion tensor for gradient constancy
+
+    References
+    ----------
+    .. [1] Flotho et al. "Software for Non-Parametric Image Registration of
+       2-Photon Imaging Data", J Biophotonics, 2022.
+       https://doi.org/10.1002/jbio.202100330
+    """
     # Ensure fixed and moving have the same number of dimensions
     assert fixed.ndim == moving.ndim, f"Fixed and moving must have same dimensions: fixed.shape={fixed.shape}, moving.shape={moving.shape}"
     fixed = fixed.astype(np.float64)
@@ -171,8 +417,8 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=10, iterations=20, 
     a_data_arr = np.ascontiguousarray(a_data_arr)
     f1_low = fixed
     f2_low = moving
-    max_level_y = warpingDepth(eta, levels, m, n)
-    max_level_x = warpingDepth(eta, levels, m, n)
+    max_level_y = warpingDepth(eta, levels, m, m)
+    max_level_x = warpingDepth(eta, levels, n, n)
     max_level = min(max_level_x, max_level_y) * 4
     max_level_y = min(max_level_y, max_level)
     max_level_x = min(max_level_x, max_level)

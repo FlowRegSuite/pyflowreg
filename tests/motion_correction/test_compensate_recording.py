@@ -25,20 +25,17 @@ class TestRegistrationConfig:
         """Test default configuration values."""
         config = RegistrationConfig()
         assert config.n_jobs == -1
-        assert config.batch_size == 100
         assert config.verbose is False
         assert config.parallelization is None
-    
+
     def test_custom_config(self):
         """Test custom configuration values."""
         config = RegistrationConfig(
             n_jobs=4,
-            batch_size=50,
             verbose=True,
             parallelization="threading"
         )
         assert config.n_jobs == 4
-        assert config.batch_size == 50
         assert config.verbose is True
         assert config.parallelization == "threading"
 
@@ -89,9 +86,9 @@ class TestCompensateRecording:
     
     def test_initialization_with_basic_options(self, basic_of_options):
         """Test pipeline initialization with basic options."""
-        config = RegistrationConfig(n_jobs=2, batch_size=5)
+        config = RegistrationConfig(n_jobs=2)
         pipeline = BatchMotionCorrector(basic_of_options, config)
-        
+
         assert pipeline.options == basic_of_options
         assert pipeline.config == config
         assert pipeline.executor is not None
@@ -167,19 +164,19 @@ class TestCompensateRecordingIntegration:
         """Test compensate_recording function with sequential executor."""
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
-        
+        fast_of_options.buffer_size = 5
+
         config = RegistrationConfig(
             n_jobs=1,
-            batch_size=5,
             verbose=True,
             parallelization="sequential"
         )
-        
+
         # Test that pipeline can be created and configured correctly
         pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.executor.name == "sequential"
         assert pipeline.n_workers == 1
-        assert pipeline.config.batch_size == 5
+        assert pipeline.options.buffer_size == 5
     
     @pytest.mark.integration
     @pytest.mark.parametrize("executor_name", ["sequential", "threading"])
@@ -187,18 +184,18 @@ class TestCompensateRecordingIntegration:
         """Test compensate_recording with different executors."""
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
-        
+        fast_of_options.buffer_size = 3
+
         config = RegistrationConfig(
             n_jobs=2,
-            batch_size=3,
             verbose=True,
             parallelization=executor_name
         )
-        
+
         # Test executor selection by creating pipeline and checking executor type
         pipeline = BatchMotionCorrector(fast_of_options, config)
         assert pipeline.executor.name == executor_name
-        
+
         # Test that pipeline can be initialized properly
         assert pipeline.config.parallelization == executor_name
         assert pipeline.n_workers == 2
@@ -241,8 +238,9 @@ class TestExecutorCleanup:
         """Test that executor is cleaned up after successful completion."""
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
-        
-        config = RegistrationConfig(parallelization="sequential", n_jobs=1, batch_size=2)
+        fast_of_options.buffer_size = 2
+
+        config = RegistrationConfig(parallelization="sequential", n_jobs=1)
         pipeline = BatchMotionCorrector(fast_of_options, config)
         executor = pipeline.executor
         
@@ -260,8 +258,9 @@ class TestExecutorCleanup:
         """Test that executor is cleaned up even when exceptions occur."""
         video_path, shape = small_test_video
         fast_of_options.input_file = video_path
-        
-        config = RegistrationConfig(parallelization="sequential", n_jobs=1, batch_size=2)
+        fast_of_options.buffer_size = 2
+
+        config = RegistrationConfig(parallelization="sequential", n_jobs=1)
         pipeline = BatchMotionCorrector(fast_of_options, config)
         executor = pipeline.executor
         
@@ -317,19 +316,19 @@ class TestComprehensiveIntegration:
         """Test full pipeline with medium-sized data."""
         video_path, shape = medium_test_video
         basic_of_options.input_file = video_path
-        
+        basic_of_options.buffer_size = 20
+
         config = RegistrationConfig(
             n_jobs=2,
-            batch_size=20,
             verbose=False,
             parallelization="sequential"  # Use sequential for deterministic results
         )
-        
+
         # This would run the actual pipeline - commented out for safety
         # reference = compensate_recording(basic_of_options, config=config)
         # assert reference is not None
-        
+
         # Instead, just test setup
         pipeline = BatchMotionCorrector(basic_of_options, config)
         assert pipeline.executor.name == "sequential"
-        assert pipeline.config.batch_size == 20
+        assert pipeline.options.buffer_size == 20
