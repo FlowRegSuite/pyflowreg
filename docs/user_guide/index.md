@@ -24,16 +24,16 @@ Detailed guides for configuring motion correction:
 Working with different file formats:
 
 - **[Supported Formats](file_formats.md)** - HDF5, TIFF, MAT, MDF
-- **[Format Conversion](file_formats.md#format-conversion)** - Converting between formats
-- **[Multi-File Datasets](file_formats.md#multi-file-datasets)** - Handling multiple files
+- **[Format Conversion](file_formats.md)** - Converting between formats
+- **[Multi-File Datasets](file_formats.md)** - Handling multiple files
 
 ## Parallelization
 
 Optimizing performance with parallel processing:
 
-- **[Choosing an Executor](parallelization.md#choosing-an-executor)** - Sequential, threading, multiprocessing
-- **[Configuration](parallelization.md#configuration)** - Tuning batch size and worker count
-- **[Performance Tips](parallelization.md#performance-tips)** - Memory management and optimization
+- **[Choosing an Executor](parallelization.md)** - Sequential, threading, multiprocessing
+- **[Configuration](parallelization.md)** - Tuning worker count and buffer size
+- **[Performance Tips](parallelization.md)** - Memory management and optimization
 
 ```{toctree}
 :maxdepth: 2
@@ -43,4 +43,5 @@ workflows
 configuration
 file_formats
 parallelization
+3d_volumes
 ```
