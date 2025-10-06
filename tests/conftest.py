@@ -91,7 +91,7 @@ def test_data_array():
 def basic_of_options(temp_dir):
     """Create basic OF_options for testing."""
     options = get_minimal_of_options()
-    options.output_path = temp_dir
+    options.output_path = Path(temp_dir)  # Convert to Path
     return options
 
 
@@ -99,10 +99,10 @@ def basic_of_options(temp_dir):
 def fast_of_options(temp_dir):
     """Create very fast OF_options for quick testing."""
     options = get_minimal_of_options()
-    options.output_path = temp_dir
+    options.output_path = Path(temp_dir)  # Convert to Path
     options.levels = 1  # Single level for speed
     options.iterations = 2  # Minimal iterations
-    options.alpha = 50.0  # Lower regularization for speed
+    options.alpha = (50.0, 50.0)
     return options
 
 
@@ -111,7 +111,6 @@ def sequential_config():
     """Create configuration for sequential executor."""
     return RegistrationConfig(
         n_jobs=1,
-        batch_size=10,
         verbose=True,
         parallelization="sequential"
     )
@@ -122,7 +121,6 @@ def threading_config():
     """Create configuration for threading executor."""
     return RegistrationConfig(
         n_jobs=2,
-        batch_size=10,
         verbose=True,
         parallelization="threading"
     )
@@ -133,7 +131,6 @@ def multiprocessing_config():
     """Create configuration for multiprocessing executor."""
     return RegistrationConfig(
         n_jobs=2,
-        batch_size=10,
         verbose=True,
         parallelization="multiprocessing"
     )

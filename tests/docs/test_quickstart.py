@@ -43,7 +43,7 @@ class TestQuickstartArrayWorkflow:
     def test_compensate_arr_basic_workflow(self, test_data_array, fast_of_options):
         """Test basic compensate_arr workflow from quickstart example."""
         # Simulate the quickstart example workflow
-        video = test_data_array
+        video, _ = test_data_array  # Unpack tuple (array, shape)
         reference = np.mean(video[:10], axis=0)
 
         # Configure motion correction
@@ -59,7 +59,7 @@ class TestQuickstartArrayWorkflow:
     @pytest.mark.parametrize("quality_setting", ["fast", "balanced", "quality"])
     def test_compensate_arr_quality_settings(self, test_data_array, quality_setting):
         """Test different quality settings from quickstart guide."""
-        video = test_data_array
+        video, _ = test_data_array  # Unpack tuple (array, shape)
         reference = np.mean(video[:10], axis=0)
 
         # Configure with different quality settings
@@ -78,23 +78,22 @@ class TestQuickstartFileWorkflow:
 
     def test_compensate_recording_options_creation(self, tmp_path, small_test_video):
         """Test OFOptions configuration for file-based workflow."""
-        # Create test input file
-        input_file = tmp_path / "test_video.npy"
-        np.save(input_file, small_test_video)
+        # small_test_video is already a file path, not an array
+        video_path, shape = small_test_video
 
         # Configure options as in quickstart example
         options = OFOptions(
-            input_file=str(input_file),
+            input_file=video_path,
             output_path=str(tmp_path / "results"),
             output_format="HDF5",
             quality_setting="fast",  # Use fast for testing
-            reference_frames=list(range(min(10, small_test_video.shape[0]))),
+            reference_frames=list(range(min(10, shape[0]))),
             save_w=True
         )
 
         # Verify options are correctly set
-        assert options.input_file == str(input_file)
-        assert options.output_format == "HDF5"
+        assert options.input_file == video_path
+        assert options.output_format.value == "HDF5"
         assert options.save_w is True
 
 

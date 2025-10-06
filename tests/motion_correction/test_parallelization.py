@@ -243,10 +243,12 @@ class TestProgressCallbacks:
             # Configure
             config = RegistrationConfig(
                 parallelization=executor_name,
-                n_jobs=2,
-                batch_size=5  # Small batches for more updates
+                n_jobs=2
             )
-            options = OFOptions(quality_setting="fast", buffer_size=5)
+            options = OFOptions(
+                quality_setting="fast",
+                buffer_size=5  # Small batches for more progress updates
+            )
             
             # Setup for array processing
             options.input_file = video
