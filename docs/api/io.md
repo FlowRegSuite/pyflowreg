@@ -17,6 +17,14 @@ Modular I/O system supporting multiple file formats through a common VideoReader
    :show-inheritance:
 ```
 
+## Dataset Discovery
+
+```{eval-rst}
+.. automodule:: pyflowreg.util.io._ds_io
+   :members:
+   :show-inheritance:
+```
+
 ## File Format Support
 
 ### HDF5

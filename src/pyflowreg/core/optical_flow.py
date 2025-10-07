@@ -224,10 +224,10 @@ def get_motion_tensor_gc(f1, f2, hy, hx):
 
     References
     ----------
-    .. [1] Brox, T., Bruhn, A., Papenberg, N., and Weickert, J. "High
+    .. [2] Brox, T., Bruhn, A., Papenberg, N., and Weickert, J. "High
        Accuracy Optical Flow Estimation Based on a Theory for Warping",
        ECCV 2004.
-    .. [2] Flotho, P., et al. "Software for Non-Parametric Image
+    .. [3] Flotho, P., et al. "Software for Non-Parametric Image
        Registration of 2-Photon Imaging Data", J. Biophotonics, 2022.
     """
     f1p = np.pad(f1, ((1, 1), (1, 1)), mode='symmetric')
@@ -365,7 +365,7 @@ def get_displacement(fixed, moving, alpha=(2, 2), update_lag=5, iterations=50, m
 
     References
     ----------
-    .. [1] Flotho et al. "Software for Non-Parametric Image Registration of
+    .. [4] Flotho et al. "Software for Non-Parametric Image Registration of
        2-Photon Imaging Data", J Biophotonics, 2022.
        https://doi.org/10.1002/jbio.202100330
     """

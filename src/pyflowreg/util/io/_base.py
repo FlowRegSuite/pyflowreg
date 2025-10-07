@@ -247,13 +247,27 @@ class VideoReader(ABC):
 
     @property
     def shape(self) -> Tuple[int, int, int, int]:
-        """Shape after binning: (T_binned, H, W, C)."""
+        """
+        Shape after binning.
+
+        Returns
+        -------
+        tuple of int
+            Shape as (T_binned, H, W, C)
+        """
         self._ensure_initialized()
         return (len(self), self.height, self.width, self.n_channels)
 
     @property
     def unbinned_shape(self) -> Tuple[int, int, int, int]:
-        """Original shape: (T_original, H, W, C)."""
+        """
+        Original shape before binning.
+
+        Returns
+        -------
+        tuple of int
+            Shape as (T_original, H, W, C)
+        """
         self._ensure_initialized()
         return (self.frame_count, self.height, self.width, self.n_channels)
 
