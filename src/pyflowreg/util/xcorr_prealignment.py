@@ -8,12 +8,12 @@ def estimate_rigid_xcorr_2d(ref_img, mov_img, target_hw=(256, 256), up=1, normal
                             weight=None):
     """
     Estimate rigid displacement between 2D images using phase cross-correlation.
-    
-    Parameters:
-    -----------
+
+    Parameters
+    ----------
     ref_img : np.ndarray
         Reference image, shape (H, W) or (H, W, C)
-    mov_img : np.ndarray  
+    mov_img : np.ndarray
         Moving image, shape (H, W) or (H, W, C)
     target_hw : tuple or int
         Target size for downsampling before correlation
@@ -25,9 +25,9 @@ def estimate_rigid_xcorr_2d(ref_img, mov_img, target_hw=(256, 256), up=1, normal
         Whether to disambiguate sign of shift
     weight : np.ndarray or None
         Channel weights for multi-channel images
-        
-    Returns:
-    --------
+
+    Returns
+    -------
     np.ndarray
         Displacement vector [dx, dy] (negated for backward warp convention)
     """

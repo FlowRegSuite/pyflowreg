@@ -305,6 +305,6 @@ For most 2-photon z-stack applications, PyFlowReg's 2D approach with adaptive re
 
 ## See Also
 
-- [2D Motion Correction](2d_correction.md) - Basic 2D time series registration
-- [Advanced Configuration](advanced_config.md) - Parameter tuning guide
+- [Workflows](workflows.md) - Basic 2D time series registration workflows
+- [Configuration](configuration.md) - Parameter tuning guide
 - [Parameter Theory](../theory/parameters.md) - Understanding alpha and sigma parameters

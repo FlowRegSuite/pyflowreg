@@ -3,6 +3,7 @@
 [![PyPI - License](https://img.shields.io/pypi/l/pyflowreg)](LICENSE)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/pyflowreg)](https://pypistats.org/packages/pyflowreg)
 [![GitHub Actions](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml)
+[![Documentation Status](https://readthedocs.org/projects/pyflowreg/badge/?version=latest)](https://pyflowreg.readthedocs.io/en/latest/?badge=latest)
 
 ## 🚧 Under Development
 
@@ -17,6 +18,8 @@ This project is still in an **alpha stage**. Expect rapid changes, incomplete fe
 Python bindings for Flow-Registration - variational optical-flow motion correction for 2-photon (2P) microscopy videos and volumetric 3D scans.
 
 Derived from the Flow-Registration toolbox for compensation and stabilization of multichannel microscopy videos. The original implementation spans MATLAB, Java (ImageJ/Fiji plugin), and C++. See the [publication](https://doi.org/10.1002/jbio.202100330) and the [project website](https://www.snnu.uni-saarland.de/flow-registration/) for method details and video results.
+
+**[📖 Read the Documentation](https://pyflowreg.readthedocs.io/)**
 
 **Related projects**
 - Original Flow-Registration repo: https://github.com/FlowRegSuite/flow_registration
