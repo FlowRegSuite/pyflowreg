@@ -33,7 +33,9 @@ class MDFFileReader(VideoReader):
     and 1-based MDF indexing.
     """
 
-    def __init__(self, file_path: str, buffer_size: int = 500, bin_size: int = 1, **kwargs):
+    def __init__(
+        self, file_path: str, buffer_size: int = 500, bin_size: int = 1, **kwargs
+    ):
         """
         Initialize MDF reader.
 
@@ -44,7 +46,9 @@ class MDFFileReader(VideoReader):
             channel_idx: Optional list of channels to read (1-based)
         """
         if not MDF_SUPPORTED:
-            raise NotImplementedError("MDF file reading requires Windows and 'pywin32' library")
+            raise NotImplementedError(
+                "MDF file reading requires Windows and 'pywin32' library"
+            )
 
         super().__init__()
 
@@ -54,7 +58,7 @@ class MDFFileReader(VideoReader):
         self.mfile = None
 
         # MDF-specific options
-        self.channel_idx = kwargs.get('channel_idx', None)  # Will be set in _initialize
+        self.channel_idx = kwargs.get("channel_idx", None)  # Will be set in _initialize
         self._out_of_bound_warning = True
 
         # Validate file exists
@@ -64,27 +68,29 @@ class MDFFileReader(VideoReader):
     def _initialize(self):
         """Open MDF file and read metadata."""
         try:
-            self.mfile = win32com.client.Dispatch('MCSX.Data')
+            self.mfile = win32com.client.Dispatch("MCSX.Data")
             if self.mfile.OpenMCSFile(self.file_path):
-                raise ConnectionAbortedError("Failed to open MDF file. Only one instance can be opened at once. "
-                                             "Close other MDF viewers and clear any other instances.")
+                raise ConnectionAbortedError(
+                    "Failed to open MDF file. Only one instance can be opened at once. "
+                    "Close other MDF viewers and clear any other instances."
+                )
         except Exception as e:
             raise ConnectionError(f"Could not connect to MCSX.Data COM server: {e}")
 
         # Read core metadata
-        self.frame_count = int(self.mfile.ReadParameter('Frame Count'))
-        self.height = int(self.mfile.ReadParameter('Frame Height'))
-        self.width = int(self.mfile.ReadParameter('Frame Width'))
+        self.frame_count = int(self.mfile.ReadParameter("Frame Count"))
+        self.height = int(self.mfile.ReadParameter("Frame Height"))
+        self.width = int(self.mfile.ReadParameter("Frame Width"))
 
         # Determine bit depth and dtype
-        bit_depth_str = self.mfile.ReadParameter('Frame Bit Depth').split('-')[0]
+        bit_depth_str = self.mfile.ReadParameter("Frame Bit Depth").split("-")[0]
         bit_depth = int(bit_depth_str)
         self.dtype = self._get_numpy_dtype(bit_depth)
 
         # Detect available channels (MDF uses 0-based channel indices in metadata)
         available_channels = []
         for i in range(3):  # Check channels 0, 1, 2 in metadata
-            if self.mfile.ReadParameter(f'Scanning Ch {i} Name'):
+            if self.mfile.ReadParameter(f"Scanning Ch {i} Name"):
                 available_channels.append(i + 1)  # Convert to 1-based for ReadFrame
 
         # Set channels to read
@@ -94,7 +100,9 @@ class MDFFileReader(VideoReader):
             # Validate requested channels
             for ch in self.channel_idx:
                 if ch not in available_channels:
-                    raise ValueError(f"Channel {ch} not available. Available: {available_channels}")
+                    raise ValueError(
+                        f"Channel {ch} not available. Available: {available_channels}"
+                    )
 
         self.n_channels = len(self.channel_idx)
 
@@ -136,11 +144,15 @@ class MDFFileReader(VideoReader):
         # Warn once about out-of-bounds values
         if self._out_of_bound_warning and (has_negatives or has_overflow):
             if np.issubdtype(self.dtype, np.unsignedinteger) and has_negatives:
-                print(f"Warning: Negative values in frame {frame_idx}, "
-                      f"clamping to 0 for dtype {self.dtype}")
+                print(
+                    f"Warning: Negative values in frame {frame_idx}, "
+                    f"clamping to 0 for dtype {self.dtype}"
+                )
             if has_overflow:
-                print(f"Warning: Values exceeding {max_val} in frame {frame_idx}, "
-                      f"clamping to maximum for dtype {self.dtype}")
+                print(
+                    f"Warning: Values exceeding {max_val} in frame {frame_idx}, "
+                    f"clamping to maximum for dtype {self.dtype}"
+                )
             self._out_of_bound_warning = False
 
         # Clamp and convert
@@ -164,10 +176,14 @@ class MDFFileReader(VideoReader):
 
         n_frames = len(frame_indices)
         if n_frames == 0:
-            return np.empty((0, self.height, self.width, self.n_channels), dtype=self.dtype)
+            return np.empty(
+                (0, self.height, self.width, self.n_channels), dtype=self.dtype
+            )
 
         # Allocate output array
-        output = np.zeros((n_frames, self.height, self.width, self.n_channels), dtype=self.dtype)
+        output = np.zeros(
+            (n_frames, self.height, self.width, self.n_channels), dtype=self.dtype
+        )
 
         # Read each frame
         for i, frame_idx in enumerate(frame_indices):
@@ -176,7 +192,9 @@ class MDFFileReader(VideoReader):
 
             # Validate frame index
             if mdf_frame_idx < 1 or mdf_frame_idx > self.frame_count:
-                raise IndexError(f"Frame index {frame_idx} out of range [0, {self.frame_count})")
+                raise IndexError(
+                    f"Frame index {frame_idx} out of range [0, {self.frame_count})"
+                )
 
             # Read each channel for this frame
             for ch_idx, channel_num in enumerate(self.channel_idx):
@@ -184,8 +202,10 @@ class MDFFileReader(VideoReader):
                 raw_data = self.mfile.ReadFrame(channel_num, mdf_frame_idx)
 
                 if raw_data is None:
-                    raise IOError(f"Failed to read frame {frame_idx} (MDF frame {mdf_frame_idx}) "
-                                  f"from channel {channel_num}. File may be locked or corrupted.")
+                    raise IOError(
+                        f"Failed to read frame {frame_idx} (MDF frame {mdf_frame_idx}) "
+                        f"from channel {channel_num}. File may be locked or corrupted."
+                    )
 
                 # Clean and transpose data
                 # MDF returns data in column-major order (Fortran-style)
@@ -215,7 +235,7 @@ class MDFFileReader(VideoReader):
 
         try:
             # Re-establish connection
-            self.mfile = win32com.client.Dispatch('MCSX.Data')
+            self.mfile = win32com.client.Dispatch("MCSX.Data")
             if self.mfile.OpenMCSFile(self.file_path):
                 raise ConnectionAbortedError("Failed to re-open MDF file")
 
@@ -236,19 +256,26 @@ class MDFFileReader(VideoReader):
         self._ensure_initialized()
 
         # Helper to parse parameters with units
-        def parse_param(value: str, unit: str = '', dtype=float):
+        def parse_param(value: str, unit: str = "", dtype=float):
             try:
                 if value:
-                    clean = value.replace(',', '.').replace(unit, '').strip()
+                    clean = value.replace(",", ".").replace(unit, "").strip()
                     return dtype(clean)
-            except:
+            except (ValueError, AttributeError, TypeError):
+                # Silently return None for missing/unparseable metadata (expected behavior)
                 return None
 
         # Read various parameters
-        microns_per_pixel = parse_param(self.mfile.ReadParameter('Microns per Pixel'), 'µm')
-        magnification = parse_param(self.mfile.ReadParameter('Magnification'), 'x')
-        frame_duration_s = parse_param(self.mfile.ReadParameter('Frame Duration (s)'), 's')
-        frame_interval_ms = parse_param(self.mfile.ReadParameter('Frame Interval (ms)'), 'ms')
+        microns_per_pixel = parse_param(
+            self.mfile.ReadParameter("Microns per Pixel"), "µm"
+        )
+        magnification = parse_param(self.mfile.ReadParameter("Magnification"), "x")
+        frame_duration_s = parse_param(
+            self.mfile.ReadParameter("Frame Duration (s)"), "s"
+        )
+        frame_interval_ms = parse_param(
+            self.mfile.ReadParameter("Frame Interval (ms)"), "ms"
+        )
 
         # Calculate time step
         dt = (frame_duration_s or 0) + (frame_interval_ms or 0) / 1000.0
@@ -260,13 +287,21 @@ class MDFFileReader(VideoReader):
         channel_names = []
         for ch in self.channel_idx:
             # Channel index in metadata is 0-based
-            name = self.mfile.ReadParameter(f'Scanning Ch {ch - 1} Name')
+            name = self.mfile.ReadParameter(f"Scanning Ch {ch - 1} Name")
             channel_names.append(name or f"Channel {ch}")
 
-        return {"file_name": os.path.basename(self.file_path), "frame_count": self.frame_count, "shape": self.shape,
-            "unbinned_shape": self.unbinned_shape, "channels": channel_names, "dt_seconds": dt * self.bin_size,
-            "pixel_size_um": microns_per_pixel or 1.0, "magnification": magnification or 1.0, "dtype": str(self.dtype),
-            "created_on": self.mfile.ReadParameter('Created On')}
+        return {
+            "file_name": os.path.basename(self.file_path),
+            "frame_count": self.frame_count,
+            "shape": self.shape,
+            "unbinned_shape": self.unbinned_shape,
+            "channels": channel_names,
+            "dt_seconds": dt * self.bin_size,
+            "pixel_size_um": microns_per_pixel or 1.0,
+            "magnification": magnification or 1.0,
+            "dtype": str(self.dtype),
+            "created_on": self.mfile.ReadParameter("Created On"),
+        }
 
 
 if __name__ == "__main__":
@@ -276,6 +311,14 @@ if __name__ == "__main__":
     vid = reader.read_batch()
     import cv2
 
-    cv2.imshow("Frame", cv2.normalize(vid[0, :, :, 0], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U))
-    cv2.imshow("Frame", cv2.normalize(reader[0:5][0, :, :, 0], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U))
+    cv2.imshow(
+        "Frame",
+        cv2.normalize(vid[0, :, :, 0], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U),
+    )
+    cv2.imshow(
+        "Frame",
+        cv2.normalize(
+            reader[0:5][0, :, :, 0], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U
+        ),
+    )
     cv2.waitKey()

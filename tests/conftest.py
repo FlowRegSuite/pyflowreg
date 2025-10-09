@@ -5,16 +5,15 @@ Pytest configuration and fixtures for PyFlowReg tests.
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Tuple
 
 import pytest
 import numpy as np
 
 from tests.fixtures import (
-    create_test_video_hdf5, 
-    create_simple_test_data, 
+    create_test_video_hdf5,
+    create_simple_test_data,
     get_minimal_of_options,
-    cleanup_temp_files
+    cleanup_temp_files,
 )
 from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
 from pyflowreg._runtime import RuntimeContext
@@ -24,9 +23,8 @@ from pyflowreg._runtime import RuntimeContext
 def initialize_runtime_context():
     """Initialize RuntimeContext for all tests."""
     RuntimeContext.init(force=True)
-    
+
     # Import parallelization module to trigger executor registration
-    import pyflowreg.motion_correction.parallelization
 
 
 @pytest.fixture(scope="function")
@@ -45,7 +43,7 @@ def small_test_video(temp_dir):
         shape=shape,
         output_path=str(Path(temp_dir) / "small_test.h5"),
         pattern="motion",
-        noise_level=0.05
+        noise_level=0.05,
     )
     yield video_path, shape
     cleanup_temp_files(video_path)
@@ -59,7 +57,7 @@ def medium_test_video(temp_dir):
         shape=shape,
         output_path=str(Path(temp_dir) / "medium_test.h5"),
         pattern="motion",
-        noise_level=0.1
+        noise_level=0.1,
     )
     yield video_path, shape
     cleanup_temp_files(video_path)
@@ -73,7 +71,7 @@ def static_test_video(temp_dir):
         shape=shape,
         output_path=str(Path(temp_dir) / "static_test.h5"),
         pattern="static",
-        noise_level=0.02
+        noise_level=0.02,
     )
     yield video_path, shape
     cleanup_temp_files(video_path)
@@ -109,31 +107,19 @@ def fast_of_options(temp_dir):
 @pytest.fixture(scope="function")
 def sequential_config():
     """Create configuration for sequential executor."""
-    return RegistrationConfig(
-        n_jobs=1,
-        verbose=True,
-        parallelization="sequential"
-    )
+    return RegistrationConfig(n_jobs=1, verbose=True, parallelization="sequential")
 
 
 @pytest.fixture(scope="function")
 def threading_config():
     """Create configuration for threading executor."""
-    return RegistrationConfig(
-        n_jobs=2,
-        verbose=True,
-        parallelization="threading"
-    )
+    return RegistrationConfig(n_jobs=2, verbose=True, parallelization="threading")
 
 
 @pytest.fixture(scope="function")
 def multiprocessing_config():
     """Create configuration for multiprocessing executor."""
-    return RegistrationConfig(
-        n_jobs=2,
-        verbose=True,
-        parallelization="multiprocessing"
-    )
+    return RegistrationConfig(n_jobs=2, verbose=True, parallelization="multiprocessing")
 
 
 @pytest.fixture(scope="function")
@@ -143,7 +129,7 @@ def auto_config():
         n_jobs=2,
         batch_size=10,
         verbose=True,
-        parallelization=None  # Auto-select
+        parallelization=None,  # Auto-select
     )
 
 
@@ -151,10 +137,7 @@ def auto_config():
 def executor_config(request):
     """Parametrized fixture to test all executor types."""
     return RegistrationConfig(
-        n_jobs=2,
-        batch_size=5,
-        verbose=True,
-        parallelization=request.param
+        n_jobs=2, batch_size=5, verbose=True, parallelization=request.param
     )
 
 
@@ -163,17 +146,17 @@ def reference_frame():
     """Create a simple reference frame for testing."""
     H, W, C = 16, 32, 2
     ref = np.zeros((H, W, C), dtype=np.float32)
-    
+
     # Add some structure
     center_y, center_x = H // 2, W // 2
     y, x = np.ogrid[:H, :W]
-    
+
     for c in range(C):
         # Create circular pattern
         radius = min(H, W) // 4
-        mask = (x - center_x)**2 + (y - center_y)**2 <= radius**2
+        mask = (x - center_x) ** 2 + (y - center_y) ** 2 <= radius**2
         ref[:, :, c] = mask.astype(np.float32) * 0.8 + 0.2
-    
+
     return ref
 
 
@@ -192,12 +175,8 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "executor: marks tests that test specific executors"
     )
-    config.addinivalue_line(
-        "markers", "integration: marks integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "unit: marks unit tests"
-    )
+    config.addinivalue_line("markers", "integration: marks integration tests")
+    config.addinivalue_line("markers", "unit: marks unit tests")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -206,15 +185,17 @@ def pytest_collection_modifyitems(config, items):
         # Mark slow tests
         if "large" in item.name or "comprehensive" in item.name:
             item.add_marker(pytest.mark.slow)
-        
+
         # Mark executor tests
         if "executor" in item.name or item.name.startswith("test_compensate"):
             item.add_marker(pytest.mark.executor)
-        
+
         # Mark integration tests
         if "integration" in item.name or "end_to_end" in item.name:
             item.add_marker(pytest.mark.integration)
-        
+
         # Mark unit tests (default for most tests)
-        if not any(marker.name in ["integration", "slow"] for marker in item.iter_markers()):
+        if not any(
+            marker.name in ["integration", "slow"] for marker in item.iter_markers()
+        ):
             item.add_marker(pytest.mark.unit)

@@ -40,7 +40,8 @@ This Python implementation maintains full algorithmic compatibility with the
 MATLAB version. Any differences in behavior should be reported as issues.
 """
 
-from pyflowreg.core.optical_flow import get_displacement
+from pyflowreg.core.optical_flow import get_displacement as get_displacement
+
 try:
     from ._version import version as __version__
 except ImportError:

@@ -6,19 +6,27 @@ Python port of MATLAB `OF_options` using Pydantic v2 for validation/IO
 with full MATLAB compatibility including proper private attributes,
 preregistration, and edge case handling.
 """
+
 from __future__ import annotations
 
 import json
 import warnings
-from copy import deepcopy
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import tifffile
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 # Optional heavy deps
 try:
@@ -28,9 +36,6 @@ except ImportError:
 
 # Import IO backends - these are always available as part of the package
 from pyflowreg.util.io._base import VideoReader, VideoWriter
-from pyflowreg.util.io.hdf5 import HDF5FileReader, HDF5FileWriter
-from pyflowreg.util.io.mdf import MDFFileReader
-from pyflowreg.util.io.tiff import TIFFFileReader, TIFFFileWriter
 
 
 # Enums
@@ -45,7 +50,7 @@ class OutputFormat(str, Enum):
     CAIMAN_HDF5 = "CAIMAN_HDF5"
     BEGONIA = "BEGONIA"
     SUITE2P_TIFF = "SUITE2P_TIFF"
-    
+
     # Memory formats (special handling - ignores output_path)
     ARRAY = "ARRAY"  # Returns ArrayWriter for in-memory accumulation
 
@@ -84,7 +89,7 @@ class OFOptions(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         validate_assignment=False,  # Default Pydantic behavior - appropriate for config objects
-        extra="forbid"
+        extra="forbid",
     )
 
     # I/O
@@ -94,16 +99,28 @@ class OFOptions(BaseModel):
     output_path: Path = Field(Path("results"), description="Output directory")
     output_format: OutputFormat = Field(OutputFormat.MAT, description="Output format")
     output_file_name: Optional[str] = Field(None, description="Custom output filename")
-    channel_idx: Optional[List[int]] = Field(None, description="Channel indices to process")
+    channel_idx: Optional[List[int]] = Field(
+        None, description="Channel indices to process"
+    )
 
     # Flow parameters
-    alpha: Union[float, Tuple[float, float]] = Field((1.5, 1.5), description="Regularization strength")
-    weight: Union[List[float], np.ndarray] = Field([0.5, 0.5], description="Channel weights")
+    alpha: Union[float, Tuple[float, float]] = Field(
+        (1.5, 1.5), description="Regularization strength"
+    )
+    weight: Union[List[float], np.ndarray] = Field(
+        [0.5, 0.5], description="Channel weights"
+    )
     levels: StrictInt = Field(100, ge=1, description="Number of pyramid levels")
-    min_level: StrictInt = Field(-1, ge=-1, description="Min pyramid level; -1 = from preset")
-    quality_setting: QualitySetting = Field(QualitySetting.QUALITY, description="Quality preset")
+    min_level: StrictInt = Field(
+        -1, ge=-1, description="Min pyramid level; -1 = from preset"
+    )
+    quality_setting: QualitySetting = Field(
+        QualitySetting.QUALITY, description="Quality preset"
+    )
     eta: float = Field(0.8, gt=0, le=1, description="Downsample factor per level")
-    update_lag: StrictInt = Field(5, ge=1, description="Update lag for non-linear diffusion")
+    update_lag: StrictInt = Field(
+        5, ge=1, description="Update lag for non-linear diffusion"
+    )
     iterations: StrictInt = Field(50, ge=1, description="Iterations per level")
     a_smooth: float = Field(1.0, ge=0, description="Smoothness diffusion parameter")
     a_data: float = Field(0.45, gt=0, le=1, description="Data-term diffusion parameter")
@@ -111,7 +128,7 @@ class OFOptions(BaseModel):
     # Preprocessing
     sigma: Any = Field(
         [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]],
-        description="Gaussian [sx, sy, st] per-channel"
+        description="Gaussian [sx, sy, st] per-channel",
     )
     bin_size: StrictInt = Field(1, ge=1, description="Spatial binning factor")
     buffer_size: StrictInt = Field(400, ge=1, description="Frame buffer size")
@@ -120,9 +137,13 @@ class OFOptions(BaseModel):
     reference_frames: Union[List[int], str, Path, np.ndarray] = Field(
         list(range(50, 500)), description="Indices, path, or ndarray for reference"
     )
-    update_reference: bool = Field(False, description="Update reference during processing")
+    update_reference: bool = Field(
+        False, description="Update reference during processing"
+    )
     n_references: StrictInt = Field(1, ge=1, description="Number of references")
-    min_frames_per_reference: StrictInt = Field(20, ge=1, description="Min frames per reference cluster")
+    min_frames_per_reference: StrictInt = Field(
+        20, ge=1, description="Min frames per reference cluster"
+    )
 
     # Processing options
     verbose: bool = Field(False, description="Verbose logging")
@@ -131,23 +152,45 @@ class OFOptions(BaseModel):
     save_valid_mask: bool = Field(False, description="Save valid masks")
     save_valid_idx: bool = Field(False, description="Save valid frame indices")
     output_typename: Optional[str] = Field("double", description="Output dtype tag")
-    channel_normalization: ChannelNormalization = Field(ChannelNormalization.JOINT, description="Normalization mode")
-    interpolation_method: InterpolationMethod = Field(InterpolationMethod.CUBIC, description="Warp interpolation")
-    cc_initialization: bool = Field(False, description="Cross-correlation initialization")
-    cc_hw: Union[int, Tuple[int, int]] = Field(256, description="Target HW size for CC projections")
-    cc_up: int = Field(1, ge=1, description="Upsampling factor for subpixel CC accuracy")
-    update_initialization_w: bool = Field(True, description="Propagate flow init across batches")
-    naming_convention: NamingConvention = Field(NamingConvention.DEFAULT, description="Output filename style")
-    constancy_assumption: ConstancyAssumption = Field(ConstancyAssumption.GRADIENT, description="Constancy assumption")
+    channel_normalization: ChannelNormalization = Field(
+        ChannelNormalization.JOINT, description="Normalization mode"
+    )
+    interpolation_method: InterpolationMethod = Field(
+        InterpolationMethod.CUBIC, description="Warp interpolation"
+    )
+    cc_initialization: bool = Field(
+        False, description="Cross-correlation initialization"
+    )
+    cc_hw: Union[int, Tuple[int, int]] = Field(
+        256, description="Target HW size for CC projections"
+    )
+    cc_up: int = Field(
+        1, ge=1, description="Upsampling factor for subpixel CC accuracy"
+    )
+    update_initialization_w: bool = Field(
+        True, description="Propagate flow init across batches"
+    )
+    naming_convention: NamingConvention = Field(
+        NamingConvention.DEFAULT, description="Output filename style"
+    )
+    constancy_assumption: ConstancyAssumption = Field(
+        ConstancyAssumption.GRADIENT, description="Constancy assumption"
+    )
 
     # Backend configuration
     flow_backend: str = Field("flowreg", description="Flow backend name")
-    backend_params: Dict[str, Any] = Field(default_factory=dict, description="Backend-specific parameters")
-    
+    backend_params: Dict[str, Any] = Field(
+        default_factory=dict, description="Backend-specific parameters"
+    )
+
     # Non-serializable/runtime
     preproc_funct: Optional[Callable] = Field(None, exclude=True)
-    get_displacement_impl: Optional[Callable] = Field(None, exclude=True, description="Direct displacement callable")
-    get_displacement_factory: Optional[Callable[..., Callable]] = Field(None, exclude=True, description="Factory for displacement callable")
+    get_displacement_impl: Optional[Callable] = Field(
+        None, exclude=True, description="Direct displacement callable"
+    )
+    get_displacement_factory: Optional[Callable[..., Callable]] = Field(
+        None, exclude=True, description="Factory for displacement callable"
+    )
 
     # Private attributes (using PrivateAttr for Pydantic v2)
     _video_reader: Optional[VideoReader] = PrivateAttr(default=None)
@@ -155,7 +198,7 @@ class OFOptions(BaseModel):
     _quality_setting_old: QualitySetting = PrivateAttr(default=QualitySetting.QUALITY)
     _datatype: str = PrivateAttr(default="NONE")
 
-    @field_validator('alpha', mode='before')
+    @field_validator("alpha", mode="before")
     @classmethod
     def normalize_alpha(cls, v):
         """Normalize alpha to always be a 2-tuple of positive floats."""
@@ -177,7 +220,7 @@ class OFOptions(BaseModel):
         else:
             raise ValueError("Alpha must be scalar or 2-element tuple")
 
-    @field_validator('weight', mode='before')
+    @field_validator("weight", mode="before")
     @classmethod
     def normalize_weight(cls, v):
         """Normalize weight values to sum to 1."""
@@ -197,7 +240,7 @@ class OFOptions(BaseModel):
             return v
         return v
 
-    @field_validator('sigma', mode='before')
+    @field_validator("sigma", mode="before")
     @classmethod
     def normalize_sigma(cls, v):
         """Normalize sigma to correct shape."""
@@ -242,7 +285,7 @@ class OFOptions(BaseModel):
             QualitySetting.QUALITY: 0,
             QualitySetting.BALANCED: 4,
             QualitySetting.FAST: 6,
-            QualitySetting.CUSTOM: max(self.min_level, 0)
+            QualitySetting.CUSTOM: max(self.min_level, 0),
         }
         return mapping.get(self.quality_setting, 0)
 
@@ -309,15 +352,14 @@ class OFOptions(BaseModel):
 
         # Call factory function to create reader (matches MATLAB behavior)
         from pyflowreg.util.io.factory import get_video_file_reader
+
         self._video_reader = get_video_file_reader(
-            self.input_file,
-            buffer_size=self.buffer_size,
-            bin_size=self.bin_size
+            self.input_file, buffer_size=self.buffer_size, bin_size=self.bin_size
         )
-        
+
         # Store reader back in input_file (matches MATLAB line 247)
         self.input_file = self._video_reader
-        
+
         return self._video_reader
 
     def get_video_writer(self) -> VideoWriter:
@@ -332,30 +374,39 @@ class OFOptions(BaseModel):
         else:
             if self.naming_convention == NamingConvention.DEFAULT:
                 # Extension from output_format enum value
-                ext = "HDF5" if self.output_format == OutputFormat.HDF5 else self.output_format.value
+                ext = (
+                    "HDF5"
+                    if self.output_format == OutputFormat.HDF5
+                    else self.output_format.value
+                )
                 filename = str(self.output_path / f"compensated.{ext}")
             else:
                 reader = self.get_video_reader()
                 input_name = Path(getattr(reader, "input_file_name", "output")).stem
-                ext = "HDF5" if self.output_format == OutputFormat.HDF5 else self.output_format.value
+                ext = (
+                    "HDF5"
+                    if self.output_format == OutputFormat.HDF5
+                    else self.output_format.value
+                )
                 filename = str(self.output_path / f"{input_name}_compensated.{ext}")
 
         # Call factory function to create writer (matches MATLAB)
         from pyflowreg.util.io.factory import get_video_file_writer
-        self._video_writer = get_video_file_writer(
-            filename,
-            self.output_format.value
-        )
-        
+
+        self._video_writer = get_video_file_writer(filename, self.output_format.value)
+
         return self._video_writer
 
-    def get_reference_frame(self, video_reader: Optional[VideoReader] = None) -> Union[
-        np.ndarray, List[np.ndarray]]:
+    def get_reference_frame(
+        self, video_reader: Optional[VideoReader] = None
+    ) -> Union[np.ndarray, List[np.ndarray]]:
         """Get reference frame(s), with optional preregistration."""
         if self.n_references > 1:
-            warnings.warn("Multi-reference mode not fully implemented; repeating a single computed reference")
+            warnings.warn(
+                "Multi-reference mode not fully implemented; repeating a single computed reference"
+            )
             # Create a copy with n_references=1 to avoid recursion
-            single_ref_opts = self.model_copy(update={'n_references': 1})
+            single_ref_opts = self.model_copy(update={"n_references": 1})
             ref = single_ref_opts.get_reference_frame(video_reader)
             return [ref] * self.n_references
 
@@ -370,13 +421,16 @@ class OFOptions(BaseModel):
                 return tifffile.imread(str(p))
             try:
                 import imageio.v3 as iio
+
                 return iio.imread(str(p))
             except ImportError as e:
                 raise RuntimeError(f"Unable to read reference image: {p}") from e
 
         # List of frame indices - preregister
         if isinstance(self.reference_frames, list) and video_reader is not None:
-            frames = video_reader[self.reference_frames]  # (T,H,W,C) using array-like indexing
+            frames = video_reader[
+                self.reference_frames
+            ]  # (T,H,W,C) using array-like indexing
 
             if frames.ndim != 4:
                 if frames.ndim == 3:
@@ -406,9 +460,7 @@ class OFOptions(BaseModel):
                 for c in range(n_channels):
                     sig = self.get_sigma_at(c) + np.array([1, 1, 0.5])
                     frames_smooth[:, :, c, :] = gaussian_filter(
-                        frames[:, :, c, :],
-                        sigma=tuple(sig),
-                        mode='reflect'
+                        frames[:, :, c, :], sigma=tuple(sig), mode="reflect"
                     )
             else:
                 frames_smooth = frames
@@ -431,10 +483,14 @@ class OFOptions(BaseModel):
 
             # Compensate using stronger regularization for preregistration
             from pyflowreg.motion_correction.compensate_arr import compensate_arr
-            
+
             # Use stronger regularization for preregistration
-            alpha_prereg = tuple(a + 2.0 for a in self.alpha) if isinstance(self.alpha, tuple) else self.alpha + 2.0
-            
+            alpha_prereg = (
+                tuple(a + 2.0 for a in self.alpha)
+                if isinstance(self.alpha, tuple)
+                else self.alpha + 2.0
+            )
+
             # Create a temporary OFOptions for preregistration
             prereg_options = OFOptions(
                 alpha=alpha_prereg,
@@ -446,15 +502,17 @@ class OFOptions(BaseModel):
                 a_smooth=self.a_smooth,
                 a_data=self.a_data,
                 constancy_assumption=self.constancy_assumption,
-                weight=weight_2d
+                weight=weight_2d,
             )
-            
+
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
             frames_for_compensation = np.transpose(frames_norm, (3, 0, 1, 2))
-            
+
             # Compensate all frames against the mean reference
-            compensated, _ = compensate_arr(frames_for_compensation, ref_mean, options=prereg_options)
-            
+            compensated, _ = compensate_arr(
+                frames_for_compensation, ref_mean, options=prereg_options
+            )
+
             # Calculate mean of compensated frames as the reference
             reference = np.mean(compensated, axis=0)
 
@@ -473,7 +531,13 @@ class OFOptions(BaseModel):
 
         # Prepare data for JSON
         data = self.model_dump(
-            exclude={"preproc_funct", "_video_reader", "_video_writer", "_quality_setting_old", "_datatype"}
+            exclude={
+                "preproc_funct",
+                "_video_reader",
+                "_video_writer",
+                "_quality_setting_old",
+                "_datatype",
+            }
         )
 
         # Convert non-JSON types
@@ -527,28 +591,29 @@ class OFOptions(BaseModel):
     def resolve_get_displacement(self) -> Callable:
         """
         Resolve the displacement computation function based on configuration.
-        
+
         Priority order:
         1. get_displacement_impl (direct callable)
         2. get_displacement_factory with backend_params
         3. flow_backend from registry with backend_params
-        
+
         Returns:
             Callable for computing optical flow
         """
         # Priority 1: Direct implementation override
         if self.get_displacement_impl is not None:
             return self.get_displacement_impl
-        
+
         # Priority 2: Factory override
         if self.get_displacement_factory is not None:
             return self.get_displacement_factory(**self.backend_params)
-        
+
         # Priority 3: Registry backend
         from pyflowreg.core.backend_registry import get_backend
+
         factory = get_backend(self.flow_backend)
         return factory(**self.backend_params)
-    
+
     def to_dict(self) -> dict:
         """Get parameters dict for optical flow functions."""
         return {
@@ -561,20 +626,22 @@ class OFOptions(BaseModel):
             "update_lag": self.update_lag,
             "a_data": self.a_data,
             "a_smooth": self.a_smooth,
-            "const_assumption": self.constancy_assumption.value  # Fixed: use const_assumption for API compatibility
+            "const_assumption": self.constancy_assumption.value,  # Fixed: use const_assumption for API compatibility
         }
 
     def __repr__(self) -> str:
-        return (f"OFOptions(quality={self.quality_setting.value}, alpha={self.alpha}, "
-                f"levels={self.levels}, min_level={self.effective_min_level})")
+        return (
+            f"OFOptions(quality={self.quality_setting.value}, alpha={self.alpha}, "
+            f"levels={self.levels}, min_level={self.effective_min_level})"
+        )
 
 
 # Convenience functions
 def compensate_inplace(
-        frames: np.ndarray,
-        reference: np.ndarray,
-        options: Optional[OFOptions] = None,
-        **kwargs
+    frames: np.ndarray,
+    reference: np.ndarray,
+    options: Optional[OFOptions] = None,
+    **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compensate frames against reference.
@@ -628,7 +695,7 @@ if __name__ == "__main__":
         output_path=Path("./results"),
         quality_setting=QualitySetting.BALANCED,
         alpha=2.0,
-        weight=[0.6, 0.4]
+        weight=[0.6, 0.4],
     )
 
     print(opts)

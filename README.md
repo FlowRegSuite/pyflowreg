@@ -7,11 +7,11 @@
 
 ## 🚧 Under Development
 
-This project is still in an **alpha stage**. Expect rapid changes, incomplete features, and possible breaking updates between releases. 
+This project is still in an **alpha stage**. Expect rapid changes, incomplete features, and possible breaking updates between releases.
 
-- The API may evolve as we stabilize core functionality.  
-- Documentation and examples are incomplete.  
-- Feedback and bug reports are especially valuable at this stage.  
+- The API may evolve as we stabilize core functionality.
+- Documentation and examples are incomplete.
+- Feedback and bug reports are especially valuable at this stage.
 
 # <img src="https://raw.githubusercontent.com/FlowRegSuite/pyflowreg/refs/heads/main/img/flowreglogo.png" alt="FlowReg logo" height="64"> PyFlowReg
 
@@ -66,13 +66,108 @@ pip install pyflowreg[vis]
 
 ## Getting started
 
-This repository contains demo scripts under ```experiments``` and 
+This repository contains demo scripts under ```experiments``` and
 demo notebooks under ```notebooks```. The demos with the jupiter sequence should run out of the box.
 
 The plugin supports most of the commonly used file types such as HDF5, tiff stacks and matlab mat files. To run the motion compensation, the options need to be defined into a ```OF_options``` object.
 
 The python version of Flow-Registration aims at full MATLAB compatibility, any missing functionality should be reported as an issue. The API is designed to be similar to the original MATLAB code, with some adjustments for Python conventions.
 
+
+## Development
+
+### Code Quality & Pre-commit Hooks
+
+We use [pre-commit](https://pre-commit.com) for automated code quality checks before each commit. Our hooks are centralized in [FlowRegSuite/flowreg-hooks](https://github.com/FlowRegSuite/flowreg-hooks) for consistency across all FlowRegSuite projects.
+
+**What's checked:**
+- Ruff linting and formatting (Python code style)
+- NumPy docstring validation (documentation standards)
+- README image URLs (PyPI compatibility) are checked and automatically replaced
+- YAML/TOML validation and general file hygiene
+
+**Setup:**
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Install the git hook scripts
+pre-commit install
+
+# Run on all files to check current status
+pre-commit run --all-files
+```
+
+**Alternative installations (without pip):**
+
+If you're using pipx (isolated tool installation):
+
+```bash
+# Install pipx if not available
+python -m pip install --user pipx
+python -m pipx ensurepath
+
+# Install pre-commit via pipx
+pipx install pre-commit
+
+# For uv support (optional, if using uv as package installer)
+pipx inject pre-commit pre-commit-uv
+
+# Then install hooks as usual
+pre-commit install
+```
+
+Or using uv's tool management directly:
+
+```bash
+# Install uv if not available
+pip install uv
+
+# Install pre-commit as an isolated tool
+uv tool install pre-commit
+
+# Then install hooks as usual
+pre-commit install
+```
+
+**Daily usage:**
+
+Simply commit as usual - checks run automatically. Failed hooks show what needs fixing, and many issues are auto-corrected.
+
+```bash
+# Manual run when needed
+pre-commit run --all-files
+
+# Skip hooks in emergency (use sparingly)
+git commit -m "message" --no-verify
+```
+
+**Troubleshooting (Windows/Anaconda):**
+
+If you encounter registry or path errors on Windows, try:
+
+```powershell
+# Clear pre-commit cache
+pre-commit clean
+
+# Set environment variable (if needed)
+$env:PROGRAMDATA = "C:\ProgramData"
+
+# Try again
+pre-commit run --all-files
+```
+
+**Updating hooks** (maintainers only):
+```bash
+pre-commit autoupdate
+git add .pre-commit-config.yaml
+git commit -m "chore: update pre-commit hooks"
+```
+
+### Docstring Standards
+
+We follow NumPy-style docstrings for compatibility with Sphinx documentation. The `numpydoc-validation` hook ensures consistency. See the [NumPy docstring guide](https://numpydoc.readthedocs.io/en/latest/format.html) for examples.
 
 ## Dataset
 
@@ -101,4 +196,3 @@ BibTeX entry
   doi = {https://doi.org/10.1002/jbio.202100330}
 }
 ```
-

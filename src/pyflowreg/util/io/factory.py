@@ -1,21 +1,24 @@
-import os
-from typing import Union, List, Optional, Dict, Any
+from typing import Union, List
 from pathlib import Path
+import warnings
 
 import numpy as np
 
 from pyflowreg.util.io._base import VideoReader, VideoWriter
 
 
-def get_video_file_reader(input_source: Union[str, Path, np.ndarray, VideoReader, List[str]], 
-                          buffer_size: int = 500,
-                          bin_size: int = 1, **kwargs) -> VideoReader:
+def get_video_file_reader(
+    input_source: Union[str, Path, np.ndarray, VideoReader, List[str]],
+    buffer_size: int = 500,
+    bin_size: int = 1,
+    **kwargs,
+) -> VideoReader:
     """
     Factory function to create appropriate reader based on input type.
     Mirrors MATLAB get_video_file_reader functionality.
 
     Args:
-        input_source: Path to video file, numpy array, VideoReader instance, 
+        input_source: Path to video file, numpy array, VideoReader instance,
                      list of paths for multichannel, or folder for images
         buffer_size: Buffer size for reading
         bin_size: Temporal binning factor
@@ -29,8 +32,9 @@ def get_video_file_reader(input_source: Union[str, Path, np.ndarray, VideoReader
     # Handle numpy arrays
     if isinstance(input_source, np.ndarray):
         from pyflowreg.util.io._arr import ArrayReader
+
         return ArrayReader(input_source, buffer_size, bin_size)
-    
+
     # Handle VideoReader instances (already initialized)
     if isinstance(input_source, VideoReader):
         return input_source
@@ -45,36 +49,40 @@ def get_video_file_reader(input_source: Union[str, Path, np.ndarray, VideoReader
     # Handle multichannel input (list of files)
     if isinstance(input_source, list):
         return MULTICHANNELFileReader(input_source, buffer_size, bin_size, **kwargs)
-    
+
     # From here on, treat as file path
     file_path = input_source
     path = Path(file_path)
-    
+
     # Handle folder input (image sequence) - TODO: implement IMGFileReader
     if path.is_dir():
         # Check if folder contains images
-        image_exts = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'}
-        has_images = any(f.suffix.lower() in image_exts for f in path.iterdir() if f.is_file())
+        image_exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+        has_images = any(
+            f.suffix.lower() in image_exts for f in path.iterdir() if f.is_file()
+        )
         if has_images:
             # TODO: Implement IMGFileReader for image folders
-            raise NotImplementedError("Image folder reading not yet implemented. Use TIFF stacks instead.")
+            raise NotImplementedError(
+                "Image folder reading not yet implemented. Use TIFF stacks instead."
+            )
         else:
             raise ValueError(f"Folder {file_path} does not contain images")
-    
+
     # Handle file input
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
-    
+
     ext = path.suffix.lower()
 
     readers = {
-        '.tif': TIFFFileReader,
-        '.tiff': TIFFFileReader,
-        '.h5': HDF5FileReader,
-        '.hdf5': HDF5FileReader,
-        '.hdf': HDF5FileReader,
-        '.mat': MATFileReader,
-        '.mdf': MDFFileReader,
+        ".tif": TIFFFileReader,
+        ".tiff": TIFFFileReader,
+        ".h5": HDF5FileReader,
+        ".hdf5": HDF5FileReader,
+        ".hdf": HDF5FileReader,
+        ".mat": MATFileReader,
+        ".mdf": MDFFileReader,
     }
 
     reader_class = readers.get(ext)
@@ -84,11 +92,13 @@ def get_video_file_reader(input_source: Union[str, Path, np.ndarray, VideoReader
         # Try to check if it's HDF5 without extension
         try:
             import h5py
-            with h5py.File(str(file_path), 'r'):
+
+            with h5py.File(str(file_path), "r"):
                 return HDF5FileReader(str(file_path), buffer_size, bin_size, **kwargs)
-        except:
-            pass
-        
+        except Exception as e:
+            # Not an HDF5 file - warn before raising error
+            warnings.warn(f"File format detection failed: could not open as HDF5: {e}")
+
         # Try video formats as last resort
         # TODO: Implement AVIFileReader for video files
         raise ValueError(f"Unsupported file format: {ext}")
@@ -107,7 +117,6 @@ def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> Video
     Returns:
         Appropriate VideoWriter subclass instance
     """
-    from pathlib import Path
 
     # Import writers here to avoid circular imports
     from pyflowreg.util.io.tiff import TIFFFileWriter
@@ -116,30 +125,31 @@ def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> Video
     from pyflowreg.util.io.multifile_wrappers import MULTIFILEFileWriter
 
     # Special handling for memory formats
-    if output_format == 'ARRAY':
+    if output_format == "ARRAY":
         from pyflowreg.util.io._arr import ArrayWriter
+
         return ArrayWriter()
 
     # Handle different output formats (matches MATLAB switch statement)
-    if output_format == 'TIFF':
+    if output_format == "TIFF":
         return TIFFFileWriter(file_path, **kwargs)
-    elif output_format == 'SUITE2P_TIFF':
+    elif output_format == "SUITE2P_TIFF":
         # TODO: Add suite2p-specific formatting
-        return TIFFFileWriter(file_path, format='suite2p', **kwargs)
-    elif output_format == 'MAT':
+        return TIFFFileWriter(file_path, format="suite2p", **kwargs)
+    elif output_format == "MAT":
         return MATFileWriter(file_path, **kwargs)
-    elif output_format == 'HDF5':
+    elif output_format == "HDF5":
         return HDF5FileWriter(file_path, **kwargs)
-    elif output_format == 'MULTIFILE_TIFF':
-        return MULTIFILEFileWriter(file_path, 'TIFF', **kwargs)
-    elif output_format == 'MULTIFILE_MAT':
-        return MULTIFILEFileWriter(file_path, 'MAT', **kwargs)
-    elif output_format == 'MULTIFILE_HDF5':
-        return MULTIFILEFileWriter(file_path, 'HDF5', **kwargs)
-    elif output_format == 'CAIMAN_HDF5':
+    elif output_format == "MULTIFILE_TIFF":
+        return MULTIFILEFileWriter(file_path, "TIFF", **kwargs)
+    elif output_format == "MULTIFILE_MAT":
+        return MULTIFILEFileWriter(file_path, "MAT", **kwargs)
+    elif output_format == "MULTIFILE_HDF5":
+        return MULTIFILEFileWriter(file_path, "HDF5", **kwargs)
+    elif output_format == "CAIMAN_HDF5":
         # Multifile HDF5 with /mov dataset for CaImAn compatibility
-        return MULTIFILEFileWriter(file_path, 'HDF5', dataset_names='/mov', **kwargs)
-    elif output_format == 'BEGONIA':
+        return MULTIFILEFileWriter(file_path, "HDF5", dataset_names="/mov", **kwargs)
+    elif output_format == "BEGONIA":
         # TODO: Implement TSERIESH5_file_writer
         raise NotImplementedError("BEGONIA format not yet implemented")
     else:
@@ -149,8 +159,11 @@ def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> Video
 def main():
     """Test wrapper implementations."""
     import tempfile
-    import shutil
-    from multifile_wrappers import MULTICHANNELFileReader, SUBSETFileReader, MULTIFILEFileWriter
+    from multifile_wrappers import (
+        MULTICHANNELFileReader,
+        SUBSETFileReader,
+        MULTIFILEFileWriter,
+    )
 
     # Create test data
     test_frames = np.random.randint(0, 255, (20, 64, 64, 2), dtype=np.uint8)
@@ -160,7 +173,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         multifile_path = Path(tmpdir) / "test_multi"
 
-        with MULTIFILEFileWriter(str(multifile_path), 'TIFF') as writer:
+        with MULTIFILEFileWriter(str(multifile_path), "TIFF") as writer:
             writer.write_frames(test_frames[:10])
             writer.write_frames(test_frames[10:])
 
@@ -181,7 +194,12 @@ def main():
 
         # Read all frames
         all_frames = reader[:]
-        assert all_frames.shape == (20, 64, 64, 2), f"Shape mismatch: {all_frames.shape}"
+        assert all_frames.shape == (
+            20,
+            64,
+            64,
+            2,
+        ), f"Shape mismatch: {all_frames.shape}"
         print("✓ MULTICHANNEL reader test passed")
 
         # Test SUBSET reader
@@ -193,13 +211,19 @@ def main():
         assert subset_reader.frame_count == 5, "Subset frame count incorrect"
 
         subset_frames = subset_reader[:]
-        assert subset_frames.shape == (5, 64, 64, 2), f"Subset shape mismatch: {subset_frames.shape}"
+        assert subset_frames.shape == (
+            5,
+            64,
+            64,
+            2,
+        ), f"Subset shape mismatch: {subset_frames.shape}"
 
         # Verify correct frames were selected
         for i, orig_idx in enumerate(subset_indices):
             np.testing.assert_array_equal(
-                subset_frames[i], all_frames[orig_idx],
-                err_msg=f"Frame {i} (original {orig_idx}) mismatch"
+                subset_frames[i],
+                all_frames[orig_idx],
+                err_msg=f"Frame {i} (original {orig_idx}) mismatch",
             )
 
         print("✓ SUBSET reader test passed")

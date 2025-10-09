@@ -39,8 +39,16 @@ pyflowreg.util : I/O, visualization, and image processing utilities
 """
 
 from pyflowreg.motion_correction.compensate_arr import compensate_arr
-from pyflowreg.motion_correction.compensate_recording import compensate_recording, BatchMotionCorrector
-from pyflowreg.motion_correction.OF_options import OFOptions, QualitySetting, OutputFormat, ChannelNormalization
+from pyflowreg.motion_correction.compensate_recording import (
+    compensate_recording,
+    BatchMotionCorrector,
+)
+from pyflowreg.motion_correction.OF_options import (
+    OFOptions,
+    QualitySetting,
+    OutputFormat,
+    ChannelNormalization,
+)
 from pyflowreg.motion_correction.flow_reg_live import FlowRegLive
 
 __all__ = [

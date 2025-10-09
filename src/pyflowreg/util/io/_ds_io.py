@@ -24,7 +24,9 @@ class DSFileReader:
 
         # --- Pass 1: Find datasets with channel conventions (e.g., 'ch1', 'channel_2') ---
         # This regex captures (prefix)(channel_word)(separator)(number)
-        pattern = re.compile(r"^(.*?)((?:ch|channel|chan))([_.\s]*)(\d+)", re.IGNORECASE)
+        pattern = re.compile(
+            r"^(.*?)((?:ch|channel|chan))([_.\s]*)(\d+)", re.IGNORECASE
+        )
 
         channel_groups = defaultdict(list)
         for name in all_names:
@@ -40,20 +42,31 @@ class DSFileReader:
             valid_groups = {}
             for prefix, channels in channel_groups.items():
                 # Get shapes of all datasets in this group
-                shapes = {info[1] for name in channels for info in datasets_with_info if info[0] == name[1]}
-                if len(shapes) == 1:  # All datasets in the group must have the same shape
+                shapes = {
+                    info[1]
+                    for name in channels
+                    for info in datasets_with_info
+                    if info[0] == name[1]
+                }
+                if (
+                    len(shapes) == 1
+                ):  # All datasets in the group must have the same shape
                     valid_groups[prefix] = channels
 
             if valid_groups:
                 best_prefix = max(valid_groups, key=lambda k: len(valid_groups[k]))
-                sorted_channels = sorted(valid_groups[best_prefix], key=lambda item: item[0])
-                print(f"Heuristic Pass 1: Found channel group with prefix '{best_prefix}'.")
+                sorted_channels = sorted(
+                    valid_groups[best_prefix], key=lambda item: item[0]
+                )
+                print(
+                    f"Heuristic Pass 1: Found channel group with prefix '{best_prefix}'."
+                )
                 return [name for num, name in sorted_channels]
 
         # --- Pass 2: Find datasets with common generic names ---
-        common_names = ['mov', 'data', 'dataset']
+        common_names = ["mov", "data", "dataset"]
         for name in all_names:
-            sanitized_name = name.lower().lstrip('/')
+            sanitized_name = name.lower().lstrip("/")
             if sanitized_name in common_names:
                 print(f"Heuristic Pass 2: Found common dataset '{name}'.")
                 return [name]
@@ -68,8 +81,10 @@ class DSFileReader:
 
         if candidate_shapes:
             best_shape = max(candidate_shapes, key=lambda s: np.prod(s))
-            print(f"Warning: Guessing video data based on dimensions. "
-                  f"Selected {len(candidate_shapes[best_shape])} dataset(s) with shape {best_shape}.")
+            print(
+                f"Warning: Guessing video data based on dimensions. "
+                f"Selected {len(candidate_shapes[best_shape])} dataset(s) with shape {best_shape}."
+            )
             return candidate_shapes[best_shape]
 
         return []
@@ -83,15 +98,15 @@ class DSFileWriter:
 
     def __init__(self, **kwargs):
         # Default dimension ordering for writers: (height, width, time)
-        self.dimension_ordering = kwargs.get('dimension_ordering', (0, 1, 2))
-        self.dataset_names = kwargs.get('dataset_names', None)
+        self.dimension_ordering = kwargs.get("dimension_ordering", (0, 1, 2))
+        self.dataset_names = kwargs.get("dataset_names", None)
 
         # Sanitize dataset names by removing any leading slashes
         if self.dataset_names:
             if isinstance(self.dataset_names, list):
-                self.dataset_names = [name.lstrip('/') for name in self.dataset_names]
+                self.dataset_names = [name.lstrip("/") for name in self.dataset_names]
             elif isinstance(self.dataset_names, str):
-                self.dataset_names = self.dataset_names.lstrip('/')
+                self.dataset_names = self.dataset_names.lstrip("/")
 
     def get_ds_name(self, channel_id: int, n_channels: int) -> str:
         """
@@ -107,12 +122,14 @@ class DSFileWriter:
         if self.dataset_names:
             if isinstance(self.dataset_names, list):
                 if len(self.dataset_names) != n_channels:
-                    raise ValueError("The number of provided dataset names must match the number of channels.")
+                    raise ValueError(
+                        "The number of provided dataset names must match the number of channels."
+                    )
                 return self.dataset_names[channel_id - 1]
 
             # Handle string patterns like 'ch*_reg'
-            if '*' in self.dataset_names:
-                return self.dataset_names.replace('*', str(channel_id))
+            if "*" in self.dataset_names:
+                return self.dataset_names.replace("*", str(channel_id))
 
             # If it's a single name for a single channel, or a prefix for multiple
             if n_channels == 1:

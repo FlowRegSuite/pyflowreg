@@ -11,13 +11,14 @@ from typing import Optional, Union
 # Public dictionary mapping demo names to their download URLs
 DEMO_DATA_URLS = {
     "jupiter.tiff": "https://drive.usercontent.google.com/download?id=12lEhahzKtOZsFgxLzwxnT8JsVBErvzJH&export=download&authuser=0",
-    "synth_frames.h5": "https://drive.usercontent.google.com/download?id=10YxHVSdnz0L4WMLR0eIHH6bMxaojpVdY&export=download&authuser=0", }
+    "synth_frames.h5": "https://drive.usercontent.google.com/download?id=10YxHVSdnz0L4WMLR0eIHH6bMxaojpVdY&export=download&authuser=0",
+}
 
 
 def download_data(url: str, filename: str, output_folder: Union[str, Path]) -> Path:
     """
     Download a file from a URL to a specified folder.
-    
+
     Parameters
     ----------
     url : str
@@ -26,12 +27,12 @@ def download_data(url: str, filename: str, output_folder: Union[str, Path]) -> P
         The name to save the file as.
     output_folder : Union[str, Path]
         The folder to save the file in.
-    
+
     Returns
     -------
     Path
         The path to the downloaded file.
-    
+
     Raises
     ------
     urllib.error.URLError
@@ -57,34 +58,36 @@ def download_data(url: str, filename: str, output_folder: Union[str, Path]) -> P
     return file_path
 
 
-def download_demo_data(demo_name: str, output_folder: Optional[Union[str, Path]] = None) -> Path:
+def download_demo_data(
+    demo_name: str, output_folder: Optional[Union[str, Path]] = None
+) -> Path:
     """
     Download demo data by name using predefined URLs.
-    
+
     Parameters
     ----------
     demo_name : str
         The name of the demo data file to download. Must be one of the keys in DEMO_DATA_URLS.
     output_folder : Optional[Union[str, Path]]
         The folder to save the file in. If None, uses 'data' folder relative to project root.
-    
+
     Returns
     -------
     Path
         The path to the downloaded file.
-    
+
     Raises
     ------
     ValueError
         If the demo_name is not found in DEMO_DATA_URLS.
     urllib.error.URLError
         If the download fails.
-    
+
     Examples
     --------
     >>> # Download jupiter demo data
     >>> jupiter_path = download_demo_data("jupiter.tiff")
-    
+
     >>> # Download synthetic evaluation data
     >>> synth_path = download_demo_data("synth_frames.h5")
     """

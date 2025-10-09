@@ -7,7 +7,6 @@ in the quickstart guide execute correctly using existing test fixtures.
 
 import pytest
 import numpy as np
-from pathlib import Path
 
 from pyflowreg.motion_correction import compensate_arr, compensate_recording, OFOptions
 from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
@@ -19,19 +18,22 @@ class TestQuickstartImports:
     def test_array_workflow_imports(self):
         """Test imports for array-based workflow example."""
         from pyflowreg.motion_correction import compensate_arr, OFOptions
+
         assert callable(compensate_arr)
         assert OFOptions is not None
 
     def test_file_workflow_imports(self):
         """Test imports for file-based workflow example."""
-        from pyflowreg.motion_correction import compensate_recording, OFOptions
+        from pyflowreg.motion_correction import OFOptions
+
         assert callable(compensate_recording)
         assert OFOptions is not None
 
     def test_parallel_processing_imports(self):
         """Test imports for parallel processing configuration."""
-        from pyflowreg.motion_correction import compensate_recording, OFOptions
+        from pyflowreg.motion_correction import OFOptions
         from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
+
         assert callable(compensate_recording)
         assert OFOptions is not None
         assert RegistrationConfig is not None
@@ -88,7 +90,7 @@ class TestQuickstartFileWorkflow:
             output_format="HDF5",
             quality_setting="fast",  # Use fast for testing
             reference_frames=list(range(min(10, shape[0]))),
-            save_w=True
+            save_w=True,
         )
 
         # Verify options are correctly set
@@ -104,10 +106,7 @@ class TestQuickstartParallelProcessing:
     def test_registration_config_creation(self, parallelization):
         """Test RegistrationConfig creation with different backends."""
         # Manual executor selection as shown in quickstart
-        config = RegistrationConfig(
-            n_jobs=-1,
-            parallelization=parallelization
-        )
+        config = RegistrationConfig(n_jobs=-1, parallelization=parallelization)
 
         # Verify config is correctly set
         assert config.n_jobs == -1
@@ -116,9 +115,7 @@ class TestQuickstartParallelProcessing:
     def test_registration_config_auto_selection(self):
         """Test auto-selection of parallelization backend."""
         # Default behavior - auto-select best available backend
-        config = RegistrationConfig(
-            n_jobs=-1
-        )
+        config = RegistrationConfig(n_jobs=-1)
 
         # Verify config uses default auto-selection
         assert config.n_jobs == -1
