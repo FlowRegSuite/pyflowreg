@@ -4,7 +4,7 @@ minimum_pre_commit_version: "3.5.0"
 
 repos:
   - repo: https://github.com/FlowRegSuite/flowreg-hooks
-    rev: v1.0.0
+    rev: v1.0.1
     hooks:
       - id: fr-ruff
       - id: fr-ruff-format
