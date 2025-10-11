@@ -20,6 +20,8 @@ def compensate_arr(
     backend_params: Optional[Dict[str, Any]] = None,
     get_displacement: Optional[Callable] = None,
     get_displacement_factory: Optional[Callable[..., Callable]] = None,
+    w_callback: Optional[Callable[[np.ndarray, int, int], None]] = None,
+    registered_callback: Optional[Callable[[np.ndarray, int, int], None]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Process arrays in memory matching MATLAB compensate_inplace functionality.
@@ -39,6 +41,8 @@ def compensate_arr(
         backend_params: Backend-specific parameters override
         get_displacement: Direct displacement callable override
         get_displacement_factory: Factory function override for creating displacement callable
+        w_callback: Optional callback for displacement field batches, receives (w_batch, start_idx, end_idx)
+        registered_callback: Optional callback for registered frame batches, receives (batch, start_idx, end_idx)
 
     Returns:
         Tuple of:
@@ -114,9 +118,13 @@ def compensate_arr(
     # Run standard pipeline
     compensator = BatchMotionCorrector(options)
 
-    # Register progress callback if provided
+    # Register callbacks if provided
     if progress_callback is not None:
         compensator.register_progress_callback(progress_callback)
+    if w_callback is not None:
+        compensator.register_w_callback(w_callback)
+    if registered_callback is not None:
+        compensator.register_registered_callback(registered_callback)
 
     compensator.run()
 

@@ -111,7 +111,10 @@ def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> Video
 
     Args:
         file_path: Output file path
-        output_format: Output format string (e.g., 'TIFF', 'HDF5', 'MAT', 'MULTIFILE_TIFF', etc.)
+        output_format: Output format string (e.g., 'TIFF', 'HDF5', 'MAT', 'MULTIFILE_TIFF', 'ARRAY', 'NULL', etc.)
+                       Special formats:
+                       - 'ARRAY': Returns ArrayWriter for in-memory accumulation
+                       - 'NULL': Returns NullVideoWriter that discards all frames (useful for callbacks only)
         **kwargs: Additional writer-specific arguments
 
     Returns:
@@ -129,6 +132,12 @@ def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> Video
         from pyflowreg.util.io._arr import ArrayWriter
 
         return ArrayWriter()
+
+    # NULL writer - discards output without storage
+    if output_format == "NULL":
+        from pyflowreg.util.io._null import NullVideoWriter
+
+        return NullVideoWriter()
 
     # Handle different output formats (matches MATLAB switch statement)
     if output_format == "TIFF":

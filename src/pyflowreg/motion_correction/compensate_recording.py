@@ -58,6 +58,10 @@ class BatchMotionCorrector:
         # Task-based progress tracking: {task_id: (frames_processed, total_frames)}
         self._progress_trackers: Dict[str, Tuple[int, Optional[int]]] = {}
 
+        # New batch data callbacks
+        self.w_callbacks: List[Callable[[np.ndarray, int, int], None]] = []
+        self.registered_callbacks: List[Callable[[np.ndarray, int, int], None]] = []
+
         # Get number of workers
         if self.config.n_jobs == -1:
             import os
@@ -134,6 +138,34 @@ class BatchMotionCorrector:
         """
         if callback not in self.progress_callbacks:
             self.progress_callbacks.append(callback)
+
+    def register_w_callback(
+        self, callback: Callable[[np.ndarray, int, int], None]
+    ) -> None:
+        """
+        Register a callback for displacement field batches.
+
+        Args:
+            callback: Function receiving (w_batch, batch_start_idx, batch_end_idx)
+                      where w_batch has shape (T, H, W, 2) containing [u,v] components.
+                      batch_start_idx and batch_end_idx indicate the frame indices in the original video.
+        """
+        if callback not in self.w_callbacks:
+            self.w_callbacks.append(callback)
+
+    def register_registered_callback(
+        self, callback: Callable[[np.ndarray, int, int], None]
+    ) -> None:
+        """
+        Register a callback for registered/compensated frame batches.
+
+        Args:
+            callback: Function receiving (registered_batch, batch_start_idx, batch_end_idx)
+                      where registered_batch has shape (T, H, W, C).
+                      batch_start_idx and batch_end_idx indicate the frame indices in the original video.
+        """
+        if callback not in self.registered_callbacks:
+            self.registered_callbacks.append(callback)
 
     def _notify_progress(self, frames_completed: int, task_id: str = "main") -> None:
         """
@@ -487,6 +519,15 @@ class BatchMotionCorrector:
                 # Write results
                 self.video_writer.write_frames(registered)
 
+                # Notify registered frame callbacks
+                batch_start_idx = total_frames
+                batch_end_idx = total_frames + registered.shape[0]
+                for callback in self.registered_callbacks:
+                    try:
+                        callback(registered, batch_start_idx, batch_end_idx)
+                    except Exception as e:
+                        warnings.warn(f"Registered frames callback error: {e}")
+
                 # Save flows if requested
                 if getattr(self.options, "save_w", False):
                     if self.w_writer is not None:
@@ -497,6 +538,13 @@ class BatchMotionCorrector:
                         warnings.warn(
                             "Displacement saving was requested but writer could not be initialized. Skipping displacement save."
                         )
+
+                # Notify w callbacks (displacement fields)
+                for callback in self.w_callbacks:
+                    try:
+                        callback(w, batch_start_idx, batch_end_idx)
+                    except Exception as e:
+                        warnings.warn(f"Displacement field callback error: {e}")
 
                 # Update reference if requested
                 if getattr(self.options, "update_reference", False):
