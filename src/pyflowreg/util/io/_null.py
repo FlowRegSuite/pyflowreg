@@ -43,7 +43,31 @@ class NullVideoWriter(VideoWriter):
         Args:
             first_frame_batch: First batch with shape (T,H,W,C), (H,W,C), or (H,W)
         """
-        super().init(first_frame_batch)  # Sets dimensions, dtype, etc.
+        shape = first_frame_batch.shape
+
+        if len(shape) == 2:
+            # Single channel single frame (H,W)
+            self.height = shape[0]
+            self.width = shape[1]
+            self.n_channels = 1
+        elif len(shape) == 3:
+            # Single frame (H,W,C)
+            self.height = shape[0]
+            self.width = shape[1]
+            self.n_channels = shape[2]
+        elif len(shape) == 4:
+            # Batch (T,H,W,C) - use first frame dimensions
+            self.height = shape[1]
+            self.width = shape[2]
+            self.n_channels = shape[3]
+        else:
+            raise ValueError(
+                f"Expected 2D, 3D or 4D array, got {first_frame_batch.ndim}D"
+            )
+
+        self.dtype = first_frame_batch.dtype
+        self.bit_depth = self.dtype.itemsize * 8
+        self.initialized = True
 
     def write_frames(self, frames: np.ndarray):
         """
