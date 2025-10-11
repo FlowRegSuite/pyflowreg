@@ -53,6 +53,7 @@ class OutputFormat(str, Enum):
 
     # Memory formats (special handling - ignores output_path)
     ARRAY = "ARRAY"  # Returns ArrayWriter for in-memory accumulation
+    NULL = "NULL"  # Returns NullVideoWriter that discards frames without storage
 
 
 class QualitySetting(str, Enum):
