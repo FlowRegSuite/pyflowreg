@@ -230,8 +230,7 @@ class OFOptions(BaseModel):
                 if weight_sum > 0:
                     return (v / weight_sum).tolist()
                 return v.tolist()
-            # For multi-dimensional arrays (spatial weights), return as-is
-            return v
+            return v.tolist()
         elif isinstance(v, (list, tuple)):
             arr = np.asarray(v, dtype=float)
             if arr.ndim == 1:

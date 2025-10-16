@@ -21,7 +21,7 @@ class TestFlowRegLiveBasics:
 
         # Check defaults
         assert flow_reg.options.quality_setting == QualitySetting.FAST
-        assert flow_reg.options.save_w is True  # Always True for flow initialization
+        assert flow_reg.options.save_w is False
         assert flow_reg.reference_update_interval == 20
         assert flow_reg.reference_update_weight == 0.2
         assert flow_reg.reference_raw is None
@@ -44,7 +44,7 @@ class TestFlowRegLiveBasics:
 
         # Check that options are overridden for speed
         assert flow_reg.options.quality_setting == QualitySetting.FAST
-        assert flow_reg.options.save_w is True  # Always True for flow initialization
+        assert flow_reg.options.save_w is False
         # But other options preserved
         # Note: alpha is converted to tuple in OF_options
         assert flow_reg.options.alpha == (5.0, 5.0)
