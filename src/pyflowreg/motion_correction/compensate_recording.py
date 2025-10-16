@@ -8,7 +8,7 @@ from typing import Any, Optional, Tuple, List, Callable, Dict
 
 import numpy as np
 
-from pyflowreg.core.optical_flow import imregister_wrapper
+from pyflowreg.core.warping import imregister_wrapper
 from pyflowreg._runtime import RuntimeContext
 from pyflowreg.util.image_processing import normalize, apply_gaussian_filter
 from pyflowreg.motion_correction.OF_options import OutputFormat, ChannelNormalization
@@ -52,6 +52,7 @@ class BatchMotionCorrector:
         self.video_reader = None
         self.video_writer = None
         self.w_writer = None
+        self.idx_writer = None
 
         # Progress callbacks
         self.progress_callbacks: List[Callable[[int, int], None]] = []
@@ -193,6 +194,23 @@ class BatchMotionCorrector:
                 )
                 self.w_writer = None
                 self.options.save_w = False  # Disable to avoid trying to write later
+
+        # Create valid mask writer if requested
+        if getattr(self.options, "save_valid_idx", False):
+            try:
+                from pyflowreg.util.io.factory import get_video_file_writer
+
+                # Use HDF5 for idx (MATLAB compatibility: idx.hdf)
+                idx_path = output_path / "idx.hdf"
+                self.idx_writer = get_video_file_writer(
+                    str(idx_path), "HDF5", dataset_name="idx"
+                )
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to create valid mask writer: {e}. Valid masks will not be saved."
+                )
+                self.idx_writer = None
+                self.options.save_valid_idx = False
 
     def _setup_reference(self, reference_frame: Optional[np.ndarray] = None):
         """Setup reference frame and weights."""
@@ -487,6 +505,18 @@ class BatchMotionCorrector:
                 # Write results
                 self.video_writer.write_frames(registered)
 
+                # Save valid masks if requested
+                if getattr(self.options, "save_valid_idx", False):
+                    if self.idx_writer is not None:
+                        from pyflowreg.core.warping import compute_batch_valid_masks
+
+                        valid_batch = compute_batch_valid_masks(w)
+                        self.idx_writer.write_frames(valid_batch)
+                    else:
+                        warnings.warn(
+                            "Valid mask saving was requested but writer could not be initialized. Skipping mask save."
+                        )
+
                 # Save flows if requested
                 if getattr(self.options, "save_w", False):
                     if self.w_writer is not None:
@@ -563,6 +593,8 @@ class BatchMotionCorrector:
             self.video_writer.close()
         if hasattr(self, "w_writer") and self.w_writer is not None:
             self.w_writer.close()
+        if hasattr(self, "idx_writer") and self.idx_writer is not None:
+            self.idx_writer.close()
 
 
 def compensate_recording(

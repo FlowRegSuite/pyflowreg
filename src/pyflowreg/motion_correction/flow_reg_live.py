@@ -11,7 +11,7 @@ import numpy as np
 
 from pyflowreg.motion_correction.OF_options import OFOptions, QualitySetting
 from pyflowreg.motion_correction.compensate_arr import compensate_arr
-from pyflowreg.core.optical_flow import imregister_wrapper
+from pyflowreg.core.warping import imregister_wrapper
 from pyflowreg.util.image_processing import (
     normalize,
     apply_gaussian_filter,
