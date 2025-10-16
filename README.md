@@ -2,7 +2,7 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyflowreg)](https://pypi.org/project/pyflowreg/)
 [![PyPI - License](https://img.shields.io/pypi/l/pyflowreg)](LICENSE)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/pyflowreg)](https://pypistats.org/packages/pyflowreg)
-[![PyPI - Total Downloads](https://img.shields.io/pypi/dt/pyflowreg)](https://pypistats.org/packages/pyflowreg)
+[![PyPI - Total Downloads](https://img.shields.io/pepy/dt/pyflowreg)](https://pepy.tech/project/pyflowreg)
 [![GitHub Actions](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml)
 [![Documentation Status](https://readthedocs.org/projects/pyflowreg/badge/?version=latest)](https://pyflowreg.readthedocs.io/en/latest/?badge=latest)
 
