@@ -18,6 +18,7 @@ from skimage.registration import phase_cross_correlation
 from pyflowreg.core.backend_registry import get_backend
 from pyflowreg.session.config import SessionConfig
 from pyflowreg.session.stage1_compensate import (
+    atomic_save_npz,
     discover_input_files,
     load_or_create_status,
     save_status,
@@ -291,8 +292,8 @@ def run_stage2(config: SessionConfig) -> Tuple[int, Path, List[np.ndarray]]:
                 print(f"Computing displacement for {input_files[idx].stem}...")
                 w = compute_between_displacement(reference_average, current_avg, config)
 
-            # Save
-            np.savez(str(w_path), u=w[:, :, 0], v=w[:, :, 1])
+            # Save atomically (write-to-temp then replace)
+            atomic_save_npz(w_path, u=w[:, :, 0], v=w[:, :, 1])
             displacement_fields.append(w)
 
             # Update status

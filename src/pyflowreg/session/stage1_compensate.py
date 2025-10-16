@@ -94,7 +94,88 @@ def save_status(output_folder: Path, status: Dict):
     temp_path.replace(status_path)
 
 
-def is_stage1_complete(output_folder: Path) -> bool:
+def atomic_save_npy(path: Path, arr: np.ndarray):
+    """
+    Atomically save numpy array to .npy file.
+
+    Parameters
+    ----------
+    path : Path
+        Target path for .npy file
+    arr : ndarray
+        Array to save
+
+    Notes
+    -----
+    Uses write-to-temp then replace() to avoid half-written files on crash.
+    """
+    temp_path = path.with_suffix(".npy.tmp")
+    np.save(str(temp_path), arr)
+    temp_path.replace(path)
+
+
+def atomic_save_npz(path: Path, **arrays):
+    """
+    Atomically save numpy arrays to .npz file.
+
+    Parameters
+    ----------
+    path : Path
+        Target path for .npz file
+    **arrays : dict
+        Arrays to save (keyword arguments)
+
+    Notes
+    -----
+    Uses write-to-temp then replace() to avoid half-written files on crash.
+    """
+    temp_path = path.with_suffix(".npz.tmp")
+    np.savez(str(temp_path), **arrays)
+    temp_path.replace(path)
+
+
+def verify_hdf5_completeness(h5_path: Path, expected_frame_count: int) -> bool:
+    """
+    Verify HDF5 file has expected dataset and frame count.
+
+    Parameters
+    ----------
+    h5_path : Path
+        Path to HDF5 file
+    expected_frame_count : int
+        Expected number of frames
+
+    Returns
+    -------
+    bool
+        True if file is complete and valid
+    """
+    if not h5_path.exists():
+        return False
+
+    try:
+        from pyflowreg.util.io.factory import get_video_file_reader
+
+        reader = get_video_file_reader(str(h5_path))
+        actual_count = reader.frame_count
+
+        if actual_count != expected_frame_count:
+            print(
+                f"Warning: {h5_path.name} has {actual_count} frames, "
+                f"expected {expected_frame_count}. Will rerun compensation."
+            )
+            return False
+
+        return True
+
+    except Exception as e:
+        print(
+            f"Warning: Failed to verify {h5_path.name}: {e}. Will rerun compensation."
+        )
+        return False
+
+
+def is_stage1_complete(output_folder: Path, input_file: Optional[Path] = None) -> bool:
     """
     Check if Stage 1 is complete for a sequence.
 
@@ -102,6 +183,8 @@ def is_stage1_complete(output_folder: Path) -> bool:
     ----------
     output_folder : Path
         Output folder for the sequence
+    input_file : Path, optional
+        Input file to verify frame count (for robustness check)
 
     Returns
     -------
@@ -113,14 +196,35 @@ def is_stage1_complete(output_folder: Path) -> bool:
         output_folder / "compensated.hdf5",
         output_folder / "compensated.HDF5",
     ]
-    has_compensated = any(p.exists() for p in h5_candidates)
+    compensated_h5 = next((p for p in h5_candidates if p.exists()), None)
 
     temporal_avg_npy = output_folder / "temporal_average.npy"
     status = load_or_create_status(output_folder)
 
-    return (
-        has_compensated and temporal_avg_npy.exists() and status.get("stage1") == "done"
-    )
+    if not (
+        compensated_h5 and temporal_avg_npy.exists() and status.get("stage1") == "done"
+    ):
+        return False
+
+    # Robust check: verify HDF5 has expected frame count
+    if input_file is not None:
+        try:
+            from pyflowreg.util.io.factory import get_video_file_reader
+
+            input_reader = get_video_file_reader(str(input_file))
+            expected_count = input_reader.frame_count
+
+            if not verify_hdf5_completeness(compensated_h5, expected_count):
+                return False
+
+        except Exception as e:
+            print(
+                f"Warning: Could not verify HDF5 completeness for {output_folder.name}: {e}"
+            )
+            # If we can't verify, err on the side of caution and rerun
+            return False
+
+    return True
 
 
 def compute_and_save_temporal_average(
@@ -183,8 +287,8 @@ def compute_and_save_temporal_average(
     # Compute average
     temporal_avg = accumulator / frame_count
 
-    # Save
-    np.save(str(avg_path), temporal_avg)
+    # Save atomically (write-to-temp then replace)
+    atomic_save_npy(avg_path, temporal_avg)
     print(f"Saved temporal average to {avg_path.name}")
 
     return temporal_avg
@@ -225,8 +329,8 @@ def compensate_single_recording(
     # Create output folder
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    # Check resume
-    if config.resume and is_stage1_complete(output_folder):
+    # Check resume (with robustness check for HDF5 completeness)
+    if config.resume and is_stage1_complete(output_folder, input_file):
         print(f"Skipping {input_file.name} - already complete")
         return output_folder
 
