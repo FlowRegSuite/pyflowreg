@@ -75,6 +75,14 @@ Modular I/O system supporting multiple file formats through a common VideoReader
    :show-inheritance:
 ```
 
+## Null Writer (Callback-Only Processing)
+
+```{eval-rst}
+.. automodule:: pyflowreg.util.io._null
+   :members:
+   :show-inheritance:
+```
+
 ## ScanImage Support
 
 ```{eval-rst}
