@@ -54,7 +54,6 @@ class FlowRegLive:
         if options is None:
             options = OFOptions(
                 quality_setting=QualitySetting.FAST,
-                save_w=True,  # Always save flow for initialization
                 **kwargs,
             )
         else:
@@ -62,7 +61,6 @@ class FlowRegLive:
             options = options.model_copy(
                 update={
                     "quality_setting": QualitySetting.FAST,
-                    "save_w": True,
                     **kwargs,
                 }
             )
