@@ -54,7 +54,7 @@ def load_idx_and_compute_mask(idx_path: Path) -> np.ndarray:
     from pyflowreg.util.io.factory import get_video_file_reader
 
     reader = get_video_file_reader(str(idx_path))
-    vmask = reader.read_frames(list(range(reader.frame_count)))
+    vmask = reader.read_frames(list(range(len(reader))))
 
     # Convert to boolean
     vmask = vmask > 0
@@ -297,7 +297,7 @@ def run_stage3(
             from pyflowreg.util.io.factory import get_video_file_reader
 
             vr = get_video_file_reader(str(h5_path))
-            vid = vr.read_frames(list(range(vr.frame_count)))
+            vid = vr.read_frames(list(range(len(vr))))
             temporal_averages.append(np.mean(vid, axis=0))
 
         processing_toc = time() - processing_timer

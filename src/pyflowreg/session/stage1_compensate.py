@@ -167,7 +167,7 @@ def verify_hdf5_completeness(h5_path: Path, expected_frame_count: int) -> bool:
         from pyflowreg.util.io.factory import get_video_file_reader
 
         reader = get_video_file_reader(str(h5_path))
-        actual_count = reader.frame_count
+        actual_count = len(reader)
 
         if actual_count != expected_frame_count:
             print(
@@ -222,7 +222,7 @@ def is_stage1_complete(output_folder: Path, input_file: Optional[Path] = None) -
             from pyflowreg.util.io.factory import get_video_file_reader
 
             input_reader = get_video_file_reader(str(input_file))
-            expected_count = input_reader.frame_count
+            expected_count = len(input_reader)
 
             if not verify_hdf5_completeness(compensated_h5, expected_count):
                 return False
@@ -273,7 +273,7 @@ def compute_and_save_temporal_average(
     vid_reader = get_video_file_reader(str(compensated_path))
 
     # Stream frames to avoid loading entire video into RAM
-    frame_count = vid_reader.frame_count
+    frame_count = len(vid_reader)
 
     # Safety check
     if frame_count == 0:
