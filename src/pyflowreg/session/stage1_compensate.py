@@ -275,14 +275,22 @@ def compute_and_save_temporal_average(
     # Stream frames to avoid loading entire video into RAM
     frame_count = vid_reader.frame_count
 
+    # Safety check
+    if frame_count == 0:
+        raise ValueError(
+            f"{compensated_path.name} has 0 frames - cannot compute temporal average"
+        )
+
     # Read first frame to get shape (VideoReader supports array indexing)
     first_frame = vid_reader[[0]]  # Returns (1, H, W, C) or (1, H, W)
     if first_frame.ndim == 4:  # (T, H, W, C)
         first_frame = first_frame[0]  # Remove batch dimension
 
+    # Ensure float64 for accumulation
+    first_frame = first_frame.astype(np.float64)
+
     # Initialize accumulator
-    accumulator = np.zeros_like(first_frame, dtype=np.float64)
-    accumulator += first_frame
+    accumulator = first_frame.copy()
 
     # Accumulate remaining frames in batches to avoid RAM spike
     batch_size = 1000  # Process 1000 frames at a time
@@ -296,6 +304,13 @@ def compute_and_save_temporal_average(
 
     # Compute average
     temporal_avg = accumulator / frame_count
+
+    # Verify no inf/nan values
+    if np.any(~np.isfinite(temporal_avg)):
+        raise ValueError(
+            f"Temporal average contains inf/nan values. "
+            f"This suggests corrupted data in {compensated_path.name}"
+        )
 
     # Save atomically (write-to-temp then replace)
     atomic_save_npy(avg_path, temporal_avg)

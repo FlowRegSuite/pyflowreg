@@ -185,7 +185,7 @@ class TestFullSessionPipeline:
 
         # Verify outputs exist
         for folder in output_folders:
-            assert (folder / "compensated.hdf5").exists()
+            assert (folder / "compensated.HDF5").exists()
             assert (folder / "temporal_average.npy").exists()
             assert (folder / "idx.hdf").exists()
             assert (folder / "status.json").exists()
@@ -384,11 +384,11 @@ class TestJobArrayIndexing:
             if i == task_index:
                 # This one should exist
                 assert output_folder.exists()
-                assert (output_folder / "compensated.hdf5").exists()
+                assert (output_folder / "compensated.HDF5").exists()
             else:
                 # These should not exist (or not have outputs)
                 if output_folder.exists():
-                    assert not (output_folder / "compensated.hdf5").exists()
+                    assert not (output_folder / "compensated.HDF5").exists()
 
 
 if __name__ == "__main__":
