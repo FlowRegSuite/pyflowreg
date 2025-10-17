@@ -87,3 +87,4 @@ _skbuild
 src/pyflowreg/_version.py
 
 jupiter_demo/*
+docs/_build/*

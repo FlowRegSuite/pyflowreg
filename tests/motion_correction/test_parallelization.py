@@ -5,301 +5,309 @@ import pytest
 from typing import List, Tuple
 
 from pyflowreg.motion_correction.compensate_arr import compensate_arr
-from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrector, RegistrationConfig
+from pyflowreg.motion_correction.compensate_recording import (
+    BatchMotionCorrector,
+    RegistrationConfig,
+)
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
 from pyflowreg._runtime import RuntimeContext
 
 
 class TestParallelizationExecutors:
     """Test different parallelization strategies."""
-    
+
     def test_all_executors_available(self):
         """Test that all expected executors are registered."""
-        available = RuntimeContext.get('available_parallelization', set())
-        
+        available = RuntimeContext.get("available_parallelization", set())
+
         # At minimum, sequential should be available
-        assert 'sequential' in available, "Sequential executor not available"
-        
+        assert "sequential" in available, "Sequential executor not available"
+
         # Check if other executors are registered
         print(f"Available executors: {available}")
-    
+
     @pytest.mark.parametrize("n_channels", [1, 2, 3])
     def test_sequential_executor(self, n_channels):
         """Test sequential executor processing with different channel counts."""
-        from pyflowreg.motion_correction.parallelization.sequential import SequentialExecutor
-        
+
         # Create test data
         T, H, W, C = 5, 16, 16, n_channels
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
-        
+
         # Configure for sequential processing
-        config = RegistrationConfig(parallelization='sequential')
+        config = RegistrationConfig(parallelization="sequential")
         options = OFOptions(quality_setting="fast")
-        
+
         # Setup for array processing
         options.input_file = video
         options.reference_frames = reference
         options.output_format = OutputFormat.ARRAY
         options.save_w = True
         options.save_meta_info = False
-        
+
         # Create compensator
         compensator = BatchMotionCorrector(options, config)
-        
+
         # Verify sequential executor is used
-        assert compensator.executor.__class__.__name__ == 'SequentialExecutor'
-        
+        assert compensator.executor.__class__.__name__ == "SequentialExecutor"
+
         # Run
         compensator.run()
-        
+
         # Get results
         registered = compensator.video_writer.get_array()
         flow = compensator.w_writer.get_array() if compensator.w_writer else None
-        
+
         # Verify results
         assert registered.shape == video.shape
         assert flow is not None and flow.shape == (T, H, W, 2)
-    
+
     @pytest.mark.parametrize("n_channels", [1, 2, 3])
     def test_threading_executor(self, n_channels):
         """Test threading executor with different channel counts."""
-        available = RuntimeContext.get('available_parallelization', set())
-        
-        if 'threading' not in available:
+        available = RuntimeContext.get("available_parallelization", set())
+
+        if "threading" not in available:
             pytest.skip("Threading executor not available")
-        
+
         # Create test data
         T, H, W, C = 10, 16, 16, n_channels
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:3], axis=0)
-        
+
         # Configure for threading
-        config = RegistrationConfig(parallelization='threading', n_jobs=2)
+        config = RegistrationConfig(parallelization="threading", n_jobs=2)
         options = OFOptions(quality_setting="fast")
-        
+
         # Setup for array processing
         options.input_file = video
         options.reference_frames = reference
         options.output_format = OutputFormat.ARRAY
         options.save_w = True
         options.save_meta_info = False
-        
+
         # Create compensator
         compensator = BatchMotionCorrector(options, config)
-        
+
         # Verify threading executor is used
-        assert compensator.executor.__class__.__name__ == 'ThreadingExecutor'
-        
+        assert compensator.executor.__class__.__name__ == "ThreadingExecutor"
+
         # Run
         compensator.run()
-        
+
         # Get results
         registered = compensator.video_writer.get_array()
         flow = compensator.w_writer.get_array() if compensator.w_writer else None
-        
+
         # Verify results
         assert registered.shape == video.shape
         assert flow is not None and flow.shape == (T, H, W, 2)
-    
+
     @pytest.mark.parametrize("n_channels", [1, 2, 3])
     def test_multiprocessing_executor(self, n_channels):
         """Test multiprocessing executor with different channel counts."""
-        available = RuntimeContext.get('available_parallelization', set())
-        
-        if 'multiprocessing' not in available:
+        available = RuntimeContext.get("available_parallelization", set())
+
+        if "multiprocessing" not in available:
             pytest.skip("Multiprocessing executor not available")
-        
+
         # Create test data
         T, H, W, C = 10, 16, 16, n_channels
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:3], axis=0)
-        
+
         # Configure for multiprocessing
-        config = RegistrationConfig(parallelization='multiprocessing', n_jobs=2)
+        config = RegistrationConfig(parallelization="multiprocessing", n_jobs=2)
         options = OFOptions(quality_setting="fast")
-        
+
         # Setup for array processing
         options.input_file = video
         options.reference_frames = reference
         options.output_format = OutputFormat.ARRAY
         options.save_w = True
         options.save_meta_info = False
-        
+
         # Create compensator
         compensator = BatchMotionCorrector(options, config)
-        
+
         # Verify multiprocessing executor is used
-        assert compensator.executor.__class__.__name__ == 'MultiprocessingExecutor'
-        
+        assert compensator.executor.__class__.__name__ == "MultiprocessingExecutor"
+
         # Run
         compensator.run()
-        
+
         # Get results
         registered = compensator.video_writer.get_array()
         flow = compensator.w_writer.get_array() if compensator.w_writer else None
-        
+
         # Verify results
         assert registered.shape == video.shape
         assert flow is not None and flow.shape == (T, H, W, 2)
-    
+
     @pytest.mark.parametrize("n_channels", [1, 2])
     def test_executor_consistency(self, n_channels):
         """Test that all executors produce consistent results with different channel counts."""
-        available = RuntimeContext.get('available_parallelization', set())
-        
+        available = RuntimeContext.get("available_parallelization", set())
+
         # Create test data
         T, H, W, C = 8, 16, 16, n_channels
         np.random.seed(42)  # Fixed seed for reproducibility
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
-        
+
         results = {}
-        
+
         for executor_name in available:
             # Configure
             config = RegistrationConfig(parallelization=executor_name, n_jobs=2)
-            options = OFOptions(
-                quality_setting="fast",
-                levels=2,
-                iterations=5
-            )
-            
+            options = OFOptions(quality_setting="fast", levels=2, iterations=5)
+
             # Setup for array processing
             options.input_file = video.copy()  # Copy to avoid side effects
             options.reference_frames = reference.copy()
             options.output_format = OutputFormat.ARRAY
             options.save_w = True
             options.save_meta_info = False
-            
+
             # Create compensator
             compensator = BatchMotionCorrector(options, config)
-            
+
             # Run
             compensator.run()
-            
+
             # Store results
             results[executor_name] = compensator.video_writer.get_array()
-        
+
         # Compare results (allowing small numerical differences)
         if len(results) > 1:
             reference_result = list(results.values())[0]
             for name, result in results.items():
                 np.testing.assert_allclose(
-                    result, reference_result, rtol=1e-5, atol=1e-6,
-                    err_msg=f"Results from {name} differ from reference"
+                    result,
+                    reference_result,
+                    rtol=1e-5,
+                    atol=1e-6,
+                    err_msg=f"Results from {name} differ from reference",
                 )
 
 
 class TestProgressCallbacks:
     """Test progress callback functionality with parallelization."""
-    
+
     def test_progress_callback_with_compensate_arr(self):
         """Test progress callback through compensate_arr interface."""
         # Create test data
         T, H, W, C = 15, 16, 16, 2
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:3], axis=0)
-        
+
         # Track progress
         progress_calls: List[Tuple[int, int]] = []
-        
+
         def progress_callback(current: int, total: int):
             progress_calls.append((current, total))
-        
+
         # Run with callback
         options = OFOptions(quality_setting="fast", buffer_size=5)
         registered, flow = compensate_arr(video, reference, options, progress_callback)
-        
+
         # Verify callback was called
         assert len(progress_calls) > 0, "Progress callback was not called"
-        
+
         # Check final progress
         final_current, final_total = progress_calls[-1]
         actual_frames_processed = registered.shape[0]
-        assert final_current == final_total, f"Final progress {final_current} != final_total {final_total}"
-        assert final_current == actual_frames_processed, f"Progress {final_current} != actual frames {actual_frames_processed}"
+        assert (
+            final_current == final_total
+        ), f"Final progress {final_current} != final_total {final_total}"
+        assert (
+            final_current == actual_frames_processed
+        ), f"Progress {final_current} != actual frames {actual_frames_processed}"
         assert final_total == T, f"Total frames {final_total} != input frames {T}"
-        
+
         # Check monotonic increase
         for i in range(1, len(progress_calls)):
-            assert progress_calls[i][0] >= progress_calls[i-1][0], "Progress should increase"
-    
+            assert (
+                progress_calls[i][0] >= progress_calls[i - 1][0]
+            ), "Progress should increase"
+
     def test_progress_with_different_executors(self):
         """Test progress callbacks work with each executor type."""
-        available = RuntimeContext.get('available_parallelization', set())
-        
+        available = RuntimeContext.get("available_parallelization", set())
+
         # Create test data
         T, H, W, C = 20, 16, 16, 2
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:3], axis=0)
-        
+
         for executor_name in available:
             progress_calls = []
-            
+
             def progress_callback(current, total):
                 progress_calls.append((current, total))
-            
+
             # Configure
-            config = RegistrationConfig(
-                parallelization=executor_name,
-                n_jobs=2,
-                batch_size=5  # Small batches for more updates
+            config = RegistrationConfig(parallelization=executor_name, n_jobs=2)
+            options = OFOptions(
+                quality_setting="fast",
+                buffer_size=5,  # Small batches for more progress updates
             )
-            options = OFOptions(quality_setting="fast", buffer_size=5)
-            
+
             # Setup for array processing
             options.input_file = video
             options.reference_frames = reference
             options.output_format = OutputFormat.ARRAY
             options.save_w = True
             options.save_meta_info = False
-            
+
             # Create compensator and register callback
             compensator = BatchMotionCorrector(options, config)
             compensator.register_progress_callback(progress_callback)
-            
+
             # Run
             compensator.run()
-            
+
             # Verify progress was tracked
             assert len(progress_calls) > 0, f"No progress for {executor_name}"
-            
+
             # Check that final progress matches total - the actual processed frames may differ from input
             final_current, final_total = progress_calls[-1]
-            assert final_current == final_total, f"Wrong final count for {executor_name}: {final_current} != {final_total}"
-            
+            assert (
+                final_current == final_total
+            ), f"Wrong final count for {executor_name}: {final_current} != {final_total}"
+
             # Different executors have different update patterns
-            if executor_name in ['sequential', 'threading']:
+            if executor_name in ["sequential", "threading"]:
                 # Frame-by-frame updates possible
                 print(f"{executor_name}: {len(progress_calls)} progress updates")
             else:  # multiprocessing
                 # Batch-wise updates only
                 print(f"{executor_name}: {len(progress_calls)} batch updates")
-    
+
     def test_multiple_callbacks_registered(self):
         """Test that multiple callbacks can be registered and called."""
         # Create test data
         T, H, W, C = 10, 16, 16, 2
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
-        
+
         # Track calls from multiple callbacks
         calls1 = []
         calls2 = []
         calls3 = []
-        
+
         def callback1(current, total):
             calls1.append((current, total))
-        
+
         def callback2(current, total):
             calls2.append((current, total))
-        
+
         def callback3(current, total):
             # This one calculates percentage
             percent = (current / total * 100) if total > 0 else 0
             calls3.append(percent)
-        
+
         # Setup
         options = OFOptions(quality_setting="fast")
         options.input_file = video
@@ -307,48 +315,50 @@ class TestProgressCallbacks:
         options.output_format = OutputFormat.ARRAY
         options.save_w = True
         options.save_meta_info = False
-        
+
         # Create compensator and register multiple callbacks
         compensator = BatchMotionCorrector(options)
         compensator.register_progress_callback(callback1)
         compensator.register_progress_callback(callback2)
         compensator.register_progress_callback(callback3)
-        
+
         # Run
         compensator.run()
-        
+
         # All callbacks should be called
         assert len(calls1) > 0, "First callback not called"
         assert len(calls2) > 0, "Second callback not called"
         assert len(calls3) > 0, "Third callback not called"
-        
+
         # First two should have identical calls
         assert calls1 == calls2, "Callbacks should receive same calls"
-        
+
         # Third should end at 100%
         final_percent = calls3[-1]
-        assert abs(final_percent - 100.0) < 0.01, f"Final progress should be 100%, got {final_percent}%"
-    
+        assert (
+            abs(final_percent - 100.0) < 0.01
+        ), f"Final progress should be 100%, got {final_percent}%"
+
     def test_callback_exception_handling(self):
         """Test that exceptions in callbacks don't break processing."""
         # Create test data
         T, H, W, C = 8, 16, 16, 2
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:2], axis=0)
-        
+
         # Track successful calls
         good_calls = []
         exception_raised = [False]
-        
+
         def good_callback(current, total):
             good_calls.append((current, total))
-        
+
         def bad_callback(current, total):
             # Raise exception on first call to test handling
             if not exception_raised[0]:
                 exception_raised[0] = True
                 raise ValueError("Test exception")
-        
+
         # Setup
         options = OFOptions(quality_setting="fast")
         options.input_file = video
@@ -356,58 +366,63 @@ class TestProgressCallbacks:
         options.output_format = OutputFormat.ARRAY
         options.save_w = True
         options.save_meta_info = False
-        
+
         # Create compensator with both callbacks
         compensator = BatchMotionCorrector(options)
         compensator.register_progress_callback(good_callback)
         compensator.register_progress_callback(bad_callback)
-        
+
         # Run - should complete despite exception
         with pytest.warns(UserWarning, match="Progress callback error"):
             compensator.run()
-        
+
         # Good callback should still work
         assert len(good_calls) > 0, "Good callback should still be called"
-        
+
         # Check that processing completed correctly
         final_current, final_total = good_calls[-1]
-        assert final_current == final_total, f"Processing should complete: {final_current} != {final_total}"
-        
+        assert (
+            final_current == final_total
+        ), f"Processing should complete: {final_current} != {final_total}"
+
         # Get results to verify processing completed
         registered = compensator.video_writer.get_array()
         assert registered.shape == video.shape
-    
+
     def test_progress_callback_performance(self):
         """Test that callbacks don't significantly impact performance."""
         # Create test data
         T, H, W, C = 50, 32, 32, 2
         video = np.random.rand(T, H, W, C).astype(np.float32)
         reference = np.mean(video[:5], axis=0)
-        
+
         import time
-        
+
         # Time without callback
         options = OFOptions(quality_setting="fast", levels=2, iterations=3)
         start = time.time()
         registered1, flow1 = compensate_arr(video, reference, options)
         time_without = time.time() - start
-        
+
         # Time with callback
         call_count = [0]
+
         def progress_callback(current, total):
             call_count[0] += 1
-        
+
         start = time.time()
-        registered2, flow2 = compensate_arr(video, reference, options, progress_callback)
+        registered2, flow2 = compensate_arr(
+            video, reference, options, progress_callback
+        )
         time_with = time.time() - start
-        
+
         print(f"Time without callback: {time_without:.3f}s")
         print(f"Time with callback: {time_with:.3f}s ({call_count[0]} calls)")
         print(f"Overhead: {(time_with - time_without):.3f}s")
-        
+
         # Callback overhead should be minimal (< 10% for this test size)
         assert time_with < time_without * 1.1, "Callback overhead too high"
-        
+
         # Results should be identical
         np.testing.assert_allclose(registered1, registered2, rtol=1e-6)
 
@@ -418,10 +433,10 @@ if __name__ == "__main__":
     test_exec = TestParallelizationExecutors()
     test_exec.test_all_executors_available()
     test_exec.test_sequential_executor()
-    
+
     print("\nTesting progress callbacks...")
     test_prog = TestProgressCallbacks()
     test_prog.test_progress_callback_with_compensate_arr()
     test_prog.test_multiple_callbacks_registered()
-    
+
     print("\n✓ All parallelization tests passed!")

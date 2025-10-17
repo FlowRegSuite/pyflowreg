@@ -87,7 +87,7 @@ class VideoReader(ABC):
         # Pad to make divisible by bin_size
         pad = (-T) % self.bin_size
         if pad:
-            frames = np.pad(frames, [(0, pad), (0, 0), (0, 0), (0, 0)], mode='edge')
+            frames = np.pad(frames, [(0, pad), (0, 0), (0, 0), (0, 0)], mode="edge")
             T = frames.shape[0]
 
         # Reshape and average
@@ -118,7 +118,9 @@ class VideoReader(ABC):
             if key < 0:
                 key = binned_count + key
             if key < 0 or key >= binned_count:
-                raise IndexError(f"Index {key} out of range for {binned_count} binned frames")
+                raise IndexError(
+                    f"Index {key} out of range for {binned_count} binned frames"
+                )
 
             # Get raw frame range for this bin
             start = key * self.bin_size
@@ -133,7 +135,9 @@ class VideoReader(ABC):
             start, stop, step = key.indices(binned_count)
 
             if start >= stop:
-                return np.empty((0, self.height, self.width, self.n_channels), dtype=self.dtype)
+                return np.empty(
+                    (0, self.height, self.width, self.n_channels), dtype=self.dtype
+                )
 
             # Collect all requested bins
             binned_frames = []
@@ -151,25 +155,25 @@ class VideoReader(ABC):
         elif isinstance(key, (list, np.ndarray)):
             # Convert to numpy array if it's a list
             indices = np.asarray(key, dtype=np.int64)
-            
+
             # Handle negative indices
             indices = np.where(indices < 0, binned_count + indices, indices)
-            
+
             # Check bounds
             if np.any(indices < 0) or np.any(indices >= binned_count):
                 raise IndexError(f"Index out of range for {binned_count} binned frames")
-            
+
             # Collect frames at specified indices
             frames_list = []
             for idx in indices:
                 idx = int(idx)  # Ensure it's a Python int
                 frame_start = idx * self.bin_size
                 frame_end = min((idx + 1) * self.bin_size, self.frame_count)
-                
+
                 raw_frames = self._read_raw_frames(slice(frame_start, frame_end))
                 binned_frame = raw_frames.mean(axis=0, keepdims=True)
                 frames_list.append(binned_frame)
-            
+
             # Return (T, H, W, C) for consistency with slice indexing
             return np.concatenate(frames_list, axis=0)
 
@@ -247,13 +251,27 @@ class VideoReader(ABC):
 
     @property
     def shape(self) -> Tuple[int, int, int, int]:
-        """Shape after binning: (T_binned, H, W, C)."""
+        """
+        Shape after binning.
+
+        Returns
+        -------
+        tuple of int
+            Shape as (T_binned, H, W, C)
+        """
         self._ensure_initialized()
         return (len(self), self.height, self.width, self.n_channels)
 
     @property
     def unbinned_shape(self) -> Tuple[int, int, int, int]:
-        """Original shape: (T_original, H, W, C)."""
+        """
+        Original shape before binning.
+
+        Returns
+        -------
+        tuple of int
+            Shape as (T_original, H, W, C)
+        """
         self._ensure_initialized()
         return (self.frame_count, self.height, self.width, self.n_channels)
 
@@ -270,8 +288,10 @@ class VideoReader(ABC):
 
     def __repr__(self):
         self._ensure_initialized()
-        return (f"{self.__class__.__name__}(shape={self.shape}, "
-                f"dtype={self.dtype}, bin_size={self.bin_size})")
+        return (
+            f"{self.__class__.__name__}(shape={self.shape}, "
+            f"dtype={self.dtype}, bin_size={self.bin_size})"
+        )
 
     def __enter__(self):
         return self

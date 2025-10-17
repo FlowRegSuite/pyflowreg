@@ -1,5 +1,5 @@
 import os
-from typing import Union, List, Optional
+from typing import Union, List
 import warnings
 
 import numpy as np
@@ -17,7 +17,9 @@ class MATFileReader(DSFileReader, VideoReader):
     Supports both traditional MAT files (v5, v7) and v7.3 (HDF5-based).
     """
 
-    def __init__(self, file_path: str, buffer_size: int = 500, bin_size: int = 1, **kwargs):
+    def __init__(
+        self, file_path: str, buffer_size: int = 500, bin_size: int = 1, **kwargs
+    ):
         # Initialize parent classes
         DSFileReader.__init__(self)
         VideoReader.__init__(self)
@@ -32,11 +34,13 @@ class MATFileReader(DSFileReader, VideoReader):
         self.h5file = None  # For v7.3 files
 
         # Dataset options from kwargs
-        self.dataset_names = kwargs.get('dataset_names')
-        self.dimension_ordering = kwargs.get('dimension_ordering', [0, 1, 2])  # MATLAB default
+        self.dataset_names = kwargs.get("dataset_names")
+        self.dimension_ordering = kwargs.get(
+            "dimension_ordering", [0, 1, 2]
+        )  # MATLAB default
 
         # Known dataset patterns from MATLAB version
-        self.known_patterns = ['ch*_reg', 'ch*', 'buffer*', 'mov', 'data']
+        self.known_patterns = ["ch*_reg", "ch*", "buffer*", "mov", "data"]
 
     @staticmethod
     def _is_v73(path: str) -> bool:
@@ -60,8 +64,7 @@ class MATFileReader(DSFileReader, VideoReader):
         else:
             try:
                 self.mat_data = sio.loadmat(
-                    self.file_path,
-                    verify_compressed_data_integrity=False
+                    self.file_path, verify_compressed_data_integrity=False
                 )
                 self.is_v73 = False
             except NotImplementedError:
@@ -92,7 +95,7 @@ class MATFileReader(DSFileReader, VideoReader):
 
         for key in self.mat_data.keys():
             # Skip metadata keys
-            if key.startswith('__'):
+            if key.startswith("__"):
                 continue
 
             data = self.mat_data[key]
@@ -108,7 +111,7 @@ class MATFileReader(DSFileReader, VideoReader):
         def visitor(name, obj):
             if isinstance(obj, h5py.Dataset) and len(obj.shape) == 3:
                 # Skip MATLAB metadata
-                if not name.startswith('#'):
+                if not name.startswith("#"):
                     datasets_info.append((name, obj.shape))
 
         self.h5file.visititems(visitor)
@@ -150,7 +153,9 @@ class MATFileReader(DSFileReader, VideoReader):
                 ds_shape = self.mat_data[ds_name].shape
 
             if ds_shape != shape:
-                raise ValueError(f"Dataset {ds_name} has different shape: {ds_shape} vs {shape}")
+                raise ValueError(
+                    f"Dataset {ds_name} has different shape: {ds_shape} vs {shape}"
+                )
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
         """
@@ -162,7 +167,9 @@ class MATFileReader(DSFileReader, VideoReader):
         # Convert list to array for indexing
         if isinstance(frame_indices, list):
             if len(frame_indices) == 0:
-                return np.empty((0, self.height, self.width, self.n_channels), dtype=self.dtype)
+                return np.empty(
+                    (0, self.height, self.width, self.n_channels), dtype=self.dtype
+                )
             indices = np.array(frame_indices)
         else:
             # Convert slice to indices
@@ -170,7 +177,9 @@ class MATFileReader(DSFileReader, VideoReader):
             indices = np.arange(start, stop, step)
 
         n_frames = len(indices)
-        output = np.zeros((n_frames, self.height, self.width, self.n_channels), dtype=self.dtype)
+        output = np.zeros(
+            (n_frames, self.height, self.width, self.n_channels), dtype=self.dtype
+        )
 
         # Read from each dataset/channel
         for ch_idx, ds_name in enumerate(self.dataset_names):
@@ -276,16 +285,16 @@ class MATFileWriter(DSFileWriter, VideoWriter):
         VideoWriter.__init__(self)
 
         self.file_path = file_path
-        self.use_v73 = kwargs.get('use_v73', False)
+        self.use_v73 = kwargs.get("use_v73", False)
         self._data_dict = {}
         self._frame_counter = 0
 
         # MATLAB compatibility options
-        self.dimension_ordering = kwargs.get('dimension_ordering', [0, 1, 2])
+        self.dimension_ordering = kwargs.get("dimension_ordering", [0, 1, 2])
 
         # Dataset naming
         if not self.dataset_names:
-            self.dataset_names = 'ch*'
+            self.dataset_names = "ch*"
 
     def write_frames(self, frames: np.ndarray):
         """
@@ -324,10 +333,14 @@ class MATFileWriter(DSFileWriter, VideoWriter):
         # Validate shape
         T, H, W, C = frames.shape
         if H != self.height or W != self.width:
-            raise ValueError(f"Frame size mismatch. Expected ({self.height}, {self.width}), "
-                             f"got ({H}, {W})")
+            raise ValueError(
+                f"Frame size mismatch. Expected ({self.height}, {self.width}), "
+                f"got ({H}, {W})"
+            )
         if C != self.n_channels:
-            raise ValueError(f"Channel count mismatch. Expected {self.n_channels}, got {C}")
+            raise ValueError(
+                f"Channel count mismatch. Expected {self.n_channels}, got {C}"
+            )
 
         # Accumulate frames for each channel
         for ch_idx in range(self.n_channels):
@@ -360,25 +373,25 @@ class MATFileWriter(DSFileWriter, VideoWriter):
                 final_dict[ds_name] = np.concatenate(frame_list, axis=concat_axis)
 
         # Add metadata
-        final_dict['__pyflowreg_metadata__'] = {
-            'n_channels': self.n_channels,
-            'frame_count': self._frame_counter,
-            'height': self.height,
-            'width': self.width,
-            'dimension_ordering': self.dimension_ordering,
-            'format': 'pyflowreg_mat_v1'
+        final_dict["__pyflowreg_metadata__"] = {
+            "n_channels": self.n_channels,
+            "frame_count": self._frame_counter,
+            "height": self.height,
+            "width": self.width,
+            "dimension_ordering": self.dimension_ordering,
+            "format": "pyflowreg_mat_v1",
         }
 
         # Write MAT file
-        #if self.use_v73:
+        # if self.use_v73:
         #    # Use v7.3 format for large files
         #    sio.savemat(self.file_path, final_dict, do_compression=True, format='7.3')
-        #else:
-            # Use default format
+        # else:
+        # Use default format
         #    try:
         #        sio.savemat(self.file_path, final_dict, do_compression=True)
         #    except ValueError:
-                # File too large for v5/v7, switch to v7.3
+        # File too large for v5/v7, switch to v7.3
         #        warnings.warn("File too large for MAT v5/v7, switching to v7.3 format")
         #        sio.savemat(self.file_path, final_dict, do_compression=True, format='7.3')
 
@@ -386,7 +399,7 @@ class MATFileWriter(DSFileWriter, VideoWriter):
             if self.use_v73:
                 h5s.savemat(self.file_path, final_dict)
             else:
-                sio.savemat(self.file_path, final_dict, do_compression=True, format='5')
+                sio.savemat(self.file_path, final_dict, do_compression=True, format="5")
         except ValueError:
             warnings.warn("Switching to v7.3 (file too large for v5).")
             h5s.savemat(self.file_path, final_dict)
@@ -404,13 +417,12 @@ class MATFileWriter(DSFileWriter, VideoWriter):
 def main():
     """Test MAT file I/O."""
     import tempfile
-    from pathlib import Path
 
     # Create test data
     test_frames = np.random.randint(0, 255, (100, 128, 128, 2), dtype=np.uint8)
 
     # Test writing
-    with tempfile.NamedTemporaryFile(suffix='.mat', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".mat", delete=False) as f:
         mat_path = f.name
 
     print(f"Writing test MAT file: {mat_path}")

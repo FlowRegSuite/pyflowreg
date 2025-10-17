@@ -3,8 +3,7 @@ Wrapper classes for video file I/O operations.
 Provides multi-file, multi-channel, and subset reading/writing capabilities.
 """
 
-import os
-from typing import Union, List, Optional, Dict, Any
+from typing import Union, List
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,7 @@ class MULTIFILEFileWriter(VideoWriter):
     Each channel is saved to a separate file with _ch{N} suffix.
     """
 
-    def __init__(self, filename: str, file_type: str = 'TIFF', **kwargs):
+    def __init__(self, filename: str, file_type: str = "TIFF", **kwargs):
         """
         Initialize multi-file writer.
 
@@ -37,7 +36,7 @@ class MULTIFILEFileWriter(VideoWriter):
             self.file_name = path.stem
         else:
             self.folder = path
-            self.file_name = 'compensated'
+            self.file_name = "compensated"
 
         # Create output directory if needed
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -78,18 +77,17 @@ class MULTIFILEFileWriter(VideoWriter):
 
             # Create a writer for each channel
             for ch_idx in range(self.n_channels):
-                ch_filename = self.folder / f"{self.file_name}_ch{ch_idx + 1}.{self.file_type}"
+                ch_filename = (
+                    self.folder / f"{self.file_name}_ch{ch_idx + 1}.{self.file_type}"
+                )
                 writer = get_video_file_writer(
-                    str(ch_filename),
-                    self.file_type,
-                    **self.writer_parameters
+                    str(ch_filename), self.file_type, **self.writer_parameters
                 )
                 self.file_writers.append(writer)
 
         # Write each channel to its file
-        T = frames.shape[0]
         for ch_idx in range(self.n_channels):
-            channel_frames = frames[:, :, :, ch_idx:ch_idx + 1]  # Keep 4D shape
+            channel_frames = frames[:, :, :, ch_idx : ch_idx + 1]  # Keep 4D shape
             self.file_writers[ch_idx].write_frames(channel_frames)
 
     def close(self):
@@ -105,8 +103,13 @@ class MULTICHANNELFileReader(VideoReader):
     and combines them into a single multichannel output.
     """
 
-    def __init__(self, input_files: List[str], buffer_size: int = 500,
-                 bin_size: int = 1, **kwargs):
+    def __init__(
+        self,
+        input_files: List[str],
+        buffer_size: int = 500,
+        bin_size: int = 1,
+        **kwargs,
+    ):
         """
         Initialize multichannel reader.
 
@@ -134,14 +137,11 @@ class MULTICHANNELFileReader(VideoReader):
 
         for i, file_path in enumerate(self.input_files):
             reader = get_video_file_reader(
-                file_path,
-                self.buffer_size,
-                self.bin_size,
-                **self.reader_kwargs
+                file_path, self.buffer_size, self.bin_size, **self.reader_kwargs
             )
 
             # Ensure the reader is initialized
-            if hasattr(reader, '_ensure_initialized'):
+            if hasattr(reader, "_ensure_initialized"):
                 reader._ensure_initialized()
 
             self.filereaders.append(reader)
@@ -195,17 +195,25 @@ class MULTICHANNELFileReader(VideoReader):
             indices = list(frame_indices)
 
         if len(indices) == 0:
-            return np.empty((0, self.height, self.width, self.n_channels), dtype=self.dtype)
+            return np.empty(
+                (0, self.height, self.width, self.n_channels), dtype=self.dtype
+            )
 
         # Allocate output array
         n_frames = len(indices)
-        output = np.zeros((n_frames, self.height, self.width, self.n_channels), dtype=self.dtype)
+        output = np.zeros(
+            (n_frames, self.height, self.width, self.n_channels), dtype=self.dtype
+        )
 
         # Read from each file and combine
         ch_offset = 0
         for reader in self.filereaders:
             # Use reader's indexing directly
-            frames = reader[indices] if len(indices) > 1 else reader[indices[0]:indices[0] + 1]
+            frames = (
+                reader[indices]
+                if len(indices) > 1
+                else reader[indices[0] : indices[0] + 1]
+            )
 
             # Ensure 4D
             if frames.ndim == 3:
@@ -213,7 +221,7 @@ class MULTICHANNELFileReader(VideoReader):
 
             # Copy to output
             n_ch = reader.n_channels
-            output[:, :, :, ch_offset:ch_offset + n_ch] = frames.astype(self.dtype)
+            output[:, :, :, ch_offset : ch_offset + n_ch] = frames.astype(self.dtype)
             ch_offset += n_ch
 
         return output
@@ -231,7 +239,9 @@ class SUBSETFileReader(VideoReader):
     Useful for reading non-contiguous frame indices or reordering frames.
     """
 
-    def __init__(self, video_file_reader: VideoReader, indices: Union[List[int], np.ndarray]):
+    def __init__(
+        self, video_file_reader: VideoReader, indices: Union[List[int], np.ndarray]
+    ):
         """
         Initialize subset reader.
 
@@ -254,13 +264,15 @@ class SUBSETFileReader(VideoReader):
     def _initialize(self):
         """Initialize properties from source reader."""
         # Ensure source is initialized
-        if hasattr(self.video_file_reader, '_ensure_initialized'):
+        if hasattr(self.video_file_reader, "_ensure_initialized"):
             self.video_file_reader._ensure_initialized()
 
         # Validate indices
         max_idx = np.max(self.indices)
         if max_idx >= self.video_file_reader.frame_count:
-            raise ValueError(f"Index {max_idx} exceeds source frame count {self.video_file_reader.frame_count}")
+            raise ValueError(
+                f"Index {max_idx} exceeds source frame count {self.video_file_reader.frame_count}"
+            )
 
         # Copy properties from source
         self.height = self.video_file_reader.height
@@ -292,7 +304,9 @@ class SUBSETFileReader(VideoReader):
             subset_indices = list(frame_indices)
 
         if len(subset_indices) == 0:
-            return np.empty((0, self.height, self.width, self.n_channels), dtype=self.dtype)
+            return np.empty(
+                (0, self.height, self.width, self.n_channels), dtype=self.dtype
+            )
 
         # Map subset indices to original video indices
         original_indices = self.indices[subset_indices]
@@ -311,8 +325,12 @@ class SUBSETFileReader(VideoReader):
                 else:
                     frames.append(frame)
 
-            result = np.concatenate(frames, axis=0) if frames else np.empty(
-                (0, self.height, self.width, self.n_channels), dtype=self.dtype
+            result = (
+                np.concatenate(frames, axis=0)
+                if frames
+                else np.empty(
+                    (0, self.height, self.width, self.n_channels), dtype=self.dtype
+                )
             )
         finally:
             # Restore original binning
@@ -328,7 +346,6 @@ class SUBSETFileReader(VideoReader):
 def main():
     """Test wrapper implementations."""
     import tempfile
-    import shutil
 
     # Create test data
     test_frames = np.random.randint(0, 255, (20, 64, 64, 2), dtype=np.uint8)
@@ -339,7 +356,7 @@ def main():
         multifile_path = Path(tmpdir) / "test_multi"
 
         # Use HDF5 format since we have that implemented
-        with MULTIFILEFileWriter(str(multifile_path), 'HDF5') as writer:
+        with MULTIFILEFileWriter(str(multifile_path), "HDF5") as writer:
             writer.write_frames(test_frames[:10])
             writer.write_frames(test_frames[10:])
 
@@ -361,7 +378,12 @@ def main():
 
         # Read all frames
         all_frames = reader[:]
-        assert all_frames.shape == (20, 64, 64, 2), f"Shape mismatch: {all_frames.shape}"
+        assert all_frames.shape == (
+            20,
+            64,
+            64,
+            2,
+        ), f"Shape mismatch: {all_frames.shape}"
         print("✓ MULTICHANNEL reader test passed")
 
         # Test SUBSET reader
@@ -373,13 +395,19 @@ def main():
         assert subset_reader.frame_count == 5, "Subset frame count incorrect"
 
         subset_frames = subset_reader[:]
-        assert subset_frames.shape == (5, 64, 64, 2), f"Subset shape mismatch: {subset_frames.shape}"
+        assert subset_frames.shape == (
+            5,
+            64,
+            64,
+            2,
+        ), f"Subset shape mismatch: {subset_frames.shape}"
 
         # Verify correct frames were selected
         for i, orig_idx in enumerate(subset_indices):
             np.testing.assert_array_equal(
-                subset_frames[i], all_frames[orig_idx],
-                err_msg=f"Frame {i} (original {orig_idx}) mismatch"
+                subset_frames[i],
+                all_frames[orig_idx],
+                err_msg=f"Frame {i} (original {orig_idx}) mismatch",
             )
 
         print("✓ SUBSET reader test passed")
@@ -391,6 +419,7 @@ def main():
     try:
         from pyflowreg.util.io.factory import get_video_file_reader as factory_reader
         from pyflowreg.util.io.factory import get_video_file_writer as factory_writer
+
         assert factory_reader == get_video_file_reader
         assert factory_writer == get_video_file_writer
         print("✓ Factory functions properly imported")

@@ -5,23 +5,31 @@ import numpy as np
 
 try:
     import matplotlib.pyplot as plt
+
     MATPLOTLIB_SUPPORTED = True
 except ImportError:
     MATPLOTLIB_SUPPORTED = False
 
 try:
     from sklearn.decomposition import PCA
+
     SKLEARN_SUPPORTED = True
 except ImportError:
     SKLEARN_SUPPORTED = False
 
 
-def color_map_numpy_2ch(img_in: np.ndarray, scaling_left: Optional[Tuple[float, float]] = None,
-        scaling_right: Optional[Tuple[float, float]] = None, reference_left: Optional[np.ndarray] = None,
-        reference_right: Optional[np.ndarray] = None, inverted: bool = False, return_float: bool = False) -> np.ndarray:
+def color_map_numpy_2ch(
+    img_in: np.ndarray,
+    scaling_left: Optional[Tuple[float, float]] = None,
+    scaling_right: Optional[Tuple[float, float]] = None,
+    reference_left: Optional[np.ndarray] = None,
+    reference_right: Optional[np.ndarray] = None,
+    inverted: bool = False,
+    return_float: bool = False,
+) -> np.ndarray:
     """
     Convert a 2-channel image to a 3-channel color visualization.
-    
+
     Args:
         img_in: Input 2-channel image (H, W, 2) or stacked 2-channel images
         scaling_left: Tuple of (scale, offset) for left channel. Default (1, 0)
@@ -30,7 +38,7 @@ def color_map_numpy_2ch(img_in: np.ndarray, scaling_left: Optional[Tuple[float, 
         reference_right: Reference array for right channel normalization
         inverted: If True, swap red and blue channels
         return_float: If True, return float array in [0,1], else uint8 in [0,255]
-    
+
     Returns:
         3-channel color image
     """
@@ -118,15 +126,21 @@ def color_map_numpy_2ch(img_in: np.ndarray, scaling_left: Optional[Tuple[float, 
         return (img * 255).astype(np.uint8)
 
 
-def get_visualization(ch1: np.ndarray, ch2: np.ndarray, scaling_left: Optional[Tuple[float, float]] = None,
-        scaling_right: Optional[Tuple[float, float]] = None, reference_left: Optional[np.ndarray] = None,
-        reference_right: Optional[np.ndarray] = None, inverted: bool = False) -> np.ndarray:
+def get_visualization(
+    ch1: np.ndarray,
+    ch2: np.ndarray,
+    scaling_left: Optional[Tuple[float, float]] = None,
+    scaling_right: Optional[Tuple[float, float]] = None,
+    reference_left: Optional[np.ndarray] = None,
+    reference_right: Optional[np.ndarray] = None,
+    inverted: bool = False,
+) -> np.ndarray:
     """
     MATLAB-compatible visualization function for 2-channel images.
-    
+
     This function reproduces the exact behavior of the MATLAB get_visualization function,
     including the typo in the original where reference_left min is used in ch2 normalization.
-    
+
     Args:
         ch1: First channel data
         ch2: Second channel data
@@ -135,7 +149,7 @@ def get_visualization(ch1: np.ndarray, ch2: np.ndarray, scaling_left: Optional[T
         reference_left: Reference array for left channel normalization
         reference_right: Reference array for right channel normalization
         inverted: If True, swap red and blue channels
-    
+
     Returns:
         3-channel float image in range [0, 1]
     """
@@ -216,10 +230,10 @@ def get_visualization(ch1: np.ndarray, ch2: np.ndarray, scaling_left: Optional[T
 def multispectral_mapping(img: np.ndarray) -> np.ndarray:
     """
     Map multispectral image to RGB visualization.
-    
+
     Args:
         img: Input image with shape (H, W, C) where C is number of channels/bands
-        
+
     Returns:
         RGB image with shape (H, W, 3) normalized to [0, 1]
     """
@@ -235,7 +249,9 @@ def multispectral_mapping(img: np.ndarray) -> np.ndarray:
 
     if n_bands == 1:
         # Grayscale - replicate to all channels
-        normalized = (img[:, :, 0] - img[:, :, 0].min()) / (img[:, :, 0].max() - img[:, :, 0].min() + 1e-10)
+        normalized = (img[:, :, 0] - img[:, :, 0].min()) / (
+            img[:, :, 0].max() - img[:, :, 0].min() + 1e-10
+        )
         rgb[:, :, 0] = normalized
         rgb[:, :, 1] = normalized
         rgb[:, :, 2] = normalized
@@ -257,8 +273,10 @@ def multispectral_mapping(img: np.ndarray) -> np.ndarray:
     else:
         # More than 3 bands - use PCA to reduce to 3 components
         if not SKLEARN_SUPPORTED:
-            raise ImportError("Multispectral mapping with >3 channels requires 'scikit-learn' library")
-            
+            raise ImportError(
+                "Multispectral mapping with >3 channels requires 'scikit-learn' library"
+            )
+
         # Reshape for PCA
         img_reshaped = img.reshape(m * n, n_bands)
 
@@ -274,13 +292,18 @@ def multispectral_mapping(img: np.ndarray) -> np.ndarray:
     return np.clip(rgb, 0, 1)
 
 
-def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float = 1.0, 
-                                 downsample: float = 0.03, show_streamlines: bool = True,
-                                 quiver_color: Tuple[int, int, int] = (255, 255, 255),
-                                 streamline_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
+def _quiver_visualization_opencv(
+    img: np.ndarray,
+    flow: np.ndarray,
+    scale: float = 1.0,
+    downsample: float = 0.03,
+    show_streamlines: bool = True,
+    quiver_color: Tuple[int, int, int] = (255, 255, 255),
+    streamline_color: Tuple[int, int, int] = (0, 0, 0),
+) -> np.ndarray:
     """
     Create quiver visualization using OpenCV backend (no matplotlib required).
-    
+
     Args:
         img: Input image (H, W) or (H, W, C)
         flow: Displacement field with shape (H, W, 2)
@@ -289,16 +312,16 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
         show_streamlines: Whether to show streamlines
         quiver_color: RGB color for quiver arrows (default white)
         streamline_color: RGB color for streamlines (default black)
-        
+
     Returns:
         Visualization image as numpy array with shape (H, W, 3)
     """
     # Ensure correct shapes
     if img.ndim == 2:
         img = img[:, :, np.newaxis]
-        
+
     h, w, n_channels = img.shape
-    
+
     # Prepare background image based on number of channels
     if n_channels == 1:
         # Grayscale to RGB
@@ -316,46 +339,46 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
             img_rgb = img[:, :, :3].copy()
         else:
             img_rgb = multispectral_mapping(img)
-            
+
     # Normalize to 0-255 range
     if img_rgb.max() <= 1.0:
         img_rgb = (img_rgb * 255).astype(np.uint8)
     else:
         img_rgb = np.clip(img_rgb, 0, 255).astype(np.uint8)
-        
+
     # Create a copy for drawing
     result = img_rgb.copy()
-    
+
     # Downsample for quiver
     new_h = max(2, int(h * downsample))
     new_w = max(2, int(w * downsample))
-    
+
     # Create sampling grid
-    y_indices = np.linspace(0, h-1, new_h, dtype=int)
-    x_indices = np.linspace(0, w-1, new_w, dtype=int)
-    
+    y_indices = np.linspace(0, h - 1, new_h, dtype=int)
+    x_indices = np.linspace(0, w - 1, new_w, dtype=int)
+
     # Draw arrows
     # Note: scale parameter increases arrow length (unlike matplotlib where it decreases)
     arrow_scale = scale
-    
+
     # Remove edge points (similar to matplotlib version)
     if len(y_indices) > 2 and len(x_indices) > 2:
         y_indices = y_indices[1:-1]
         x_indices = x_indices[1:-1]
-    
+
     for y in y_indices:
         for x in x_indices:
             u = flow[y, x, 0] * arrow_scale
             v = flow[y, x, 1] * arrow_scale
-            
+
             # Skip very small displacements
             if abs(u) < 0.5 and abs(v) < 0.5:
                 continue
-                
+
             # Draw arrow
             start_point = (int(x), int(y))
             end_point = (int(x + u), int(y + v))
-            
+
             # Draw black outline for visibility
             cv2.arrowedLine(
                 result,
@@ -364,9 +387,9 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
                 color=(0, 0, 0),  # Black outline
                 thickness=2,
                 tipLength=0.2,
-                line_type=cv2.LINE_AA
+                line_type=cv2.LINE_AA,
             )
-            
+
             # Draw colored arrow on top
             cv2.arrowedLine(
                 result,
@@ -375,19 +398,19 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
                 color=quiver_color,
                 thickness=1,
                 tipLength=0.2,
-                line_type=cv2.LINE_AA
+                line_type=cv2.LINE_AA,
             )
-            
+
     # Add streamlines if requested
     if show_streamlines:
         # Create streamlines using line integral convolution approach
         # We'll trace particles through the flow field
         h, w = flow.shape[:2]
-        
+
         # Apply light Gaussian smoothing to flow field for smoother streamlines
         # Very small kernel to maintain accuracy while reducing noise
         flow_smooth = cv2.GaussianBlur(flow, (3, 3), 0.5)
-        
+
         # Create density grid to track visited cells (similar to matplotlib)
         # This prevents overlapping streamlines
         # Match matplotlib's approach: 30x30 grid at density=1
@@ -400,17 +423,17 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
         cell_size_x = max(1, int(np.ceil(w / grid_nx)))
         cell_size_y = max(1, int(np.ceil(h / grid_ny)))
         visited_grid = np.zeros((grid_ny, grid_nx), dtype=bool)
-        
+
         # Create seed points in a grid (similar to matplotlib)
         # Use finer spacing for seed points to get more streamlines
         # Seed spacing should be finer than the density grid
         seed_spacing_x = max(2, cell_size_x // 2)
         seed_spacing_y = max(2, cell_size_y // 2)
         seed_points = []
-        for y in range(seed_spacing_y//2, h, seed_spacing_y):
-            for x in range(seed_spacing_x//2, w, seed_spacing_x):
+        for y in range(seed_spacing_y // 2, h, seed_spacing_y):
+            for x in range(seed_spacing_x // 2, w, seed_spacing_x):
                 seed_points.append([x, y])
-        
+
         # Trace streamlines from each seed point
         for seed in seed_points:
             for direction in (1.0, -1.0):
@@ -435,23 +458,36 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
                     fx, fy = x - ix, y - iy
 
                     if ix < w - 1 and iy < h - 1:
-                        u00 = flow_smooth[iy, ix, 0];
+                        u00 = flow_smooth[iy, ix, 0]
                         u10 = flow_smooth[iy, ix + 1, 0]
-                        u01 = flow_smooth[iy + 1, ix, 0];
+                        u01 = flow_smooth[iy + 1, ix, 0]
                         u11 = flow_smooth[iy + 1, ix + 1, 0]
-                        u = (1 - fx) * (1 - fy) * u00 + fx * (1 - fy) * u10 + (1 - fx) * fy * u01 + fx * fy * u11
+                        u = (
+                            (1 - fx) * (1 - fy) * u00
+                            + fx * (1 - fy) * u10
+                            + (1 - fx) * fy * u01
+                            + fx * fy * u11
+                        )
 
-                        v00 = flow_smooth[iy, ix, 1];
+                        v00 = flow_smooth[iy, ix, 1]
                         v10 = flow_smooth[iy, ix + 1, 1]
-                        v01 = flow_smooth[iy + 1, ix, 1];
+                        v01 = flow_smooth[iy + 1, ix, 1]
                         v11 = flow_smooth[iy + 1, ix + 1, 1]
-                        v = (1 - fx) * (1 - fy) * v00 + fx * (1 - fy) * v10 + (1 - fx) * fy * v01 + fx * fy * v11
+                        v = (
+                            (1 - fx) * (1 - fy) * v00
+                            + fx * (1 - fy) * v10
+                            + (1 - fx) * fy * v01
+                            + fx * fy * v11
+                        )
                     else:
-                        u = flow_smooth[iy, ix, 0];
+                        u = flow_smooth[iy, ix, 0]
                         v = flow_smooth[iy, ix, 1]
 
                     step_size = 0.35 * min(cell_size_x, cell_size_y)
-                    nx, ny = x + direction * u * step_size, y + direction * v * step_size
+                    nx, ny = (
+                        x + direction * u * step_size,
+                        y + direction * v * step_size,
+                    )
                     if nx < 0 or nx >= w - 1 or ny < 0 or ny >= h - 1:
                         break
 
@@ -471,20 +507,28 @@ def _quiver_visualization_opencv(img: np.ndarray, flow: np.ndarray, scale: float
 
                 if len(streamline) > 3:
                     pts = np.asarray(streamline, dtype=np.int32)
-                    cv2.polylines(result, [pts], False, streamline_color, 1, cv2.LINE_AA)
-    
+                    cv2.polylines(
+                        result, [pts], False, streamline_color, 1, cv2.LINE_AA
+                    )
+
     return result
 
 
-def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0, 
-                        downsample: float = 0.03, show_streamlines: bool = True,
-                        backend: str = "matplotlib", return_array: bool = True,
-                        quiver_color: Tuple[int, int, int] = (255, 255, 255),
-                        streamline_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
+def quiver_visualization(
+    img: np.ndarray,
+    w: np.ndarray,
+    scale: float = 1.0,
+    downsample: float = 0.03,
+    show_streamlines: bool = True,
+    backend: str = "matplotlib",
+    return_array: bool = True,
+    quiver_color: Tuple[int, int, int] = (255, 255, 255),
+    streamline_color: Tuple[int, int, int] = (0, 0, 0),
+) -> np.ndarray:
     """
     Create quiver visualization of displacement field overlaid on image.
     Automatically detects number of channels and applies appropriate mapping.
-    
+
     Args:
         img: Input image (H, W) or (H, W, C)
         w: Displacement field with shape (H, W, 2)
@@ -495,28 +539,29 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         return_array: If True, return numpy array; if False, display plot
         quiver_color: RGB color for quiver arrows (default white)
         streamline_color: RGB color for streamlines (default black)
-        
+
     Returns:
         Visualization image as numpy array if return_array=True
-    
+
     Raises:
         ImportError: If matplotlib is not available when using matplotlib backend
         ValueError: If invalid backend is specified
     """
     if backend not in ["matplotlib", "opencv"]:
         raise ValueError(f"Backend must be 'matplotlib' or 'opencv', got '{backend}'")
-    
+
     if backend == "matplotlib" and not MATPLOTLIB_SUPPORTED:
         raise ImportError("Matplotlib backend requires 'matplotlib' library")
     # Ensure displacement field has correct shape
     if w.ndim != 3 or w.shape[2] != 2:
         raise ValueError(f"Displacement field must have shape (H, W, 2), got {w.shape}")
-    
+
     # Use OpenCV backend if specified
     if backend == "opencv":
-        return _quiver_visualization_opencv(img, w, scale, downsample, show_streamlines, 
-                                           quiver_color, streamline_color)
-    
+        return _quiver_visualization_opencv(
+            img, w, scale, downsample, show_streamlines, quiver_color, streamline_color
+        )
+
     # Otherwise use matplotlib backend
     # Ensure image is 3D
     if img.ndim == 2:
@@ -565,7 +610,7 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
         # Tall image: fix width, adjust height
         fig_width = 10
         fig_height = 10 / aspect_ratio
-    
+
     # Limit maximum figure size to avoid memory issues
     max_size = 20
     if fig_width > max_size:
@@ -574,7 +619,7 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
     if fig_height > max_size:
         fig_height = max_size
         fig_width = max_size * aspect_ratio
-    
+
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
     # Display image
@@ -595,13 +640,21 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
 
         # Add streamlines with explicit seed points
         # Convert RGB color tuple to matplotlib color (0-1 range)
-        stream_color = tuple(c/255.0 for c in streamline_color)
+        stream_color = tuple(c / 255.0 for c in streamline_color)
         try:
             # Note: Negate V component because image coordinates have y increasing downward
             # while matplotlib display has y increasing upward (due to extent and ylim settings)
-            ax.streamplot(x, y, w_small[:, :, 0], w_small[:, :, 1],
-                         start_points=seed_points, color=stream_color,
-                         density=1.0, linewidth=1, arrowsize=1.5)
+            ax.streamplot(
+                x,
+                y,
+                w_small[:, :, 0],
+                w_small[:, :, 1],
+                start_points=seed_points,
+                color=stream_color,
+                density=1.0,
+                linewidth=1,
+                arrowsize=1.5,
+            )
         except Exception as e:
             print(f"Warning: Streamlines failed to render: {e}")
 
@@ -616,15 +669,24 @@ def quiver_visualization(img: np.ndarray, w: np.ndarray, scale: float = 1.0,
 
         # Add quiver plot
         # Convert RGB color tuple to matplotlib color (0-1 range)
-        quiv_color = tuple(c/255.0 for c in quiver_color)
+        quiv_color = tuple(c / 255.0 for c in quiver_color)
         # Note: Negate V component to match image coordinate system
-        ax.quiver(X_quiv, Y_quiv, w_quiv[:, :, 0], -w_quiv[:, :, 1], scale_units='xy', scale=1.0 / scale, width=0.003,
-                  color=quiv_color, alpha=0.9)
+        ax.quiver(
+            X_quiv,
+            Y_quiv,
+            w_quiv[:, :, 0],
+            -w_quiv[:, :, 1],
+            scale_units="xy",
+            scale=1.0 / scale,
+            width=0.003,
+            color=quiv_color,
+            alpha=0.9,
+        )
 
     ax.set_xlim(0, w_width)
     ax.set_ylim(h, 0)
-    ax.axis('off')
-    
+    ax.axis("off")
+
     # Remove padding/margins
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
     ax.margins(0, 0)
@@ -676,20 +738,20 @@ def flow_to_color(flow, max_flow=None):
     colorwheel[0:RY, 0] = 255
     colorwheel[0:RY, 1] = np.floor(255 * np.arange(RY) / RY)
     col += RY
-    colorwheel[col:col + YG, 0] = 255 - np.floor(255 * np.arange(YG) / YG)
-    colorwheel[col:col + YG, 1] = 255
+    colorwheel[col : col + YG, 0] = 255 - np.floor(255 * np.arange(YG) / YG)
+    colorwheel[col : col + YG, 1] = 255
     col += YG
-    colorwheel[col:col + GC, 1] = 255
-    colorwheel[col:col + GC, 2] = np.floor(255 * np.arange(GC) / GC)
+    colorwheel[col : col + GC, 1] = 255
+    colorwheel[col : col + GC, 2] = np.floor(255 * np.arange(GC) / GC)
     col += GC
-    colorwheel[col:col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
-    colorwheel[col:col + CB, 2] = 255
+    colorwheel[col : col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
+    colorwheel[col : col + CB, 2] = 255
     col += CB
-    colorwheel[col:col + BM, 2] = 255
-    colorwheel[col:col + BM, 0] = np.floor(255 * np.arange(BM) / BM)
+    colorwheel[col : col + BM, 2] = 255
+    colorwheel[col : col + BM, 0] = np.floor(255 * np.arange(BM) / BM)
     col += BM
-    colorwheel[col:col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
-    colorwheel[col:col + MR, 0] = 255
+    colorwheel[col : col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
+    colorwheel[col : col + MR, 0] = 255
 
     a = np.arctan2(-v, -u) / np.pi
     fk = (a + 1) / 2 * (ncols - 1)

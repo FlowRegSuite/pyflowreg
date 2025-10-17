@@ -18,7 +18,9 @@ def resize_image_skimage(image, size):
     Returns:
     - Resized image.
     """
-    img = ski_resize(image, (size[1], size[0]), order=3, mode='edge', anti_aliasing=True)
+    img = ski_resize(
+        image, (size[1], size[0]), order=3, mode="edge", anti_aliasing=True
+    )
     return img
 
 
@@ -63,13 +65,13 @@ def imresize_cv2_aa_gauss_sep(img, size):
     return cv2.resize(img, size[1::-1], interpolation=cv2.INTER_CUBIC)
 
 
-@njit(inline='always')
+@njit(inline="always")
 def _cubic(x):
     ax = abs(x)
     if ax < 1.0:
-        return (A + 2.0) * ax ** 3 - (A + 3.0) * ax ** 2 + 1.0
+        return (A + 2.0) * ax**3 - (A + 3.0) * ax**2 + 1.0
     elif ax < 2.0:
-        return A * ax ** 3 - 5.0 * A * ax ** 2 + 8.0 * A * ax - 4.0 * A
+        return A * ax**3 - 5.0 * A * ax**2 + 8.0 * A * ax - 4.0 * A
     else:
         return 0.0
 
@@ -177,7 +179,7 @@ def resize_image_cv2_aa_blur(image, size):
     return img
 
 
-@njit(inline='always')
+@njit(inline="always")
 def _reflect_idx(j, n):
     if n <= 1:
         return 0
@@ -222,7 +224,7 @@ def _precompute_fused_gauss_cubic(in_len, out_len, sigma):
         g = np.exp(-0.5 * (x / sigma) ** 2).astype(np.float32)
         g /= g.sum()
     idx = np.empty((out_len, 2 * R + 4), np.int32)
-    wt  = np.empty((out_len, 2 * R + 4), np.float32)
+    wt = np.empty((out_len, 2 * R + 4), np.float32)
     _fill_tables_fused_gauss_cubic_reflect(idx, wt, in_len, out_len, scale, g, R)
     return idx, wt
 

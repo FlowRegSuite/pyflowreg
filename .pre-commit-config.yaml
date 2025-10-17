@@ -1,0 +1,36 @@
+# Pre-commit hooks for pyflowreg
+# Using FlowRegSuite organization-wide hooks for consistency
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/FlowRegSuite/flowreg-hooks
+    rev: v1.0.1
+    hooks:
+      - id: fr-ruff
+      - id: fr-ruff-format
+      - id: fr-numpydoc-validation
+      - id: fr-validate-pyproject
+        additional_dependencies: ['validate-pyproject>=0.18', 'tomli>=1.0.0']
+      - id: fr-trailing-whitespace
+      - id: fr-end-of-file-fixer
+      - id: fr-check-yaml
+      - id: fr-check-toml
+      - id: fr-check-merge-conflict
+      - id: fr-debug-statements
+      - id: fr-mixed-line-ending
+      - id: check-readme-images
+
+# Optional global exclude to keep things snappy
+exclude: |
+  (?x)^(
+    \.git/|
+    \.venv/|
+    __pycache__/|
+    build/|dist/|
+    \.eggs/|.*\.egg-info/|
+    docs/_build/|
+    \.mypy_cache/|
+    \.pytest_cache/|
+    results/|
+    nul
+  )

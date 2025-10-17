@@ -58,14 +58,17 @@ if __name__ == "__main__":
     b = 25
 
     cold_f1 = np.zeros((32, 32, 2), np.float32)
-    pfr.get_displacement(cold_f1, cold_f1, alpha=(2, 2),
-                levels=50,
-                min_level=5,
-                iterations=50,
-                a_data=0.45,
-                a_smooth=1,
-                weight=np.array([0.6, 0.4])
-            )
+    pfr.get_displacement(
+        cold_f1,
+        cold_f1,
+        alpha=(2, 2),
+        levels=50,
+        min_level=5,
+        iterations=50,
+        a_data=0.45,
+        a_smooth=1,
+        weight=np.array([0.6, 0.4]),
+    )
 
     base_params = dict(
         alpha=(8, 8),
@@ -79,8 +82,7 @@ if __name__ == "__main__":
     )
 
     for name, data in datasets:
-        data = gaussian_filter(data, (0.00001, 0.00001, 1, 1),
-                               truncate=4)
+        data = gaussian_filter(data, (0.00001, 0.00001, 1, 1), truncate=4)
 
         f1, f2 = preprocess(data)
 
