@@ -275,8 +275,8 @@ def compute_and_save_temporal_average(
     # Stream frames to avoid loading entire video into RAM
     frame_count = vid_reader.frame_count
 
-    # Read first frame to get shape
-    first_frame = vid_reader.read_frames([0])
+    # Read first frame to get shape (VideoReader supports array indexing)
+    first_frame = vid_reader[[0]]  # Returns (1, H, W, C) or (1, H, W)
     if first_frame.ndim == 4:  # (T, H, W, C)
         first_frame = first_frame[0]  # Remove batch dimension
 
@@ -289,7 +289,7 @@ def compute_and_save_temporal_average(
     for start_idx in range(1, frame_count, batch_size):
         end_idx = min(start_idx + batch_size, frame_count)
         batch_indices = list(range(start_idx, end_idx))
-        batch = vid_reader.read_frames(batch_indices)
+        batch = vid_reader[batch_indices]  # Use array indexing
 
         # Sum over time axis (axis=0)
         accumulator += np.sum(batch, axis=0, dtype=np.float64)

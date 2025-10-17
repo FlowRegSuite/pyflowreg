@@ -334,12 +334,13 @@ class OFOptions(BaseModel):
             return float(w[i])
 
         # Handle 2D or 3D weights (spatial weights)
-        if i >= w.shape[0]:
+        # Spatial weights have shape (H, W, C) where C is the channel dimension
+        if i >= w.shape[-1]:  # Check last dimension (channels)
             if self.verbose:
                 print(f"Weight for channel {i} not set, using 1/n_channels")
-            return np.ones(w.shape[1:]) / n_channels
+            return np.ones(w.shape[:-1]) / n_channels  # Return (H, W) array
 
-        return w[i]
+        return w[:, :, i]  # Return (H, W) for channel i
 
     def copy(self) -> "OFOptions":
         """Create a deep copy (MATLAB copyable interface)."""
