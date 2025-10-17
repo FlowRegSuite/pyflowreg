@@ -108,10 +108,15 @@ def atomic_save_npy(path: Path, arr: np.ndarray):
     Notes
     -----
     Uses write-to-temp then replace() to avoid half-written files on crash.
+    Note: np.save() automatically adds .npy extension, so temp file is created
+    without extension and np.save adds it.
     """
-    temp_path = path.with_suffix(".npy.tmp")
+    # Remove extension for temp file (np.save will add .npy automatically)
+    temp_path = path.with_suffix(".tmp")
     np.save(str(temp_path), arr)
-    temp_path.replace(path)
+    # np.save created temp_path.npy, so move that to final location
+    temp_path_with_npy = temp_path.with_suffix(".tmp.npy")
+    temp_path_with_npy.replace(path)
 
 
 def atomic_save_npz(path: Path, **arrays):
@@ -128,10 +133,15 @@ def atomic_save_npz(path: Path, **arrays):
     Notes
     -----
     Uses write-to-temp then replace() to avoid half-written files on crash.
+    Note: np.savez() automatically adds .npz extension, so temp file is created
+    without extension and np.savez adds it.
     """
-    temp_path = path.with_suffix(".npz.tmp")
+    # Remove extension for temp file (np.savez will add .npz automatically)
+    temp_path = path.with_suffix(".tmp")
     np.savez(str(temp_path), **arrays)
-    temp_path.replace(path)
+    # np.savez created temp_path.npz, so move that to final location
+    temp_path_with_npz = temp_path.with_suffix(".tmp.npz")
+    temp_path_with_npz.replace(path)
 
 
 def verify_hdf5_completeness(h5_path: Path, expected_frame_count: int) -> bool:

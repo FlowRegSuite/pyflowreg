@@ -224,14 +224,19 @@ class OFOptions(BaseModel):
     @field_validator("weight", mode="before")
     @classmethod
     def normalize_weight(cls, v):
-        """Normalize weight values to sum to 1."""
+        """Normalize weight values to sum to 1.
+
+        For 1D arrays/lists: Normalizes and converts to list of floats.
+        For multi-dimensional arrays: Returns as numpy array (spatial weights).
+        """
         if isinstance(v, np.ndarray):
             if v.ndim == 1:
                 weight_sum = v.sum()
                 if weight_sum > 0:
                     return (v / weight_sum).tolist()
                 return v.tolist()
-            return v.tolist()
+            # For multi-dimensional arrays (spatial weights), return as-is
+            return v
         elif isinstance(v, (list, tuple)):
             arr = np.asarray(v, dtype=float)
             if arr.ndim == 1:
