@@ -154,10 +154,15 @@ def compute_between_displacement(
     get_displacement_func = backend_factory(**config.backend_params)
 
     # Refine with optical flow
+    # Convert scalar alpha to tuple (alpha_x, alpha_y) if needed
+    alpha = config.alpha_between
+    if not isinstance(alpha, (tuple, list)):
+        alpha = (alpha, alpha)
+
     w = get_displacement_func(
         img1,
         img2,
-        alpha=config.alpha_between,
+        alpha=alpha,
         iterations=config.iterations_between,
         uv=w_init,
     )
