@@ -13,7 +13,6 @@ from typing import List, Tuple
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from skimage.registration import phase_cross_correlation
 
 from pyflowreg.core.backend_registry import get_backend
 from pyflowreg.session.config import SessionConfig
@@ -23,64 +22,7 @@ from pyflowreg.session.stage1_compensate import (
     load_or_create_status,
     save_status,
 )
-
-
-def rigid_cc_init(
-    fixed: np.ndarray, moving: np.ndarray, upsample_factor: int = 4
-) -> np.ndarray:
-    """
-    Compute rigid displacement initialization via phase cross-correlation.
-
-    Parameters
-    ----------
-    fixed : ndarray, shape (H, W) or (H, W, C)
-        Reference image
-    moving : ndarray, shape (H, W) or (H, W, C)
-        Moving image to align
-    upsample_factor : int, default=4
-        Subpixel upsampling factor for cross-correlation
-
-    Returns
-    -------
-    w_init : ndarray, shape (H, W, 2)
-        Constant displacement field with [u, v] where shift = (dy, dx)
-
-    Notes
-    -----
-    Mirrors MATLAB get_displacement_cc() using scikit-image's
-    phase_cross_correlation with subpixel refinement.
-
-    For multi-channel images, uses only the first channel.
-
-    References
-    ----------
-    - align_full_v3_checkpoint.m line 103: w_init = get_displacement_cc(...)
-    - get_session_valid_index_v3.m line 73: w_init = get_displacement_cc(...)
-    """
-    # Use first channel if multi-channel
-    if fixed.ndim == 3:
-        fixed_gray = fixed[:, :, 0]
-        moving_gray = moving[:, :, 0]
-    else:
-        fixed_gray = fixed
-        moving_gray = moving
-
-    # Compute phase cross-correlation shift
-    # Returns (row_shift, col_shift) = (dy, dx)
-    shift, _, _ = phase_cross_correlation(
-        fixed_gray, moving_gray, upsample_factor=upsample_factor
-    )
-
-    dy, dx = shift.astype(np.float32)
-
-    # Create constant displacement field
-    H, W = fixed_gray.shape
-    u = np.full((H, W), dx, dtype=np.float32)
-    v = np.full((H, W), dy, dtype=np.float32)
-
-    w_init = np.stack([u, v], axis=-1)
-
-    return w_init
+from pyflowreg.util.xcorr_prealignment import estimate_rigid_xcorr_2d
 
 
 def normalize_to_gray(img: np.ndarray) -> np.ndarray:
@@ -138,7 +80,17 @@ def compute_between_displacement(
         w = get_displacement(img1, img2, 'alpha', 25, 'iterations', 100, 'uv', w_init(:,:,1), w_init(:,:,2));
     """
     # Rigid initialization via cross-correlation
-    w_init = rigid_cc_init(reference_avg, current_avg, config.cc_upsample)
+    # Use existing utility function with proper backward warp convention
+    shift_2d = estimate_rigid_xcorr_2d(
+        reference_avg, current_avg, target_hw=256, up=config.cc_upsample
+    )
+
+    # Create constant displacement field from 2D shift
+    dx, dy = shift_2d[0], shift_2d[1]
+    H, W = reference_avg.shape[:2]
+    w_init = np.zeros((H, W, 2), dtype=np.float32)
+    w_init[:, :, 0] = dx  # u
+    w_init[:, :, 1] = dy  # v
 
     # Smooth both images
     sigma = config.sigma_smooth
