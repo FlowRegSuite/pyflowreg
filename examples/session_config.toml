@@ -1,0 +1,52 @@
+# Example session configuration file for PyFlowReg multi-recording processing
+# Copy and modify this file for your experiment
+
+# === Data Location ===
+root = "/path/to/your/experiment/"  # Directory containing recordings
+pattern = "*.tif"                   # File pattern to match recordings
+
+# Optional: Specify which recording to use as reference
+# If not specified, the lexicographic middle file is used
+# center = "recording_005.tif"
+
+# === Output Paths ===
+# These can be absolute or relative to root
+output_root = "compensated_outputs"  # Stage 1 outputs (per-recording)
+final_results = "final_results"      # Stage 2-3 outputs (session-wide)
+
+# === Processing Options ===
+resume = true                         # Skip completed steps on rerun
+scheduler = "local"                   # Options: "local", "array", "dask"
+
+# === Optical Flow Backend ===
+# Choose the backend for displacement computation
+flow_backend = "flowreg"              # Options: "flowreg", "torch", "jax"
+
+# Backend-specific parameters (optional)
+[backend_params]
+# device = "cuda:0"                   # For torch backend
+# precision = "float32"               # Computation precision
+
+# === Stage 2 Alignment Parameters ===
+# These control inter-sequence registration quality
+
+# Phase cross-correlation initialization
+cc_upsample = 4                       # Subpixel accuracy (higher = more precise)
+
+# Gaussian smoothing before alignment
+sigma_smooth = 6.0                    # Sigma for Gaussian filter
+
+# Optical flow refinement
+alpha_between = 25.0                  # Regularization strength (higher = smoother)
+iterations_between = 100              # Solver iterations (higher = more accurate)
+
+# === Stage 1 Options (Optional) ===
+# Override specific parameters for per-recording motion correction
+# These are passed to OFOptions in run_stage1()
+#
+# [of_options_override]
+# quality_setting = "balanced"        # Options: "fast", "balanced", "quality"
+# buffer_size = 1000                  # Frames per batch
+# save_w = false                      # Save displacement fields
+# save_valid_idx = true               # Required for Stage 3
+# save_meta_info = true               # Save statistics

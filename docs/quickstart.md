@@ -85,6 +85,47 @@ compensate_recording(options, config=config)
 
 **Note:** A GPU implementation based on red-black Gauss-Seidel iteration is currently in development.
 
+## Multi-Session Processing
+
+For experiments with multiple recordings from the same field of view, use the session processing pipeline:
+
+```python
+from pyflowreg.session import SessionConfig
+from pyflowreg.session.stage1_compensate import run_stage1
+from pyflowreg.session.stage2_between_avgs import run_stage2
+from pyflowreg.session.stage3_valid_mask import run_stage3
+
+# Configure session
+config = SessionConfig(
+    root="/data/experiment/",
+    pattern="recording_*.tif",
+    output_root="compensated",
+    resume=True  # Enable resume for crash safety
+)
+
+# Stage 1: Motion correct each recording
+output_folders = run_stage1(config)
+
+# Stage 2: Align recordings to common reference
+middle_idx, center_file, displacements = run_stage2(config)
+
+# Stage 3: Compute valid mask across all recordings
+final_mask = run_stage3(config, middle_idx, displacements)
+```
+
+Or use the command-line interface:
+```bash
+# Run complete pipeline
+pyflowreg-session session.toml
+
+# Or run stages individually (useful for HPC)
+pyflowreg-session session.toml --stage 1
+pyflowreg-session session.toml --stage 2
+pyflowreg-session session.toml --stage 3
+```
+
+See the [Multi-Session Processing Guide](user_guide/multi_session.md) for details on HPC integration and advanced configuration.
+
 ## Examples and Notebooks
 
 The repository contains demo scripts under `examples/` and demo notebooks under `notebooks/`. The demos with the Jupiter sequence should run out of the box.

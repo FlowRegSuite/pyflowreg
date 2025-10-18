@@ -249,7 +249,6 @@ def imresize_fused_gauss_cubic(img, size, sigma_coeff=0.6, per_axis=False):
         c = x.shape[2]
         y = np.empty((oh, ow, c), np.float32)
         for k in range(c):
-            print(f"x shape {x.shape} x dtype {x.dtype}")
             tmp = _resize_h(x[:, :, k], idx_x, wt_x)
             y[:, :, k] = _resize_v(tmp, idx_y, wt_y)
     return y.astype(img.dtype, copy=False)

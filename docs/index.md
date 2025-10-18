@@ -11,7 +11,9 @@ This is a Python port of the [Flow-Registration MATLAB toolbox](https://github.c
 - **Variational model** optimized for motion statistics in 2P microscopy
 - **Dense motion fields** returned for analysis and visualization
 - **Multi-channel support** with automatic weight normalization
+- **Multi-session processing** for longitudinal studies with inter-sequence alignment
 - **Parallel processing** with threading and multiprocessing executors
+- **HPC integration** with array job support for cluster computing
 - **Flexible I/O** supporting HDF5, TIFF, MAT, and MDF formats
 - **Reference pre-alignment** via cross-correlation for improved robustness
 - **MATLAB compatibility** maintaining algorithmic parity with Flow-Registration

@@ -109,7 +109,7 @@ def estimate_rigid_xcorr_2d(
 
 if __name__ == "__main__":
     from scipy.ndimage import shift as ndi_shift
-    from pyflowreg.core.optical_flow import imregister_wrapper
+    from pyflowreg.core.warping import imregister_wrapper
     import matplotlib.pyplot as plt
 
     print("Testing 2D rigid cross-correlation alignment...")

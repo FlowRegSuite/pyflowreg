@@ -224,14 +224,19 @@ class OFOptions(BaseModel):
     @field_validator("weight", mode="before")
     @classmethod
     def normalize_weight(cls, v):
-        """Normalize weight values to sum to 1."""
+        """Normalize weight values to sum to 1.
+
+        For 1D arrays/lists: Normalizes and converts to list of floats.
+        For multi-dimensional arrays: Returns as numpy array (spatial weights).
+        """
         if isinstance(v, np.ndarray):
             if v.ndim == 1:
                 weight_sum = v.sum()
                 if weight_sum > 0:
                     return (v / weight_sum).tolist()
                 return v.tolist()
-            return v.tolist()
+            # For multi-dimensional arrays (spatial weights), return as-is
+            return v
         elif isinstance(v, (list, tuple)):
             arr = np.asarray(v, dtype=float)
             if arr.ndim == 1:
@@ -329,12 +334,13 @@ class OFOptions(BaseModel):
             return float(w[i])
 
         # Handle 2D or 3D weights (spatial weights)
-        if i >= w.shape[0]:
+        # Spatial weights have shape (H, W, C) where C is the channel dimension
+        if i >= w.shape[-1]:  # Check last dimension (channels)
             if self.verbose:
                 print(f"Weight for channel {i} not set, using 1/n_channels")
-            return np.ones(w.shape[1:]) / n_channels
+            return np.ones(w.shape[:-1]) / n_channels  # Return (H, W) array
 
-        return w[i]
+        return w[:, :, i]  # Return (H, W) for channel i
 
     def copy(self) -> "OFOptions":
         """Create a deep copy (MATLAB copyable interface)."""
