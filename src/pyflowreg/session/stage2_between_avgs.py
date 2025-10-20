@@ -15,6 +15,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from pyflowreg.core.backend_registry import get_backend
+from pyflowreg.core.warping import imregister_wrapper
 from pyflowreg.session.config import SessionConfig
 from pyflowreg.session.stage1_compensate import (
     atomic_save_npz,
@@ -25,27 +26,31 @@ from pyflowreg.session.stage1_compensate import (
 from pyflowreg.util.xcorr_prealignment import estimate_rigid_xcorr_2d
 
 
-def normalize_to_gray(img: np.ndarray) -> np.ndarray:
+def mat2gray_ref(img: np.ndarray, ref: np.ndarray = None) -> np.ndarray:
     """
-    Normalize image to [0, 1] range (MATLAB mat2gray).
+    Normalize image to [0, 1] range.
 
     Parameters
     ----------
     img : ndarray
         Input image
+    ref : ndarray, optional
+        Reference image for min/max calculation (default: img)
 
     Returns
     -------
     ndarray
         Normalized image in [0, 1]
     """
-    img_min = img.min()
-    img_max = img.max()
 
-    if img_max > img_min:
-        return (img - img_min) / (img_max - img_min)
+    if ref is None:
+        img_min = img.min()
+        img_max = img.max()
     else:
-        return np.zeros_like(img)
+        img_min = ref.min()
+        img_max = ref.max()
+
+    return (img - img_min) / (img_max - img_min)
 
 
 def compute_between_displacement(
@@ -79,27 +84,37 @@ def compute_between_displacement(
         img2 = mat2gray(imgaussfilt(current_avg, sigma));
         w = get_displacement(img1, img2, 'alpha', 25, 'iterations', 100, 'uv', w_init(:,:,1), w_init(:,:,2));
     """
-    # Rigid initialization via cross-correlation
-    # Use existing utility function with proper backward warp convention
-    shift_2d = estimate_rigid_xcorr_2d(
-        reference_avg, current_avg, target_hw=256, up=config.cc_upsample
-    )
-
-    # Create constant displacement field from 2D shift
-    dx, dy = shift_2d[0], shift_2d[1]
-    H, W = reference_avg.shape[:2]
-    w_init = np.zeros((H, W, 2), dtype=np.float32)
-    w_init[:, :, 0] = dx  # u
-    w_init[:, :, 1] = dy  # v
 
     # Smooth both images
     sigma = config.sigma_smooth
     ref_smooth = gaussian_filter(reference_avg, sigma=sigma)
     cur_smooth = gaussian_filter(current_avg, sigma=sigma)
 
-    # Normalize to [0, 1]
-    img1 = normalize_to_gray(ref_smooth)
-    img2 = normalize_to_gray(cur_smooth)
+    img1 = mat2gray_ref(ref_smooth)
+    img2 = mat2gray_ref(cur_smooth, ref_smooth)
+
+    # Rigid initialization via cross-correlation
+    # Use existing utility function with proper backward warp convention
+    shift_2d = estimate_rigid_xcorr_2d(img1, img2, target_hw=256, up=config.cc_upsample)
+
+    # Create constant displacement field from 2D shift
+    dx, dy = shift_2d[0], shift_2d[1]
+    H, W = img2.shape[:2]
+    w_init = np.zeros((H, W, 2), dtype=np.float32)
+    w_init[:, :, 0] = dx
+    w_init[:, :, 1] = dy
+
+    print(f"  Rigid pre-alignment shift: dx={dx:.2f}, dy={dy:.2f}")
+
+    img2_dims = img2.shape
+    img2 = imregister_wrapper(
+        img2,
+        w_init[:, :, 0],
+        w_init[:, :, 1],
+        reference_avg,
+        interpolation_method="cubic",
+    )
+    img2 = img2.reshape(img2_dims)
 
     # Get displacement function based on configured backend
     backend_factory = get_backend(config.flow_backend)
@@ -116,10 +131,9 @@ def compute_between_displacement(
         img2,
         alpha=alpha,
         iterations=config.iterations_between,
-        uv=w_init,
     )
 
-    return w
+    return w + w_init
 
 
 def load_temporal_averages(
