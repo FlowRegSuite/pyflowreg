@@ -62,6 +62,14 @@ def estimate_rigid_xcorr_2d(
     Th = H if target_hw is None else min(H, int(target_hw[0]))
     Tw = W if target_hw is None else min(W, int(target_hw[1]))
 
+    # Validate upsampling factor
+    if up < 1:
+        print(
+            f"Warning: upsampling factor {up} < 1 is invalid. "
+            f"Setting to 1 (no upsampling)."
+        )
+        up = 1
+
     # Calculate scaling factors
     sy = H / Th
     sx = W / Tw
