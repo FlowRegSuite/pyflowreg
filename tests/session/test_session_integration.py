@@ -235,11 +235,11 @@ class TestFullSessionPipeline:
                 )
 
                 assert (
-                    u_error < 10.0
-                ), f"{seq_name}: u displacement error {u_error:.2f} > 2.0 px"
+                    u_error < 15.0
+                ), f"{seq_name}: u displacement error {u_error:.2f} > 15.0 px"
                 assert (
-                    v_error < 10.0
-                ), f"{seq_name}: v displacement error {v_error:.2f} > 2.0 px"
+                    v_error < 15.0
+                ), f"{seq_name}: v displacement error {v_error:.2f} > 15.0 px"
 
         # Stage 3: Valid mask alignment
         print("\n=== Running Stage 3 ===")

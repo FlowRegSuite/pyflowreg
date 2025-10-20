@@ -2,6 +2,8 @@
 # Copy and modify this file for your experiment
 
 # === Data Location ===
+# NOTE: Use forward slashes (/) for paths, even on Windows
+# OR use double backslashes (\\) on Windows: "C:\\Users\\name\\experiment\\"
 root = "/path/to/your/experiment/"  # Directory containing recordings
 pattern = "*.tif"                   # File pattern to match recordings
 

@@ -25,8 +25,10 @@ class TestExampleConfigFiles:
 
         content = example_path.read_text()
 
-        # Replace placeholder path with temp directory
-        content = content.replace("/path/to/your/experiment/", str(tmp_path) + "/")
+        # Replace placeholder path with temp directory (use forward slashes for TOML)
+        content = content.replace(
+            "/path/to/your/experiment/", tmp_path.as_posix() + "/"
+        )
 
         # Write to temp file
         config_file = tmp_path / "test_config.toml"
@@ -61,8 +63,10 @@ class TestExampleConfigFiles:
 
         content = example_path.read_text()
 
-        # Replace placeholder path with temp directory
-        content = content.replace("/path/to/your/experiment/", str(tmp_path) + "/")
+        # Replace placeholder path with temp directory (use forward slashes)
+        content = content.replace(
+            "/path/to/your/experiment/", tmp_path.as_posix() + "/"
+        )
 
         # Write to temp file
         config_file = tmp_path / "test_config.yml"
