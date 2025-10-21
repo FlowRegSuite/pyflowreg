@@ -78,18 +78,79 @@ class BatchMotionCorrector:
 
     def _setup_executor(self):
         """Setup the parallelization executor based on configuration."""
+        import warnings
+        from pyflowreg.core.backend_registry import get_backend_executors
+
         # Get executor class from RuntimeContext
         executor_name = self.config.parallelization
+        backend_name = getattr(self.options, "flow_backend", "flowreg")
 
-        if executor_name is None:
-            # Auto-select based on available parallelization
+        # Get supported executors for this backend
+        # Let it raise ValueError if backend is truly unknown
+        supported_executors = get_backend_executors(backend_name)
+
+        # Check if requested executor is supported by backend
+        if executor_name is not None:
+            if executor_name not in supported_executors:
+                # Find a fallback
+                available = RuntimeContext.get("available_parallelization", set())
+
+                # Find intersection of what's supported and what's available
+                usable_executors = supported_executors & available
+
+                # Pick the best from what's usable
+                fallback_order = ["multiprocessing", "threading", "sequential"]
+                fallback = None
+
+                for mode in fallback_order:
+                    if mode in usable_executors:
+                        fallback = mode
+                        break
+
+                if fallback is None:
+                    # This should rarely happen - sequential should always be available
+                    if "sequential" in supported_executors:
+                        fallback = "sequential"
+                    else:
+                        raise RuntimeError(
+                            f"No compatible parallelization executor found. "
+                            f"Backend '{backend_name}' supports {sorted(supported_executors)}, "
+                            f"but only {sorted(available)} are available on this system."
+                        )
+
+                warnings.warn(
+                    f"Backend '{backend_name}' does not support '{executor_name}' executor. "
+                    f"Supported executors: {sorted(supported_executors)}. "
+                    f"Falling back to '{fallback}'."
+                )
+
+                if self.options.verbose or self.config.verbose:
+                    print(
+                        f"Backend '{backend_name}' using '{fallback}' executor "
+                        f"(requested '{executor_name}' not supported)"
+                    )
+
+                executor_name = fallback
+        else:
+            # Auto-select best available that's supported by backend
             available = RuntimeContext.get("available_parallelization", set())
-            if "multiprocessing" in available:
-                executor_name = "multiprocessing"
-            elif "threading" in available:
-                executor_name = "threading"
-            else:
-                executor_name = "sequential"
+
+            # Find intersection
+            usable_executors = supported_executors & available
+
+            if not usable_executors:
+                raise RuntimeError(
+                    f"No compatible parallelization executor found. "
+                    f"Backend '{backend_name}' supports {sorted(supported_executors)}, "
+                    f"but only {sorted(available)} are available on this system."
+                )
+
+            # Pick the best from what's usable
+            preference_order = ["multiprocessing", "threading", "sequential"]
+            for mode in preference_order:
+                if mode in usable_executors:
+                    executor_name = mode
+                    break
 
         # Get executor class
         executor_class = RuntimeContext.get_parallelization_executor(executor_name)

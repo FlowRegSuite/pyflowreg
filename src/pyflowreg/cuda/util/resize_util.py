@@ -1,4 +1,5 @@
 import numpy as np
+import cupy as cp
 
 
 def _cubic(x):
@@ -51,8 +52,6 @@ def _precompute_fused_gauss_cubic(in_len, out_len, sigma):
 
 
 def imresize_fused_gauss_cubic(img, size, sigma_coeff=0.6, per_axis=False):
-    import cupy as cp
-
     oh, ow = int(size[0]), int(size[1])
     x = img.astype(np.float32, copy=False)
     H, W = x.shape[:2]
