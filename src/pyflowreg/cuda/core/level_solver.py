@@ -10,10 +10,27 @@ import numpy as np
 import cupy as cp
 
 
-def level_solver_rbgs_cuda(J11, J22, J33, J12, J13, J23, weight_level,
-                           u, v, alpha, iterations, update_lag,
-                           a_data, a_smooth, hx, hy,
-                           omega=1.95, eps=1e-6, update_lag_semantics="torch"):
+def level_solver_rbgs_cuda(
+    J11,
+    J22,
+    J33,
+    J12,
+    J13,
+    J23,
+    weight_level,
+    u,
+    v,
+    alpha,
+    iterations,
+    update_lag,
+    a_data,
+    a_smooth,
+    hx,
+    hy,
+    omega=1.95,
+    eps=1e-6,
+    update_lag_semantics="torch",
+):
     """
     Solve for flow increments using Red-Black Gauss-Seidel relaxation on GPU.
 
@@ -101,19 +118,21 @@ def level_solver_rbgs_cuda(J11, J22, J33, J12, J13, J23, weight_level,
     """
     m, n, K = J11.shape
     cp_dtype = cp.float64
-    J11 = cp.asarray(J11, dtype=cp_dtype, order='C')
-    J22 = cp.asarray(J22, dtype=cp_dtype, order='C')
-    J33 = cp.asarray(J33, dtype=cp_dtype, order='C')
-    J12 = cp.asarray(J12, dtype=cp_dtype, order='C')
-    J13 = cp.asarray(J13, dtype=cp_dtype, order='C')
-    J23 = cp.asarray(J23, dtype=cp_dtype, order='C')
+    J11 = cp.asarray(J11, dtype=cp_dtype, order="C")
+    J22 = cp.asarray(J22, dtype=cp_dtype, order="C")
+    J33 = cp.asarray(J33, dtype=cp_dtype, order="C")
+    J12 = cp.asarray(J12, dtype=cp_dtype, order="C")
+    J13 = cp.asarray(J13, dtype=cp_dtype, order="C")
+    J23 = cp.asarray(J23, dtype=cp_dtype, order="C")
     if weight_level.ndim == 3 and weight_level.shape == (m, n, K):
-        W = cp.asarray(weight_level, dtype=cp_dtype, order='C')
+        W = cp.asarray(weight_level, dtype=cp_dtype, order="C")
     else:
-        W = cp.broadcast_to(cp.asarray(weight_level, dtype=cp_dtype).reshape(1, 1, -1), (m, n, K)).copy()
+        W = cp.broadcast_to(
+            cp.asarray(weight_level, dtype=cp_dtype).reshape(1, 1, -1), (m, n, K)
+        ).copy()
 
-    u = cp.asarray(u, dtype=cp_dtype, order='C')
-    v = cp.asarray(v, dtype=cp_dtype, order='C')
+    u = cp.asarray(u, dtype=cp_dtype, order="C")
+    v = cp.asarray(v, dtype=cp_dtype, order="C")
     du = cp.zeros((m, n), dtype=cp_dtype)
     dv = cp.zeros((m, n), dtype=cp_dtype)
 
@@ -130,7 +149,8 @@ def level_solver_rbgs_cuda(J11, J22, J33, J12, J13, J23, weight_level,
     ax = float(alpha[0]) / (hx * hx)
     ay = float(alpha[1]) / (hy * hy)
 
-    mod = cp.RawModule(code=r'''
+    mod = cp.RawModule(
+        code=r"""
     extern "C" {
 
     __global__ void boundary_rows(double* A, int m, int n){
@@ -306,7 +326,8 @@ def level_solver_rbgs_cuda(J11, J22, J33, J12, J13, J23, weight_level,
     }
 
     } // extern "C"
-    ''')
+    """
+    )
 
     k_brow = mod.get_function("boundary_rows")
     k_bcol = mod.get_function("boundary_cols")
@@ -320,23 +341,74 @@ def level_solver_rbgs_cuda(J11, J22, J33, J12, J13, J23, weight_level,
     gy = (m + by - 1) // by
     g2 = (gx, gy, 1)
     b2 = (bx, by, 1)
-    g1_rows = ((n + 255)//256, 1, 1)
-    g1_cols = ((m + 255)//256, 1, 1)
+    g1_rows = ((n + 255) // 256, 1, 1)
+    g1_cols = ((m + 255) // 256, 1, 1)
     b1 = (256, 1, 1)
 
     use_aniso = 0 if float(a_smooth) == 1.0 else 1
 
     for it in range(int(iterations)):
-        bool_tick = (it % int(update_lag) == 0) if (update_lag_semantics == "torch") else (((it + 1) % int(update_lag)) == 0)
+        bool_tick = (
+            (it % int(update_lag) == 0)
+            if (update_lag_semantics == "torch")
+            else (((it + 1) % int(update_lag)) == 0)
+        )
         if bool_tick:
-            k_psi_data(g2, b2, (J11, J22, J33, J12, J13, J23, du, dv, a_vec, np.float64(eps),
-                                psi_data, np.int32(m), np.int32(n), np.int32(K)))
-            k_denoms(g2, b2, (psi_data, W, J11, J22, denom_u, denom_v,
-                              np.int32(m), np.int32(n), np.int32(K), np.float64(eps)))
+            k_psi_data(
+                g2,
+                b2,
+                (
+                    J11,
+                    J22,
+                    J33,
+                    J12,
+                    J13,
+                    J23,
+                    du,
+                    dv,
+                    a_vec,
+                    np.float64(eps),
+                    psi_data,
+                    np.int32(m),
+                    np.int32(n),
+                    np.int32(K),
+                ),
+            )
+            k_denoms(
+                g2,
+                b2,
+                (
+                    psi_data,
+                    W,
+                    J11,
+                    J22,
+                    denom_u,
+                    denom_v,
+                    np.int32(m),
+                    np.int32(n),
+                    np.int32(K),
+                    np.float64(eps),
+                ),
+            )
             if use_aniso:
                 psi_smooth.fill(0.0)
-                k_psi_s(g2, b2, (u, du, v, dv, psi_smooth, np.int32(m), np.int32(n),
-                                 np.float64(a_smooth), np.float64(hx), np.float64(hy), np.float64(eps)))
+                k_psi_s(
+                    g2,
+                    b2,
+                    (
+                        u,
+                        du,
+                        v,
+                        dv,
+                        psi_smooth,
+                        np.int32(m),
+                        np.int32(n),
+                        np.float64(a_smooth),
+                        np.float64(hx),
+                        np.float64(hy),
+                        np.float64(eps),
+                    ),
+                )
                 k_brow(g1_rows, b1, (psi_smooth, np.int32(m), np.int32(n)))
                 k_bcol(g1_cols, b1, (psi_smooth, np.int32(m), np.int32(n)))
             else:
@@ -347,20 +419,68 @@ def level_solver_rbgs_cuda(J11, J22, J33, J12, J13, J23, weight_level,
         k_brow(g1_rows, b1, (dv, np.int32(m), np.int32(n)))
         k_bcol(g1_cols, b1, (dv, np.int32(m), np.int32(n)))
 
-        k_relax(g2, b2, (du, dv, u, v, psi_data, W, J11, J22, J12, J13, J23,
-                         psi_smooth, denom_u, denom_v,
-                         np.int32(m), np.int32(n), np.int32(K),
-                         np.float64(ax), np.float64(ay), np.float64(omega), np.float64(eps),
-                         np.int32(use_aniso), np.int32(0)))
+        k_relax(
+            g2,
+            b2,
+            (
+                du,
+                dv,
+                u,
+                v,
+                psi_data,
+                W,
+                J11,
+                J22,
+                J12,
+                J13,
+                J23,
+                psi_smooth,
+                denom_u,
+                denom_v,
+                np.int32(m),
+                np.int32(n),
+                np.int32(K),
+                np.float64(ax),
+                np.float64(ay),
+                np.float64(omega),
+                np.float64(eps),
+                np.int32(use_aniso),
+                np.int32(0),
+            ),
+        )
         k_brow(g1_rows, b1, (du, np.int32(m), np.int32(n)))
         k_bcol(g1_cols, b1, (du, np.int32(m), np.int32(n)))
         k_brow(g1_rows, b1, (dv, np.int32(m), np.int32(n)))
         k_bcol(g1_cols, b1, (dv, np.int32(m), np.int32(n)))
 
-        k_relax(g2, b2, (du, dv, u, v, psi_data, W, J11, J22, J12, J13, J23,
-                         psi_smooth, denom_u, denom_v,
-                         np.int32(m), np.int32(n), np.int32(K),
-                         np.float64(ax), np.float64(ay), np.float64(omega), np.float64(eps),
-                         np.int32(use_aniso), np.int32(1)))
+        k_relax(
+            g2,
+            b2,
+            (
+                du,
+                dv,
+                u,
+                v,
+                psi_data,
+                W,
+                J11,
+                J22,
+                J12,
+                J13,
+                J23,
+                psi_smooth,
+                denom_u,
+                denom_v,
+                np.int32(m),
+                np.int32(n),
+                np.int32(K),
+                np.float64(ax),
+                np.float64(ay),
+                np.float64(omega),
+                np.float64(eps),
+                np.int32(use_aniso),
+                np.int32(1),
+            ),
+        )
 
     return cp.asnumpy(du), cp.asnumpy(dv)
