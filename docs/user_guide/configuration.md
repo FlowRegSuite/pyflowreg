@@ -110,6 +110,21 @@ Normalization modes:
 
 ## Backend Selection
 
+### GPU Support Installation
+
+To use GPU-accelerated backends, install PyFlowReg with GPU support:
+
+```bash
+pip install pyflowreg[gpu]
+```
+
+This installs both PyTorch and CuPy for CUDA acceleration. Requirements:
+- NVIDIA GPU with CUDA support
+- CUDA 12.x installed
+- Compatible GPU drivers
+
+Without GPU support installed, only the CPU backend (`flowreg`) is available.
+
 PyFlowReg supports multiple computational backends for optical flow calculation, including CPU and GPU acceleration.
 
 ### Available Backends

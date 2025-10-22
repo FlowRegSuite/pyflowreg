@@ -89,12 +89,16 @@ class BatchMotionCorrector:
         # Let it raise ValueError if backend is truly unknown
         supported_executors = get_backend_executors(backend_name)
 
-        # Check if requested executor is supported by backend
+        # Check if requested executor is both supported by backend and available on system
         if executor_name is not None:
-            if executor_name not in supported_executors:
-                # Find a fallback
-                available = RuntimeContext.get("available_parallelization", set())
+            # Get what's actually available on this system
+            available = RuntimeContext.get("available_parallelization", set())
 
+            # Check both backend support and system availability
+            is_supported = executor_name in supported_executors
+            is_available = executor_name in available
+
+            if not is_supported or not is_available:
                 # Find intersection of what's supported and what's available
                 usable_executors = supported_executors & available
 
@@ -118,8 +122,16 @@ class BatchMotionCorrector:
                             f"but only {sorted(available)} are available on this system."
                         )
 
+                # Determine reason for fallback
+                if not is_supported:
+                    reason = f"Backend '{backend_name}' does not support '{executor_name}' executor"
+                else:
+                    reason = (
+                        f"Executor '{executor_name}' is not available on this system"
+                    )
+
                 warnings.warn(
-                    f"Backend '{backend_name}' does not support '{executor_name}' executor. "
+                    f"{reason}. "
                     f"Supported executors: {sorted(supported_executors)}. "
                     f"Falling back to '{fallback}'."
                 )
@@ -127,7 +139,7 @@ class BatchMotionCorrector:
                 if self.options.verbose or self.config.verbose:
                     print(
                         f"Backend '{backend_name}' using '{fallback}' executor "
-                        f"(requested '{executor_name}' not supported)"
+                        f"(requested '{executor_name}' not usable: {reason})"
                     )
 
                 executor_name = fallback
