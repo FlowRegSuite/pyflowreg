@@ -95,6 +95,53 @@ Manual selection overrides auto-detection:
 config = RegistrationConfig(parallelization="threading")  # Force threading
 ```
 
+## Backend Compatibility
+
+Different optical flow backends support different parallelization modes due to their architecture and Python package compatibility.
+
+### CPU Backend (`flowreg`)
+
+The default NumPy/Numba backend supports all parallelization modes:
+
+```python
+options = OFOptions(flow_backend="flowreg")
+
+# All of these work:
+config = RegistrationConfig(parallelization="sequential")
+config = RegistrationConfig(parallelization="threading")
+config = RegistrationConfig(parallelization="multiprocessing")
+```
+
+### GPU Backends (`flowreg_torch`, `flowreg_cuda`)
+
+GPU backends only support sequential execution due to package compatibility constraints:
+
+```python
+from pyflowreg.motion_correction import OFOptions
+from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
+
+options = OFOptions(
+    flow_backend="flowreg_torch",
+    backend_params={"device": "cuda"}
+)
+
+# GPU backends require sequential
+config = RegistrationConfig(parallelization="sequential")
+```
+
+**Automatic fallback:** If you request multiprocessing or threading with a GPU backend, PyFlowReg automatically falls back to sequential execution with a warning:
+
+```python
+options = OFOptions(flow_backend="flowreg_cuda")
+
+# Requesting multiprocessing with GPU backend
+config = RegistrationConfig(parallelization="multiprocessing")
+
+# Warning: Backend 'flowreg_cuda' does not support 'multiprocessing' executor.
+# Supported executors: ['sequential']. Falling back to 'sequential'.
+compensate_recording(options, config=config)  # Uses sequential
+```
+
 ## Configuration
 
 ### RegistrationConfig Parameters
