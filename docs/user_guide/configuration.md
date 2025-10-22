@@ -118,10 +118,12 @@ To use GPU-accelerated backends, install PyFlowReg with GPU support:
 pip install pyflowreg[gpu]
 ```
 
-This installs both PyTorch and CuPy for CUDA acceleration. Requirements:
+**Linux/Windows:** Installs both PyTorch and CuPy for CUDA acceleration. Requirements:
 - NVIDIA GPU with CUDA support
 - CUDA 12.x installed
 - Compatible GPU drivers
+
+**macOS:** Installs only PyTorch (CuPy not available on macOS). Enables `flowreg_torch` backend with MPS (Metal Performance Shaders) on Apple Silicon.
 
 Without GPU support installed, only the CPU backend (`flowreg`) is available.
 

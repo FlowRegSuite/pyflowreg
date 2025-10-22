@@ -346,6 +346,13 @@ class TestGPUBackendExecutors:
         # Should automatically select sequential for GPU backend
         assert pipeline.executor.name == "sequential"
 
+    @pytest.mark.skipif(
+        "flowreg_cuda"
+        not in __import__(
+            "pyflowreg.core.backend_registry", fromlist=["list_backends"]
+        ).list_backends(),
+        reason="CuPy backend not available on macOS",
+    )
     def test_gpu_backend_with_multiprocessing_request(self, fast_of_options):
         """Test that GPU backends force sequential even when multiprocessing requested."""
         import warnings
