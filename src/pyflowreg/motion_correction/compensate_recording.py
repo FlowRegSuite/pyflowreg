@@ -195,7 +195,12 @@ class BatchMotionCorrector:
         self.executor = executor_class(n_workers=self.n_workers)
 
         if not self.config.verbose:
-            print(f"Using {executor_name} executor with {self.n_workers} workers")
+            # Use actual executor name and worker count
+            actual_workers = self.executor.n_workers
+            worker_str = "worker" if actual_workers == 1 else "workers"
+            print(
+                f"Using {self.executor.name} executor with {actual_workers} {worker_str}"
+            )
 
     def _resolve_displacement_func(self):
         """Resolve the displacement function to use based on options."""
@@ -531,7 +536,9 @@ class BatchMotionCorrector:
         if not self.config.verbose:
             quality = getattr(self.options, "quality_setting", "balanced")
             print(f"\nStarting compensation with quality={quality}")
-            print(f"Buffer size: {self.options.buffer_size}, Workers: {self.n_workers}")
+            print(
+                f"Buffer size: {self.options.buffer_size}, Workers: {self.executor.n_workers}"
+            )
 
         # Process batches
         batch_idx = 0
