@@ -54,16 +54,36 @@ class TestCompensateRecording:
         assert pipeline.executor.name == "sequential"
 
     def test_executor_setup_fallback(self, fast_of_options):
-        """Test fallback to sequential when requested executor unavailable."""
-        config = RegistrationConfig(parallelization="nonexistent")
-
-        with patch("builtins.print") as mock_print:
+        """Test fallback hierarchy when executors are unavailable."""
+        # Scenario 1: Auto-selection with limited availability
+        # Multiprocessing unavailable -> should fall back to threading
+        with RuntimeContext.use(available_parallelization={"sequential", "threading"}):
+            config = RegistrationConfig(parallelization=None)  # Auto-select
             pipeline = BatchMotionCorrector(fast_of_options, config)
+            assert pipeline.executor.name == "threading"
 
-        # Should fallback to sequential
-        assert pipeline.executor is not None
-        assert pipeline.executor.name == "sequential"
-        mock_print.assert_called()
+        # Multiprocessing and threading unavailable -> should fall back to sequential
+        with RuntimeContext.use(available_parallelization={"sequential"}):
+            config = RegistrationConfig(parallelization=None)  # Auto-select
+            pipeline = BatchMotionCorrector(fast_of_options, config)
+            assert pipeline.executor.name == "sequential"
+
+        # Scenario 2: Explicit request with limited availability
+        # Request multiprocessing, but only threading available -> should fall back to threading
+        with RuntimeContext.use(available_parallelization={"sequential", "threading"}):
+            config = RegistrationConfig(
+                parallelization="multiprocessing"
+            )  # Explicit request
+            pipeline = BatchMotionCorrector(fast_of_options, config)
+            assert pipeline.executor.name == "threading"
+
+        # Request multiprocessing, but only sequential available -> should fall back to sequential
+        with RuntimeContext.use(available_parallelization={"sequential"}):
+            config = RegistrationConfig(
+                parallelization="multiprocessing"
+            )  # Explicit request
+            pipeline = BatchMotionCorrector(fast_of_options, config)
+            assert pipeline.executor.name == "sequential"
 
     def test_n_workers_setup(self, fast_of_options):
         """Test n_workers configuration."""
@@ -444,9 +464,11 @@ class TestErrorHandling:
         """Test handling of invalid executor names."""
         config = RegistrationConfig(parallelization="invalid_executor")
 
-        # Should fallback to sequential without crashing
+        # Should fallback to best available without crashing
         pipeline = BatchMotionCorrector(fast_of_options, config)
-        assert pipeline.executor.name == "sequential"
+        # On most systems, multiprocessing is available and should be the fallback
+        assert pipeline.executor.name in ["multiprocessing", "threading", "sequential"]
+        # The actual executor depends on what's available, but it should be the best one
 
     def test_executor_instantiation_error(self, fast_of_options):
         """Test handling of executor instantiation errors."""
@@ -469,6 +491,52 @@ class TestErrorHandling:
             # Should fallback to sequential
             pipeline = BatchMotionCorrector(fast_of_options, config)
             assert pipeline.executor.name == "sequential"
+
+
+class TestGPUBackendExecutors:
+    """Test GPU backend executor compatibility."""
+
+    def test_gpu_backend_auto_selection(self, fast_of_options):
+        """Test that GPU backends automatically use sequential executor."""
+        # Set backend to flowreg_torch (GPU)
+        fast_of_options.flow_backend = "flowreg_torch"
+
+        # Auto-select executor (parallelization=None)
+        config = RegistrationConfig(parallelization=None)
+        pipeline = BatchMotionCorrector(fast_of_options, config)
+
+        # Should automatically select sequential for GPU backend
+        assert pipeline.executor.name == "sequential"
+
+    @pytest.mark.skipif(
+        "flowreg_cuda"
+        not in __import__(
+            "pyflowreg.core.backend_registry", fromlist=["list_backends"]
+        ).list_backends(),
+        reason="CuPy backend not available on macOS",
+    )
+    def test_gpu_backend_with_multiprocessing_request(self, fast_of_options):
+        """Test that GPU backends force sequential even when multiprocessing requested."""
+        import warnings
+
+        # Set backend to flowreg_cuda (GPU)
+        fast_of_options.flow_backend = "flowreg_cuda"
+
+        # Explicitly request multiprocessing
+        config = RegistrationConfig(parallelization="multiprocessing")
+
+        # Should warn and fall back to sequential
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            pipeline = BatchMotionCorrector(fast_of_options, config)
+
+            # Should have warned about incompatibility
+            assert len(w) > 0
+            assert "does not support" in str(w[0].message)
+            assert "multiprocessing" in str(w[0].message)
+
+        # Should use sequential
+        assert pipeline.executor.name == "sequential"
 
 
 # Slow/comprehensive tests that can be skipped with -m "not slow"

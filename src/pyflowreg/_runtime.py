@@ -67,11 +67,7 @@ class RuntimeContext:
             pass
 
         # Check for other potential backends
-        backend_checks = [
-            ("flownet2", "flownet2"),
-            ("pwcnet", "pwcnet"),
-            ("deepflow", "deepflow"),
-        ]
+        backend_checks = []
 
         for backend_name, module_name in backend_checks:
             try:
@@ -118,9 +114,16 @@ class RuntimeContext:
         """Detect other optional features and accelerators."""
         # GPU support via CuPy
         try:
-            import_module("cupy")
-            cls._config["available_features"].add("gpu_cupy")
-        except ImportError:
+            warnings.filterwarnings(
+                "ignore",
+                message="CUDA path could not be detected",
+                category=UserWarning,
+                module=r"cupy\._environment",
+            )
+            cp = import_module("cupy")
+            if cp.cuda.runtime.getDeviceCount() > 0:
+                cls._config["available_features"].add("gpu_cupy")
+        except (ImportError, Exception):
             pass
 
         # GPU support via PyTorch

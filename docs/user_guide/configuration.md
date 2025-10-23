@@ -108,6 +108,119 @@ Normalization modes:
 - `"individual"`: Normalize each frame independently
 - `"none"`: No normalization
 
+## Backend Selection
+
+### GPU Support Installation
+
+To use GPU-accelerated backends, install PyFlowReg with GPU support:
+
+```bash
+pip install pyflowreg[gpu]
+```
+
+**Linux/Windows:** Installs both PyTorch and CuPy for CUDA acceleration. Requirements:
+- NVIDIA GPU with CUDA support
+- CUDA 12.x installed
+- Compatible GPU drivers
+
+**macOS:** Installs only PyTorch (CuPy not available on macOS). Enables `flowreg_torch` backend with MPS (Metal Performance Shaders) on Apple Silicon.
+
+Without GPU support installed, only the CPU backend (`flowreg`) is available.
+
+PyFlowReg supports multiple computational backends for optical flow calculation, including CPU and GPU acceleration.
+
+### Available Backends
+
+```python
+options = OFOptions(
+    flow_backend="flowreg",  # Choose backend
+    backend_params={"device": "cuda"}  # Backend-specific parameters
+)
+```
+
+**Available backends:**
+
+- **`flowreg`** (default): NumPy-based CPU implementation with Numba JIT compilation
+  - Best compatibility, works on all systems
+  - Good performance for small to medium datasets
+  - Supports all parallelization modes
+
+- **`flowreg_torch`**: PyTorch-based implementation supporting CPU and GPU
+  - Requires PyTorch installation
+  - Automatically uses CUDA if available, falls back to CPU
+  - Significantly faster on GPU for large datasets
+  - **Requires sequential executor** (GPU memory management constraint)
+
+- **`flowreg_cuda`**: CuPy-based GPU implementation
+  - Requires CuPy and CUDA installation
+  - Pure GPU computation for maximum performance
+  - Best for very large datasets with NVIDIA GPUs
+  - **Requires sequential executor** (GPU memory management constraint)
+
+- **`diso`**: OpenCV DISOpticalFlow implementation
+  - Designed for natural videos and non-2P microscopy data
+  - Alternative dense inverse search algorithm
+
+### GPU Backend Configuration
+
+GPU backends require sequential execution due to GPU memory management:
+
+```python
+from pyflowreg.motion_correction import compensate_recording, OFOptions
+from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
+
+# PyTorch backend (automatic CPU/GPU selection)
+options = OFOptions(
+    input_file="video.h5",
+    flow_backend="flowreg_torch",
+    backend_params={"device": "cuda", "dtype": "float32"}  # or "cpu"
+)
+
+# Executor is automatically set to sequential for GPU backends
+config = RegistrationConfig(parallelization="sequential")
+compensate_recording(options, config=config)
+```
+
+**Device selection:**
+```python
+# Automatic device selection (CUDA if available, otherwise CPU)
+backend_params={"device": None}
+
+# Force CUDA
+backend_params={"device": "cuda"}
+
+# Force CPU (PyTorch only)
+backend_params={"device": "cpu"}
+
+# Specific GPU
+backend_params={"device": "cuda:1"}
+```
+
+**Note:** If you request multiprocessing or threading with a GPU backend, PyFlowReg will automatically fall back to sequential execution and issue a warning.
+
+### Performance Considerations
+
+**For small datasets (< 1000 frames):**
+```python
+options = OFOptions(flow_backend="flowreg")  # CPU sufficient
+```
+
+**For large datasets with GPU:**
+```python
+options = OFOptions(
+    flow_backend="flowreg_torch",
+    backend_params={"device": "cuda", "dtype": "float32"}
+)
+```
+
+**For maximum GPU performance:**
+```python
+options = OFOptions(
+    flow_backend="flowreg_cuda",
+    backend_params={"device": "cuda"}
+)
+```
+
 ## Reference Selection
 
 ### Fixed Reference Frames
