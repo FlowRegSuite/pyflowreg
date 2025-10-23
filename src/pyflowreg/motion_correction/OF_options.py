@@ -557,13 +557,16 @@ class OFOptions(BaseModel):
 
             compensated_raw = np.zeros_like(frames_raw_for_warp)
             for t in range(frames_raw_for_warp.shape[0]):
-                compensated_raw[t] = imregister_wrapper(
+                warped = imregister_wrapper(
                     frames_raw_for_warp[t],
                     w_fields[t, :, :, 0],  # u
                     w_fields[t, :, :, 1],  # v
                     ref_mean_raw,
                     interpolation_method="cubic",
                 )
+                if warped.ndim == 2:
+                    warped = warped[:, :, np.newaxis]
+                compensated_raw[t] = warped
 
             # Calculate mean of compensated RAW frames as the reference
             reference = np.mean(compensated_raw, axis=0)
