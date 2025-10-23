@@ -50,8 +50,8 @@ compensate_recording(options)
 # Step 2: Read back and bin the registered frames
 reader = get_video_file_reader(
     "aligned_sequence/compensated.HDF5",
-    batch_size=100,
-    frames_per_bin=frames_per_slice  # Bin the repetitions for each slice
+    buffer_size=100,
+    bin_size=frames_per_slice  # Bin the repetitions for each slice
 )
 
 # Read all binned slices
@@ -110,8 +110,8 @@ from pyflowreg.util.io.factory import get_video_file_reader
 # The reader can perform binning automatically
 reader = get_video_file_reader(
     "aligned_sequence/compensated.HDF5",
-    batch_size=100,
-    frames_per_bin=9  # Bin every 9 frames
+    buffer_size=100,
+    bin_size=9  # Bin every 9 frames
 )
 
 # This returns already-binned data where each "frame" is the average of 9 registered frames
@@ -200,8 +200,8 @@ def align_zstack(
 
     reader = get_video_file_reader(
         str(output_file),
-        batch_size=100,
-        frames_per_bin=frames_per_slice
+        buffer_size=100,
+        bin_size=frames_per_slice
     )
 
     volume = []

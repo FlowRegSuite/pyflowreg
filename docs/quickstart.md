@@ -83,7 +83,7 @@ config = RegistrationConfig(
 compensate_recording(options, config=config)
 ```
 
-**Note:** A GPU implementation based on red-black Gauss-Seidel iteration is currently in development.
+**GPU Acceleration:** PyFlowReg supports GPU backends via `flowreg_cuda` (CuPy) and `flowreg_torch` (PyTorch). Install with `pip install pyflowreg[gpu]` and set `flow_backend="cuda"` or `flow_backend="torch"` in `OFOptions`.
 
 ## Examples and Notebooks
 
@@ -170,8 +170,8 @@ options = OFOptions(
     min_level=3,          # Finest pyramid level to compute (quality_setting controls this)
 
     # Preprocessing
-    bin_size=1,           # Spatial binning factor
-    gaussian_filter=0,    # Gaussian filter sigma (0=disabled)
+    bin_size=1,           # Temporal binning factor
+    sigma=[1.0, 1.0, 0.1],  # Gaussian filter sigma [sx, sy, st]
 
     # Reference
     reference_frames=[0, 1, 2, 3, 4],  # Frames to average for reference

@@ -25,11 +25,8 @@ import numpy as np
 video = np.random.rand(100, 256, 256, 2)
 reference = np.mean(video[:10], axis=0)
 
-# Memory accumulation (default-like behavior)
-options_memory = OFOptions(output_format=OutputFormat.ARRAY)
-
-# No storage (for real-time processing via callbacks)
-options_realtime = OFOptions(output_format=OutputFormat.NULL)
+# Array-based workflow (compensate_arr) always returns arrays
+# For callback-only processing, use compensate_recording with NULL writer
 
 # File storage
 options_file = OFOptions(
@@ -111,9 +108,9 @@ registered, w = compensate_arr(
 )
 ```
 
-### Processing Without Storage
+### Using Callbacks
 
-For applications that only need real-time processing (visualization tools, online analysis), use `OutputFormat.NULL` to avoid storage overhead:
+Process data during registration without explicit storage using callbacks:
 
 ```python
 class LiveProcessor:
@@ -121,7 +118,7 @@ class LiveProcessor:
         self.statistics = []
 
     def process_batch(self, w_batch, start_idx, end_idx):
-        # Process displacement fields without storing video
+        # Process displacement fields during registration
         batch_stats = {
             'start': start_idx,
             'end': end_idx,
@@ -133,17 +130,11 @@ class LiveProcessor:
 
 processor = LiveProcessor()
 
-options = OFOptions(
-    output_format=OutputFormat.NULL,  # No storage
-    save_w=True,
-    buffer_size=20  # Process 20 frames at a time
-)
-
-# Run motion correction without storing output
+# compensate_arr returns arrays but also calls callbacks
 registered, w = compensate_arr(
     video,
     reference,
-    options=options,
+    options=OFOptions(quality_setting="balanced"),
     w_callback=processor.process_batch
 )
 
@@ -191,13 +182,13 @@ from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
 options = OFOptions(
     input_file="raw_video.h5",
     output_path="results/",
-    quality_setting="balanced"
+    quality_setting="balanced",
+    buffer_size=100,  # Process 100 frames per batch
 )
 
 # Configure parallelization
 config = RegistrationConfig(
     n_jobs=8,  # Use 8 cores
-    batch_size=100,  # Process 100 frames per batch
     parallelization="multiprocessing"
 )
 
@@ -240,17 +231,15 @@ while imaging:
 
 ### Adaptive Reference
 
-The reference can be updated during processing to adapt to slow changes:
+The reference can be reset or updated during processing:
 
 ```python
-# Update reference every 20 frames with 20% weight
-frame_count = 0
-for frame in video_stream:
-    corrected, flow = processor(frame)
+# Set new reference from array of frames
+reference_frames = np.stack([corrected_frames[:10]])
+processor.set_reference(reference_frames)
 
-    frame_count += 1
-    if frame_count % 20 == 0:
-        processor.update_reference(corrected, weight=0.2)
+# Or reset reference buffer
+processor.reset_reference()
 ```
 
 ### When to Use
@@ -299,12 +288,12 @@ class NapariLiveCorrection:
         self.setup(video.shape)
 
         options = OFOptions(
-            output_format=OutputFormat.NULL,  # Display only, no storage
             buffer_size=10,
             levels=5,
             iterations=50
         )
 
+        # compensate_arr always returns arrays
         return compensate_arr(
             video,
             reference,
@@ -321,106 +310,6 @@ reference = compute_reference(video)
 
 corrected, w = corrector.correct_with_display(video, reference)
 napari.run()
-```
-
-## Advanced Examples
-
-### Complete Motion Tracking System
-
-```python
-import numpy as np
-from pyflowreg.motion_correction import compensate_arr
-from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
-
-class MotionTracker:
-    """Track motion throughout video using the motion correction API."""
-
-    def __init__(self):
-        self.trajectory = []
-        self.quality_metrics = []
-        self.current_batch = 0
-
-    def track_displacement(self, w_batch, start_idx, end_idx):
-        """Track displacement trajectory."""
-        for t in range(w_batch.shape[0]):
-            frame_idx = start_idx + t
-            # Calculate mean displacement vector
-            mean_u = np.mean(w_batch[t, :, :, 0])
-            mean_v = np.mean(w_batch[t, :, :, 1])
-
-            self.trajectory.append({
-                'frame': frame_idx,
-                'dx': mean_u,
-                'dy': mean_v,
-                'magnitude': np.sqrt(mean_u**2 + mean_v**2)
-            })
-
-    def assess_quality(self, batch, start_idx, end_idx):
-        """Assess quality of corrected frames."""
-        for t in range(batch.shape[0]):
-            frame_idx = start_idx + t
-            # Calculate SNR as quality metric
-            signal = np.mean(batch[t])
-            noise = np.std(batch[t])
-            snr = signal / noise if noise > 0 else 0
-
-            self.quality_metrics.append({
-                'frame': frame_idx,
-                'snr': snr,
-                'brightness': signal
-            })
-
-        self.current_batch += 1
-        print(f"Processed batch {self.current_batch} (frames {start_idx}-{end_idx})")
-
-    def get_summary(self):
-        """Get motion summary statistics."""
-        if not self.trajectory:
-            return None
-
-        magnitudes = [t['magnitude'] for t in self.trajectory]
-        return {
-            'total_frames': len(self.trajectory),
-            'mean_motion': np.mean(magnitudes),
-            'max_motion': np.max(magnitudes),
-            'std_motion': np.std(magnitudes),
-            'mean_snr': np.mean([q['snr'] for q in self.quality_metrics])
-        }
-
-# Create tracker
-tracker = MotionTracker()
-
-# Load video
-video = np.random.rand(200, 256, 256, 2).astype(np.float32)
-reference = np.mean(video[:20], axis=0)
-
-# Configure for tracking
-options = OFOptions(
-    output_format=OutputFormat.NULL,  # Don't store output
-    save_w=True,                       # Compute displacement fields
-    buffer_size=25,                    # 25 frames per batch
-    levels=5,
-    iterations=50
-)
-
-# Run motion correction with tracking
-print("Starting motion correction with tracking...")
-registered, w = compensate_arr(
-    video,
-    reference,
-    options=options,
-    w_callback=tracker.track_displacement,
-    registered_callback=tracker.assess_quality
-)
-
-# Get results
-summary = tracker.get_summary()
-print(f"\nMotion Tracking Summary:")
-print(f"  Total frames: {summary['total_frames']}")
-print(f"  Mean motion: {summary['mean_motion']:.3f} pixels")
-print(f"  Max motion: {summary['max_motion']:.3f} pixels")
-print(f"  Motion std: {summary['std_motion']:.3f} pixels")
-print(f"  Mean SNR: {summary['mean_snr']:.2f}")
 ```
 
 ## Performance Optimization
