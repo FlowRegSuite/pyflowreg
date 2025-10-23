@@ -192,6 +192,114 @@ class TestParallelizationExecutors:
                 )
 
 
+class TestExecutorRegistration:
+    """
+    Test executor registration to prevent regressions.
+
+    This test class specifically guards against the bug introduced in commit
+    cedb82eb where pre-commit hooks removed the critical import that triggers
+    executor registration, breaking multiprocessing support in production
+    while tests still passed.
+    """
+
+    def test_executors_registered_in_runtime_context(self):
+        """Test that all expected executors are registered with RuntimeContext."""
+        RuntimeContext.init(force=True)
+
+        registry = RuntimeContext._config.get("parallelization_registry", {})
+
+        # These executors must always be registered
+        assert "sequential" in registry, "Sequential executor not registered"
+        assert "threading" in registry, "Threading executor not registered"
+        assert "multiprocessing" in registry, "Multiprocessing executor not registered"
+
+        # Verify registry contains valid dotted paths
+        for name, path in registry.items():
+            assert isinstance(path, str), f"Executor {name} path is not string: {path}"
+            assert "." in path, f"Executor {name} has invalid path: {path}"
+
+    def test_get_parallelization_executor_returns_classes(self):
+        """Test that RuntimeContext can retrieve executor classes."""
+        RuntimeContext.init(force=True)
+
+        for executor_name in ["sequential", "threading", "multiprocessing"]:
+            executor_class = RuntimeContext.get_parallelization_executor(executor_name)
+            assert executor_class is not None, f"Failed to get {executor_name} executor"
+            assert callable(executor_class), f"{executor_name} executor is not callable"
+
+    def test_compensate_recording_imports_parallelization(self):
+        """
+        CRITICAL: Verify compensate_recording.py contains the executor import.
+
+        This import triggers executor registration and MUST NOT be removed by
+        pre-commit hooks or code cleanup tools. It must have '# noqa: F401'
+        to prevent automatic removal.
+        """
+        import inspect
+        import pyflowreg.motion_correction.compensate_recording as cr_module
+
+        source_file = inspect.getfile(cr_module)
+
+        with open(source_file, "r") as f:
+            content = f.read()
+
+        # Check for the critical import
+        assert "import pyflowreg.motion_correction.parallelization" in content, (
+            "CRITICAL: Import missing from compensate_recording.py!\n"
+            "This import triggers executor registration and must not be removed.\n"
+            "See commit cedb82eb for the bug this test prevents."
+        )
+
+        # Verify it has noqa comment to prevent removal
+        assert (
+            "# noqa" in content
+        ), "Import should have '# noqa: F401' to prevent pre-commit removal"
+
+    @pytest.mark.integration
+    def test_executors_available_without_explicit_import(self):
+        """
+        Test executors work when importing only compensate_recording.
+
+        This simulates real-world usage and would have caught the cedb82eb bug
+        where pre-commit hooks broke production while tests still passed.
+        """
+        import sys
+        import subprocess
+
+        test_script = """
+import sys
+from pyflowreg._runtime import RuntimeContext
+from pyflowreg.motion_correction import compensate_recording
+
+# User code should NOT need to import parallelization module explicitly
+# It should be imported by compensate_recording
+
+RuntimeContext.init()
+
+# Verify executors are registered
+registry = RuntimeContext._config.get("parallelization_registry", {})
+assert "multiprocessing" in registry, f"Multiprocessing not in registry: {registry}"
+assert "threading" in registry, f"Threading not in registry: {registry}"
+
+# Verify we can get executor classes
+mp_executor = RuntimeContext.get_parallelization_executor("multiprocessing")
+assert mp_executor is not None, "Could not get multiprocessing executor"
+
+print("SUCCESS: Executors available")
+"""
+
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True,
+            text=True,
+        )
+
+        assert (
+            result.returncode == 0
+        ), f"Fresh process test failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+        assert "SUCCESS" in result.stdout
+
+
 class TestProgressCallbacks:
     """Test progress callback functionality with parallelization."""
 
