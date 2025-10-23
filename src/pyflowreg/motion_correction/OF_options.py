@@ -36,6 +36,7 @@ except ImportError:
 
 # Import IO backends - these are always available as part of the package
 from pyflowreg.util.io._base import VideoReader, VideoWriter
+from pyflowreg.core.optical_flow import imregister_wrapper
 
 
 # Enums
@@ -226,18 +227,32 @@ class OFOptions(BaseModel):
     def normalize_weight(cls, v):
         """Normalize weight values to sum to 1.
 
-        For 1D arrays/lists: Normalizes and converts to list of floats.
-        For multi-dimensional arrays: Returns as numpy array (spatial weights).
+        Accepts:
+        - List [1, 2]: normalized to [0.33, 0.67]
+        - 1D numpy array: normalized and converted to list
+        - 2D numpy array (H, W): spatial weight map for single channel
+        - 3D numpy array (H, W, C): spatial weight maps from preregistration
         """
         if isinstance(v, np.ndarray):
             if v.ndim == 1:
+                # 1D weight array: normalize and convert to list for JSON serialization
                 weight_sum = v.sum()
                 if weight_sum > 0:
                     return (v / weight_sum).tolist()
                 return v.tolist()
-            # For multi-dimensional arrays (spatial weights), return as-is
-            return v
+            elif v.ndim <= 3:
+                # 2D/3D arrays (spatial weight maps from preregistration)
+                # Keep as numpy array - don't convert to nested lists
+                # Pydantic v2 with arbitrary_types_allowed=True handles this correctly
+                return v
+            else:
+                # Weight is spatial only, not temporal
+                raise ValueError(
+                    f"Weight array cannot exceed 3 dimensions (got {v.ndim}D array). "
+                    "Weight must be either channel weights (1D) or spatial weight maps (2D/3D)."
+                )
         elif isinstance(v, (list, tuple)):
+            # List or tuple: normalize if 1D
             arr = np.asarray(v, dtype=float)
             if arr.ndim == 1:
                 weight_sum = arr.sum()
@@ -334,13 +349,29 @@ class OFOptions(BaseModel):
             return float(w[i])
 
         # Handle 2D or 3D weights (spatial weights)
-        # Spatial weights have shape (H, W, C) where C is the channel dimension
-        if i >= w.shape[-1]:  # Check last dimension (channels)
-            if self.verbose:
-                print(f"Weight for channel {i} not set, using 1/n_channels")
-            return np.ones(w.shape[:-1]) / n_channels  # Return (H, W) array
+        # 2D: (H, W) - single channel spatial weight map
+        # 3D: (H, W, C) - multi-channel spatial weight map (channel-last)
 
-        return w[:, :, i]  # Return (H, W) for channel i
+        if w.ndim == 2:
+            # 2D weight map - return for channel 0, otherwise uniform weight
+            if i == 0:
+                return w
+            else:
+                if self.verbose:
+                    print(f"Weight for channel {i} not set, using uniform weight")
+                return np.ones_like(w) / n_channels
+
+        elif w.ndim == 3:
+            # 3D weight map in channel-last format (H, W, C)
+            if i >= w.shape[2]:
+                if self.verbose:
+                    print(f"Weight for channel {i} not set, using 1/n_channels")
+                return np.ones(w.shape[:2]) / n_channels
+
+            return w[:, :, i]
+
+        else:
+            raise ValueError(f"Unexpected weight array with {w.ndim} dimensions")
 
     def copy(self) -> "OFOptions":
         """Create a deep copy (MATLAB copyable interface)."""
@@ -515,13 +546,30 @@ class OFOptions(BaseModel):
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
             frames_for_compensation = np.transpose(frames_norm, (3, 0, 1, 2))
 
-            # Compensate all frames against the mean reference
-            compensated, _ = compensate_arr(
+            # Compensate: compute displacement fields using normalized frames
+            _, w_fields = compensate_arr(
                 frames_for_compensation, ref_mean, options=prereg_options
             )
 
-            # Calculate mean of compensated frames as the reference
-            reference = np.mean(compensated, axis=0)
+            # Warp the RAW frames using the computed displacement fields
+            frames_raw_for_warp = np.transpose(frames, (3, 0, 1, 2))  # (T,H,W,C)
+            ref_mean_raw = np.mean(frames_raw_for_warp, axis=0)  # (H,W,C)
+
+            compensated_raw = np.zeros_like(frames_raw_for_warp)
+            for t in range(frames_raw_for_warp.shape[0]):
+                warped = imregister_wrapper(
+                    frames_raw_for_warp[t],
+                    w_fields[t, :, :, 0],  # u
+                    w_fields[t, :, :, 1],  # v
+                    ref_mean_raw,
+                    interpolation_method="cubic",
+                )
+                if warped.ndim == 2:
+                    warped = warped[:, :, np.newaxis]
+                compensated_raw[t] = warped
+
+            # Calculate mean of compensated RAW frames as the reference
+            reference = np.mean(compensated_raw, axis=0)
 
             if self.verbose:
                 print("Finished pre-registration of the reference frames.")

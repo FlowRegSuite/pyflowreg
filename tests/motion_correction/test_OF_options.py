@@ -1,5 +1,5 @@
 """
-Tests for OFOptions configuration class.
+Tests for OF_options configuration class.
 
 Tests validation, normalization, and edge cases for optical flow options.
 """
@@ -34,23 +34,21 @@ class TestWeightValidation:
 
     def test_weight_2d_array_spatial(self):
         """Test 2D spatial weight array is preserved as numpy array."""
-        # Create a 2D spatial weight map (H, W, C)
-        H, W, C = 64, 64, 2
-        weight_2d = np.ones((H, W, C), dtype=np.float64)
-        weight_2d[:, :, 0] = 0.3
-        weight_2d[:, :, 1] = 0.7
+        # Create a 2D spatial weight map (H, W)
+        H, W = 64, 64
+        weight_2d = np.ones((H, W), dtype=np.float64)
 
         opts = OFOptions(weight=weight_2d)
 
         # Should be kept as numpy array, not converted to nested list
         assert isinstance(opts.weight, np.ndarray)
-        assert opts.weight.shape == (H, W, C)
-        assert opts.weight.ndim == 3
+        assert opts.weight.shape == (H, W)
+        assert opts.weight.ndim == 2
 
     def test_weight_3d_array_spatial(self):
         """Test 3D spatial weight array is preserved as numpy array."""
-        # Create a 3D spatial weight map
-        H, W, C = 32, 32, 1
+        # Create a 3D spatial weight map (H, W, C)
+        H, W, C = 32, 32, 2
         weight_3d = np.random.rand(H, W, C).astype(np.float64)
 
         opts = OFOptions(weight=weight_3d)
@@ -59,6 +57,18 @@ class TestWeightValidation:
         assert isinstance(opts.weight, np.ndarray)
         assert opts.weight.shape == (H, W, C)
         assert opts.weight.ndim == 3
+
+    def test_weight_4d_array_should_fail(self):
+        """Test that 4D weight arrays are rejected (weight is spatial only, not temporal)."""
+        from pydantic import ValidationError
+
+        # Weight should only be spatial (H, W, C), not temporal
+        h, w, c, t = 8, 8, 2, 10
+        weight_4d = np.ones((h, w, c, t), dtype=np.float32)
+
+        # This SHOULD fail - weight cannot be 4D
+        with pytest.raises(ValidationError):
+            OFOptions(weight=weight_4d)
 
     def test_weight_default(self):
         """Test default weight value."""
@@ -189,14 +199,28 @@ class TestGetWeightAt:
         assert np.isclose(w0, 0.3)
         assert np.isclose(w1, 0.7)
 
-    def test_get_weight_at_spatial_weights(self):
+    def test_get_weight_at_2d_spatial_weights(self):
         """Test get_weight_at with 2D spatial weights."""
-        H, W, C = 32, 32, 2
-        weight_2d = np.ones((H, W, C), dtype=np.float64)
-        weight_2d[:, :, 0] = 0.3
-        weight_2d[:, :, 1] = 0.7
+        H, W = 32, 32
+        weight_2d = np.ones((H, W), dtype=np.float64) * 0.5
 
         opts = OFOptions(weight=weight_2d)
+
+        w0 = opts.get_weight_at(0, n_channels=1)
+
+        # Should return 2D array
+        assert isinstance(w0, np.ndarray)
+        assert w0.shape == (H, W)
+        assert np.allclose(w0, 0.5)
+
+    def test_get_weight_at_3d_spatial_weights(self):
+        """Test get_weight_at with 3D spatial weights."""
+        H, W, C = 32, 32, 2
+        weight_3d = np.ones((H, W, C), dtype=np.float64)
+        weight_3d[:, :, 0] = 0.3
+        weight_3d[:, :, 1] = 0.7
+
+        opts = OFOptions(weight=weight_3d)
 
         w0 = opts.get_weight_at(0, n_channels=2)
         w1 = opts.get_weight_at(1, n_channels=2)
@@ -265,3 +289,118 @@ class TestToDict:
         # Weight should be preserved as numpy array
         assert isinstance(params["weight"], np.ndarray)
         assert params["weight"].shape == (H, W, C)
+
+
+class TestExampleConfigurations:
+    """Test that all example configurations can be created without errors."""
+
+    def test_jupiter_demo_config(self, tmp_path):
+        """Test configuration from examples/jupiter_demo.py"""
+        options = OFOptions(
+            input_file="dummy.h5",
+            output_path=str(tmp_path),
+            output_format="HDF5",
+            alpha=4,
+            quality_setting="balanced",
+            output_typename="",
+            reference_frames=list(
+                range(100, 201)
+            ),  # This would trigger preregistration
+        )
+
+        assert options.alpha == (4.0, 4.0)
+        assert options.quality_setting.value == "balanced"
+        assert options.reference_frames == list(range(100, 201))
+
+    def test_jupiter_demo_arr_config(self, tmp_path):
+        """Test configuration from examples/jupiter_demo_arr.py"""
+        options = OFOptions(
+            input_file="dummy.h5",
+            output_path=str(tmp_path),
+            alpha=4,
+            quality_setting="balanced",
+            levels=100,
+            iterations=50,
+            eta=0.8,
+            save_w=True,
+            output_typename="double",
+        )
+
+        assert options.alpha == (4.0, 4.0)
+        assert options.levels == 100
+        assert options.iterations == 50
+        assert options.save_w is True
+
+    def test_jupiter_demo_live_config(self, tmp_path):
+        """Test configuration from examples/jupiter_demo_live.py"""
+        options = OFOptions(
+            input_file="dummy.h5",
+            output_path=str(tmp_path),
+            alpha=4,
+            quality_setting=QualitySetting.FAST,
+            sigma=[[2.0, 2.0, 0.5], [2.0, 2.0, 0.5]],
+            levels=100,
+            iterations=50,
+            eta=0.8,
+            channel_normalization="separate",
+        )
+
+        assert options.alpha == (4.0, 4.0)
+        assert options.quality_setting == QualitySetting.FAST
+        assert options.levels == 100
+
+    def test_synth_evaluation_configs(self, tmp_path):
+        """Test configurations from examples/synth_evaluation.py"""
+        # First config with 1D numpy array weights
+        options1 = OFOptions(
+            input_file="dummy.h5",
+            output_path=str(tmp_path),
+            alpha=(2, 2),
+            levels=50,
+            min_level=5,
+            iterations=50,
+            a_data=0.45,
+            a_smooth=1,
+            weight=np.array([0.6, 0.4]),
+        )
+
+        assert options1.alpha == (2.0, 2.0)
+        assert isinstance(options1.weight, list)  # Should be converted to list
+        assert len(options1.weight) == 2
+
+        # Second config
+        options2 = OFOptions(
+            input_file="dummy.h5",
+            output_path=str(tmp_path),
+            alpha=(8, 8),
+            iterations=100,
+            a_data=0.45,
+            a_smooth=1.0,
+            weight=np.array([0.5, 0.5], np.float32),
+            levels=50,
+            eta=0.8,
+            update_lag=5,
+        )
+
+        assert options2.alpha == (8.0, 8.0)
+        assert options2.iterations == 100
+
+    def test_jupyter_notebook_config(self, tmp_path):
+        """Test configuration from notebooks/jupiter_demo.ipynb"""
+        options = OFOptions(
+            input_file="dummy.h5",
+            output_path=str(tmp_path),
+            output_format="HDF5",
+            alpha=4,
+            min_level=3,
+            bin_size=1,
+            buffer_size=500,
+            reference_frames=list(range(100, 201)),  # Would trigger preregistration
+            save_meta_info=True,
+            save_w=False,
+        )
+
+        assert options.alpha == (4.0, 4.0)
+        assert options.min_level == 3
+        assert options.buffer_size == 500
+        assert options.save_w is False

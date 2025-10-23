@@ -211,6 +211,7 @@ def get_displacement(
     const_assumption="gc",
     uv=None,
     weight=None,
+    level_solver_backend=None,
 ):
     """
     Compute optical flow displacement field using variational approach.
@@ -265,6 +266,10 @@ def get_displacement(
         - 2D array (H, W): spatial weights broadcast to all channels
         - 3D array (H, W, C): full spatial and channel weights
         If None, uses equal weights (1/C) for all channels.
+    level_solver_backend : Callable, optional
+        Custom level solver function to use instead of the default CPU solver.
+        Used by GPU backends to inject accelerated solvers. Must have the same
+        signature as the default level_solver function.
 
     Returns
     -------
@@ -427,7 +432,12 @@ def get_displacement(
 
         alpha_tmp = [alpha_scaling * alpha[j] for j in range(len(alpha))]
 
-        du, dv = level_solver(
+        # Use custom level solver if provided, otherwise use default
+        solver_func = (
+            level_solver_backend if level_solver_backend is not None else level_solver
+        )
+
+        du, dv = solver_func(
             np.ascontiguousarray(J11),
             np.ascontiguousarray(J22),
             np.ascontiguousarray(J33),
