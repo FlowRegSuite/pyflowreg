@@ -9,15 +9,22 @@ The simplest way to use PyFlowReg is with in-memory arrays using `compensate_arr
 ```python
 import numpy as np
 from pyflowreg.motion_correction import compensate_arr, OFOptions
+from pyflowreg.util.io import get_video_file_reader
 
-# Load your 2-photon video (T, H, W, C)
-video = np.load("my_video.npy")
+# Load video using PyFlowReg's video readers
+reader = get_video_file_reader("my_video.tif")
+video = reader[:]  # Read all frames (T, H, W, C)
+reader.close()
 
-# Create reference from first 10 frames
-reference = np.mean(video[:10], axis=0)
+# Create reference from frames 100-200
+reference = np.mean(video[100:201], axis=0)
 
 # Configure motion correction
-options = OFOptions(quality_setting="balanced")
+options = OFOptions(
+    alpha=4,
+    quality_setting="balanced",
+    save_w=True
+)
 
 # Run compensation - returns registered video and flow fields
 registered, flow = compensate_arr(video, reference, options)
