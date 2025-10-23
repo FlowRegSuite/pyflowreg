@@ -230,6 +230,168 @@ class TestBackwardCompatibility:
         np.testing.assert_array_equal(pipeline.reference_raw, reference_frame)
 
 
+class TestReferenceFramePreregistration:
+    """Test reference frame preregistration with list of frame indices."""
+
+    @pytest.mark.integration
+    def test_preregistration_with_frame_list(self, tmp_path):
+        """Test preregistration when reference_frames is a list of frame indices."""
+        from pyflowreg.util.io.factory import get_video_file_writer
+        from pyflowreg.motion_correction import OFOptions
+
+        # Create minimal test video: 3 frames, 8x8, 1 channel
+        video_path = tmp_path / "test_preregistration.h5"
+        n_frames, h, w, c = 3, 8, 8, 1
+
+        # Create simple test data with slight variations
+        test_data = np.zeros((n_frames, h, w, c), dtype=np.float32)
+        for i in range(n_frames):
+            test_data[i, 2:6, 2:6, 0] = (
+                100.0 + i * 10.0
+            )  # Small square with varying intensity
+
+        # Write test video using factory
+        writer = get_video_file_writer(str(video_path), "HDF5")
+        try:
+            writer.write_frames(test_data)
+        finally:
+            writer.close()
+
+        # Create options with reference_frames as list of indices
+        # This should trigger preregistration code path (like jupiter_demo does)
+        options = OFOptions(
+            input_file=str(video_path),
+            reference_frames=[
+                0,
+                1,
+                2,
+            ],  # List of frame indices - triggers preregistration!
+            quality_setting="fast",
+            buffer_size=3,
+            output_path=str(tmp_path / "output"),
+        )
+
+        config = RegistrationConfig(
+            parallelization="sequential", n_jobs=1, verbose=False
+        )
+
+        # Call compensate_recording just like jupiter_demo does
+        # This will trigger get_reference_frame() -> preregistration
+        # which creates weight_2d and passes it to OFOptions, exposing the Pydantic bug
+        reference = compensate_recording(options, config=config)
+
+        # If we get here without Pydantic validation error, the bug is fixed
+        assert reference is not None
+        assert reference.shape == (h, w, c)
+
+    def test_weight_as_list(self, tmp_path):
+        """Test that weight can be specified as a list [1, 2] for backwards compatibility."""
+        from pyflowreg.motion_correction import OFOptions
+
+        # Test with weight as list - this is a common use case
+        options = OFOptions(
+            input_file="dummy.h5",
+            weight=[1, 2],  # Should be normalized to [0.333..., 0.666...]
+            output_path=str(tmp_path),
+        )
+
+        # Verify weight was normalized
+        assert isinstance(options.weight, list)
+        assert len(options.weight) == 2
+        assert abs(options.weight[0] - 1 / 3) < 0.001
+        assert abs(options.weight[1] - 2 / 3) < 0.001
+
+    def test_weight_as_numpy_1d(self, tmp_path):
+        """Test that weight can be specified as a 1D numpy array."""
+        from pyflowreg.motion_correction import OFOptions
+
+        # Test with weight as 1D numpy array
+        options = OFOptions(
+            input_file="dummy.h5",
+            weight=np.array([1.0, 2.0]),  # Should be normalized and converted to list
+            output_path=str(tmp_path),
+        )
+
+        # Verify weight was normalized and converted to list
+        assert isinstance(options.weight, list)
+        assert len(options.weight) == 2
+        assert abs(options.weight[0] - 1 / 3) < 0.001
+        assert abs(options.weight[1] - 2 / 3) < 0.001
+
+    def test_weight_as_numpy_2d(self, tmp_path):
+        """Test that weight can be a 2D numpy array (spatial weight map, single channel)."""
+        from pyflowreg.motion_correction import OFOptions
+
+        # Test with weight as 2D numpy array
+        h, w = 8, 8
+        weight_2d = np.ones((h, w), dtype=np.float32)
+
+        # This should NOT fail with Pydantic validation error
+        options = OFOptions(
+            input_file="dummy.h5",
+            weight=weight_2d,  # 2D array should be kept as-is
+            output_path=str(tmp_path),
+        )
+
+        # Verify weight was kept as numpy array
+        assert isinstance(options.weight, np.ndarray)
+        assert options.weight.shape == (h, w)
+        assert options.weight.ndim == 2
+
+    def test_weight_as_numpy_3d(self, tmp_path):
+        """Test that weight can be a 3D numpy array (from preregistration)."""
+        from pyflowreg.motion_correction import OFOptions
+
+        # Test with weight as 3D numpy array (like preregistration creates)
+        h, w, c = 8, 8, 2
+        weight_3d = np.ones((h, w, c), dtype=np.float32)
+
+        # This should NOT fail with Pydantic validation error
+        options = OFOptions(
+            input_file="dummy.h5",
+            weight=weight_3d,  # Multi-dimensional array should be kept as-is
+            output_path=str(tmp_path),
+        )
+
+        # Verify weight was kept as numpy array
+        assert isinstance(options.weight, np.ndarray)
+        assert options.weight.shape == (h, w, c)
+        assert options.weight.ndim == 3
+
+    def test_weight_wrong_length_list(self, tmp_path):
+        """Test that weight list with wrong number of channels is accepted by Pydantic but may cause issues later."""
+        from pyflowreg.motion_correction import OFOptions
+
+        # This tests that Pydantic validation doesn't fail for mismatched channel counts
+        # The actual check for matching channels happens at runtime during processing
+        options = OFOptions(
+            input_file="dummy.h5",
+            weight=[1, 2, 3],  # 3 weights - might not match actual channel count
+            output_path=str(tmp_path),
+        )
+
+        # Pydantic should accept this (validation happens later during processing)
+        assert isinstance(options.weight, list)
+        assert len(options.weight) == 3
+
+    def test_weight_4d_array_should_fail(self, tmp_path):
+        """Test that 4D weight arrays are rejected (weight is spatial only, not temporal)."""
+        from pyflowreg.motion_correction import OFOptions
+        from pydantic import ValidationError
+
+        # Weight should only be spatial (H, W, C), not temporal
+        h, w, c, t = 8, 8, 2, 10
+        weight_4d = np.ones((h, w, c, t), dtype=np.float32)
+
+        # This SHOULD fail - weight cannot be 4D
+        with pytest.raises(ValidationError):
+            OFOptions(
+                input_file="dummy.h5",
+                weight=weight_4d,
+                output_path=str(tmp_path),
+            )
+
+
 class TestExecutorCleanup:
     """Test that executors are properly cleaned up."""
 

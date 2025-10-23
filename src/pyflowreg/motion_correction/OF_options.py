@@ -224,15 +224,34 @@ class OFOptions(BaseModel):
     @field_validator("weight", mode="before")
     @classmethod
     def normalize_weight(cls, v):
-        """Normalize weight values to sum to 1."""
+        """Normalize weight values to sum to 1.
+
+        Accepts:
+        - List [1, 2]: normalized to [0.33, 0.67]
+        - 1D numpy array: normalized and converted to list
+        - 2D numpy array (H, W): spatial weight map for single channel
+        - 3D numpy array (H, W, C): spatial weight maps from preregistration
+        """
         if isinstance(v, np.ndarray):
             if v.ndim == 1:
+                # 1D weight array: normalize and convert to list for JSON serialization
                 weight_sum = v.sum()
                 if weight_sum > 0:
                     return (v / weight_sum).tolist()
                 return v.tolist()
-            return v.tolist()
+            elif v.ndim <= 3:
+                # 2D/3D arrays (spatial weight maps from preregistration)
+                # Keep as numpy array - don't convert to nested lists
+                # Pydantic v2 with arbitrary_types_allowed=True handles this correctly
+                return v
+            else:
+                # Weight is spatial only, not temporal
+                raise ValueError(
+                    f"Weight array cannot exceed 3 dimensions (got {v.ndim}D array). "
+                    "Weight must be either channel weights (1D) or spatial weight maps (2D/3D)."
+                )
         elif isinstance(v, (list, tuple)):
+            # List or tuple: normalize if 1D
             arr = np.asarray(v, dtype=float)
             if arr.ndim == 1:
                 weight_sum = arr.sum()
@@ -329,12 +348,29 @@ class OFOptions(BaseModel):
             return float(w[i])
 
         # Handle 2D or 3D weights (spatial weights)
-        if i >= w.shape[0]:
-            if self.verbose:
-                print(f"Weight for channel {i} not set, using 1/n_channels")
-            return np.ones(w.shape[1:]) / n_channels
+        # 2D: (H, W) - single channel spatial weight map
+        # 3D: (H, W, C) - multi-channel spatial weight map (channel-last)
 
-        return w[i]
+        if w.ndim == 2:
+            # 2D weight map - return for channel 0, otherwise uniform weight
+            if i == 0:
+                return w
+            else:
+                if self.verbose:
+                    print(f"Weight for channel {i} not set, using uniform weight")
+                return np.ones_like(w) / n_channels
+
+        elif w.ndim == 3:
+            # 3D weight map in channel-last format (H, W, C)
+            if i >= w.shape[2]:
+                if self.verbose:
+                    print(f"Weight for channel {i} not set, using 1/n_channels")
+                return np.ones(w.shape[:2]) / n_channels
+
+            return w[:, :, i]
+
+        else:
+            raise ValueError(f"Unexpected weight array with {w.ndim} dimensions")
 
     def copy(self) -> "OFOptions":
         """Create a deep copy (MATLAB copyable interface)."""
