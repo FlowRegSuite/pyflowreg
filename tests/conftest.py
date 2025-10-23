@@ -25,6 +25,7 @@ def initialize_runtime_context():
     RuntimeContext.init(force=True)
 
     # Import parallelization module to trigger executor registration
+    import pyflowreg.motion_correction.parallelization  # noqa: F401
 
 
 @pytest.fixture(scope="function")
