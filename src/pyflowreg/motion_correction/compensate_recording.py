@@ -14,6 +14,7 @@ from pyflowreg.util.image_processing import normalize, apply_gaussian_filter
 from pyflowreg.motion_correction.OF_options import OutputFormat, ChannelNormalization
 
 # Import to trigger executor registration (side effect)
+import pyflowreg.motion_correction.parallelization as _parallelization  # noqa: F401
 
 
 @dataclass

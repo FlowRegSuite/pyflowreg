@@ -114,9 +114,16 @@ class RuntimeContext:
         """Detect other optional features and accelerators."""
         # GPU support via CuPy
         try:
-            import_module("cuda")
-            cls._config["available_features"].add("gpu_cupy")
-        except ImportError:
+            warnings.filterwarnings(
+                "ignore",
+                message="CUDA path could not be detected",
+                category=UserWarning,
+                module=r"cupy\._environment",
+            )
+            cp = import_module("cupy")
+            if cp.cuda.runtime.getDeviceCount() > 0:
+                cls._config["available_features"].add("gpu_cupy")
+        except (ImportError, Exception):
             pass
 
         # GPU support via PyTorch

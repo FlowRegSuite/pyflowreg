@@ -185,6 +185,15 @@ if TORCH_AVAILABLE:
 
 # CUDA backend (only if cupy is available)
 try:
+    import warnings
+
+    # Suppress CuPy CUDA path warning during availability check
+    warnings.filterwarnings(
+        "ignore",
+        message="CUDA path could not be detected",
+        category=UserWarning,
+        module=r"cupy\._environment",
+    )
     import cupy as cp  # noqa: F401
 
     CUPY_AVAILABLE = True
