@@ -36,6 +36,7 @@ except ImportError:
 
 # Import IO backends - these are always available as part of the package
 from pyflowreg.util.io._base import VideoReader, VideoWriter
+from pyflowreg.core.optical_flow import imregister_wrapper
 
 
 # Enums
@@ -545,13 +546,27 @@ class OFOptions(BaseModel):
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
             frames_for_compensation = np.transpose(frames_norm, (3, 0, 1, 2))
 
-            # Compensate all frames against the mean reference
-            compensated, _ = compensate_arr(
+            # Compensate: compute displacement fields using normalized frames
+            _, w_fields = compensate_arr(
                 frames_for_compensation, ref_mean, options=prereg_options
             )
 
-            # Calculate mean of compensated frames as the reference
-            reference = np.mean(compensated, axis=0)
+            # Warp the RAW frames using the computed displacement fields
+            frames_raw_for_warp = np.transpose(frames, (3, 0, 1, 2))  # (T,H,W,C)
+            ref_mean_raw = np.mean(frames_raw_for_warp, axis=0)  # (H,W,C)
+
+            compensated_raw = np.zeros_like(frames_raw_for_warp)
+            for t in range(frames_raw_for_warp.shape[0]):
+                compensated_raw[t] = imregister_wrapper(
+                    frames_raw_for_warp[t],
+                    w_fields[t, :, :, 0],  # u
+                    w_fields[t, :, :, 1],  # v
+                    ref_mean_raw,
+                    interpolation_method="cubic",
+                )
+
+            # Calculate mean of compensated RAW frames as the reference
+            reference = np.mean(compensated_raw, axis=0)
 
             if self.verbose:
                 print("Finished pre-registration of the reference frames.")
