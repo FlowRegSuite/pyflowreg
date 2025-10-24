@@ -9,15 +9,22 @@ The simplest way to use PyFlowReg is with in-memory arrays using `compensate_arr
 ```python
 import numpy as np
 from pyflowreg.motion_correction import compensate_arr, OFOptions
+from pyflowreg.util.io import get_video_file_reader
 
-# Load your 2-photon video (T, H, W, C)
-video = np.load("my_video.npy")
+# Load video using PyFlowReg's video readers
+reader = get_video_file_reader("my_video.tif")
+video = reader[:]  # Read all frames (T, H, W, C)
+reader.close()
 
-# Create reference from first 10 frames
-reference = np.mean(video[:10], axis=0)
+# Create reference from frames 100-200
+reference = np.mean(video[100:201], axis=0)
 
 # Configure motion correction
-options = OFOptions(quality_setting="balanced")
+options = OFOptions(
+    alpha=4,
+    quality_setting="balanced",
+    save_w=True
+)
 
 # Run compensation - returns registered video and flow fields
 registered, flow = compensate_arr(video, reference, options)
@@ -83,7 +90,7 @@ config = RegistrationConfig(
 compensate_recording(options, config=config)
 ```
 
-**Note:** A GPU implementation based on red-black Gauss-Seidel iteration is currently in development.
+**GPU Acceleration:** PyFlowReg supports GPU backends via `flowreg_cuda` (CuPy) and `flowreg_torch` (PyTorch). Install with `pip install pyflowreg[gpu]` and set `flow_backend="cuda"` or `flow_backend="torch"` in `OFOptions`.
 
 ## Multi-Session Processing
 
@@ -211,8 +218,8 @@ options = OFOptions(
     min_level=3,          # Finest pyramid level to compute (quality_setting controls this)
 
     # Preprocessing
-    bin_size=1,           # Spatial binning factor
-    gaussian_filter=0,    # Gaussian filter sigma (0=disabled)
+    bin_size=1,           # Temporal binning factor
+    sigma=[1.0, 1.0, 0.1],  # Gaussian filter sigma [sx, sy, st]
 
     # Reference
     reference_frames=[0, 1, 2, 3, 4],  # Frames to average for reference

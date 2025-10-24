@@ -35,13 +35,18 @@ This is a Python port of the [Flow-Registration MATLAB toolbox](https://github.c
 ```python
 import numpy as np
 from pyflowreg.motion_correction import compensate_arr, OFOptions
+from pyflowreg.util.io import get_video_file_reader
 
-# Load your 2-photon video (T, H, W, C)
-video = np.load("my_video.npy")
-reference = np.mean(video[:10], axis=0)
+# Load video using PyFlowReg's video readers
+reader = get_video_file_reader("my_video.tif")
+video = reader[:]
+reader.close()
+
+# Create reference from frames 100-200
+reference = np.mean(video[100:201], axis=0)
 
 # Configure and run motion correction
-options = OFOptions(quality_setting="balanced")
+options = OFOptions(alpha=4, quality_setting="balanced")
 registered, flow = compensate_arr(video, reference, options)
 ```
 

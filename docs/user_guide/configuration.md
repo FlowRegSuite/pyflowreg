@@ -44,9 +44,9 @@ options = OFOptions(
     eta=0.8,  # Downsampling factor between levels
     min_level=1,  # Finest level to compute (set by quality_setting)
 
-    # Nonlinearity parameters
-    epsilon_s=0.001,  # Smoothness nonlinearity threshold
-    epsilon_d=0.001,  # Data term nonlinearity threshold
+    # Nonlinear diffusion parameters
+    a_smooth=1.0,  # Smoothness diffusion parameter
+    a_data=0.45,  # Data term diffusion parameter
 )
 ```
 
@@ -68,17 +68,17 @@ Number of SOR iterations at each pyramid level:
 
 ## Preprocessing
 
-### Spatial Binning
+### Temporal Binning
 
-Reduce spatial resolution before processing to improve SNR and speed:
+Bin frames temporally to improve SNR and reduce computation:
 
 ```python
 options = OFOptions(
-    bin_size=2,  # 2x2 binning reduces resolution by half
+    bin_size=2,  # Average every 2 frames together
 )
 ```
 
-Binning is applied before optical flow computation. Output resolution matches the binned resolution.
+Temporal binning is applied during video reading. The effective frame rate is reduced by the binning factor.
 
 ### Gaussian Filtering
 
@@ -86,27 +86,30 @@ Apply Gaussian blur to reduce noise:
 
 ```python
 options = OFOptions(
-    gaussian_filter=1.0,  # Sigma in pixels
+    # Sigma values: [spatial_x, spatial_y, temporal]
+    sigma=[1.0, 1.0, 0.1],  # Single-channel sigma
+    # Or per-channel:
+    sigma=[[1.0, 1.0, 0.1], [2.0, 2.0, 0.2]],  # For 2 channels
 )
 ```
 
 Useful for very noisy data, but can reduce spatial accuracy.
 
-### Normalization
+### Channel Normalization
 
 Control channel normalization for multi-channel data:
 
 ```python
 options = OFOptions(
-    normalize_channels=True,  # Normalize each channel (default)
-    normalization_mode="reference",  # Use reference frame statistics
+    channel_normalization="joint",  # Default: normalize all channels together
+    # Or:
+    channel_normalization="separate",  # Normalize each channel independently
 )
 ```
 
 Normalization modes:
-- `"reference"`: Normalize using reference frame statistics (recommended)
-- `"individual"`: Normalize each frame independently
-- `"none"`: No normalization
+- `"joint"`: Normalize all channels together using global statistics (default)
+- `"separate"`: Normalize each channel independently
 
 ## Backend Selection
 
@@ -233,31 +236,15 @@ options = OFOptions(reference_frames=[0])
 
 # Average multiple frames
 options = OFOptions(reference_frames=list(range(100, 200)))
+
+# Load from file (TIFF image)
+options = OFOptions(reference_frames="reference.tif")
+
+# Provide directly as numpy array
+import numpy as np
+reference = np.load("reference.npy")
+options = OFOptions(reference_frames=reference)
 ```
-
-### Automatic Reference Selection
-
-Let PyFlowReg find stable frames:
-
-```python
-options = OFOptions(
-    reference_frames=None,  # Auto-select
-    auto_reference_method="variance",  # Use low-variance frames
-)
-```
-
-### Reference Pre-Alignment
-
-Enable cross-correlation pre-alignment for improved robustness:
-
-```python
-options = OFOptions(
-    prealignment=True,  # Enable reference pre-alignment
-    prealignment_method="xcorr",  # Cross-correlation
-)
-```
-
-Pre-alignment performs initial rigid registration before optical flow, improving convergence for large displacements.
 
 ## File I/O Configuration
 
@@ -276,7 +263,7 @@ options = OFOptions(
 ```python
 options = OFOptions(
     save_w=True,  # Save displacement fields
-    output_typename="float32",  # Data type for output
+    output_typename="single",
 )
 ```
 
@@ -307,12 +294,9 @@ options = OFOptions(alpha="4")  # Converts string to float
 ## Saving and Loading Configuration
 
 ```python
-# Save configuration
-options.save("config.json")
+# Save configuration to JSON
+options.save_options("config.json")
 
-# Load configuration
-options = OFOptions.load("config.json")
-
-# Export to MATLAB-compatible format
-options.save_matlab("config.mat")
+# Load configuration from JSON
+options = OFOptions.load_options("config.json")
 ```
