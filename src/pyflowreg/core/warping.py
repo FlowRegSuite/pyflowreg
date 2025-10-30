@@ -7,6 +7,8 @@ binary mask warping with nearest-neighbor interpolation.
 
 import cv2
 import numpy as np
+from multiprocessing import Pool, cpu_count
+from typing import Optional
 
 
 def backward_valid_mask(u, v):
@@ -273,3 +275,109 @@ def warpingDepth(eta, levels, m, n):
         if round(min_dim) < 10:
             break
     return warpingdepth
+
+
+def align_sequence(
+    batch: np.ndarray,
+    displacement: np.ndarray,
+    reference: np.ndarray,
+    interpolation_method: str = "cubic",
+    n_workers: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Apply displacement field to align a batch of frames to a reference.
+
+    This function warps each frame in a batch using the provided displacement
+    field to align them to a common reference frame. Uses multiprocessing
+    for efficient batch processing.
+
+    Parameters
+    ----------
+    batch : ndarray, shape (T, H, W, C) or (T, H, W)
+        Batch of frames to align
+    displacement : ndarray, shape (H, W, 2)
+        Displacement field where displacement[..., 0] = u (horizontal),
+        displacement[..., 1] = v (vertical)
+    reference : ndarray, shape (H, W, C) or (H, W)
+        Reference image used to fill out-of-bounds regions
+    interpolation_method : str, default='cubic'
+        Interpolation method: 'cubic' or 'linear'
+    n_workers : int, optional
+        Number of parallel workers. If None, uses cpu_count()
+
+    Returns
+    -------
+    aligned_batch : ndarray
+        Aligned frames with same shape and dtype as input batch
+
+    Examples
+    --------
+    >>> batch = np.random.rand(100, 512, 512, 1)
+    >>> displacement = np.zeros((512, 512, 2))  # No displacement
+    >>> reference = np.mean(batch, axis=0)
+    >>> aligned = align_sequence(batch, displacement, reference)
+    """
+    # Track if we need to add/remove channel dimension
+    added_channel_dim = False
+    if batch.ndim == 3:
+        batch = batch[..., np.newaxis]
+        added_channel_dim = True
+    if reference.ndim == 2:
+        reference = reference[..., np.newaxis]
+
+    T, H, W, C = batch.shape
+    u = displacement[..., 0]
+    v = displacement[..., 1]
+
+    # Prepare reference as float64
+    reference_f64 = reference.astype(np.float64, copy=False)
+
+    # Set up multiprocessing
+    if n_workers is None:
+        n_workers = min(cpu_count(), T)
+
+    # Process frames
+    if n_workers > 1:
+        # Multiprocessing requires a picklable function with single argument
+        # So we use functools.partial to bind the fixed parameters
+        from functools import partial
+
+        # Create partial function with fixed displacement and reference
+        warp_func = partial(
+            imregister_wrapper,
+            u=u,
+            v=v,
+            f1_level=reference_f64,
+            interpolation_method=interpolation_method,
+        )
+
+        # Convert frames to float64 for processing
+        frames_f64 = [batch[t].astype(np.float64, copy=False) for t in range(T)]
+
+        with Pool(processes=n_workers) as pool:
+            warped_frames = pool.map(warp_func, frames_f64)
+    else:
+        # Sequential processing for small batches
+        warped_frames = []
+        for t in range(T):
+            warped = imregister_wrapper(
+                batch[t].astype(np.float64, copy=False),
+                u,
+                v,
+                reference_f64,
+                interpolation_method=interpolation_method,
+            )
+            warped_frames.append(warped)
+
+    # Stack results and preserve dtype
+    aligned_batch = np.empty_like(batch)
+    for t, warped in enumerate(warped_frames):
+        if warped.ndim == 2:
+            warped = warped[..., np.newaxis]
+        aligned_batch[t] = warped.astype(batch.dtype, copy=False)
+
+    # Remove singleton channel dimension only if we added it
+    if added_channel_dim and aligned_batch.shape[-1] == 1:
+        aligned_batch = aligned_batch[..., 0]
+
+    return aligned_batch

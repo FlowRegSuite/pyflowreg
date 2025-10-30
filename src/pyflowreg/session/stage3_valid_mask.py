@@ -20,7 +20,7 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-from pyflowreg.core.warping import imregister_binary
+from pyflowreg.core.warping import imregister_binary, align_sequence
 from pyflowreg.session.config import SessionConfig
 from pyflowreg.session.stage1_compensate import (
     discover_input_files,
@@ -97,6 +97,93 @@ def save_mask_png(mask: np.ndarray, path: Path):
             print("Warning: PIL not available, saved as .npy instead of .png")
 
 
+def align_sequence_video(
+    compensated_path: Path,
+    output_path: Path,
+    displacement: np.ndarray,
+    reference_average: np.ndarray,
+    *,
+    resume: bool = True,
+    chunk_size: int = 64,
+    output_format: str = "TIFF",
+) -> Path:
+    """
+    Warp a compensated recording into the session reference frame and persist it.
+
+    Parameters
+    ----------
+    compensated_path : Path
+        Path to the per-recording compensated video.
+    output_path : Path
+        Destination path for the aligned video.
+    displacement : ndarray, shape (H, W, 2)
+        Displacement field that maps the recording into the reference frame.
+    reference_average : ndarray
+        Reference image used to fill out-of-bounds regions.
+    resume : bool, default=True
+        Skip processing when the aligned video already exists.
+    chunk_size : int, default=64
+        Number of frames processed per batch.
+    output_format : str, default="TIFF"
+        Output format for the aligned video.
+
+    Returns
+    -------
+    Path
+        Path to the aligned video.
+    """
+    if resume and output_path.exists():
+        print(f"  Skipping existing {output_path.name}")
+        return output_path
+
+    print(f"  Creating {output_path.name}...")
+    start_time = time()
+
+    from pyflowreg.util.io.factory import (
+        get_video_file_reader,
+        get_video_file_writer,
+    )
+
+    reference = reference_average.astype(np.float64, copy=False)
+    reader = get_video_file_reader(str(compensated_path))
+    writer = get_video_file_writer(str(output_path), output_format=output_format)
+
+    total_frames = len(reader)
+    frame_dtype = reader.dtype
+
+    for start_idx in range(0, total_frames, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_frames)
+        batch = reader[slice(start_idx, end_idx)]
+
+        if batch.ndim == 3:  # (H, W, C) single frame due to binning logic
+            batch = batch[np.newaxis, ...]
+
+        # Use align_sequence for batch processing
+        aligned_batch = align_sequence(
+            batch,
+            displacement,
+            reference,
+            interpolation_method="cubic",
+            n_workers=1,  # Use single worker since we're already batching
+        )
+
+        # Preserve dtype
+        aligned_batch = aligned_batch.astype(frame_dtype, copy=False)
+        writer.write_frames(aligned_batch)
+
+        # Progress indication
+        if (end_idx % 500 == 0) or (end_idx == total_frames):
+            progress = (end_idx / total_frames) * 100
+            print(f"    Progress: {progress:.1f}% ({end_idx}/{total_frames} frames)")
+
+    reader.close()
+    writer.close()
+
+    elapsed = time() - start_time
+    print(f"  Saved aligned video to {output_path.name} after {elapsed:.2f} seconds.")
+    return output_path
+
+
 def save_final_results(
     final_results: Path,
     final_valid: np.ndarray,
@@ -107,6 +194,7 @@ def save_final_results(
     compensated_h5_paths: List[Path],
     reference_average: np.ndarray,
     middle_idx: int,
+    aligned_video_paths: List[Path] = None,
 ):
     """
     Save all final results including masks and metadata.
@@ -131,6 +219,8 @@ def save_final_results(
         Reference temporal average
     middle_idx : int
         Index of center reference
+    aligned_video_paths : list[Path], optional
+        Paths to aligned video files
 
     Notes
     -----
@@ -146,18 +236,25 @@ def save_final_results(
 
     # Save comprehensive .npz with all data
     npz_path = final_results / "final_valid_idx.npz"
-    np.savez(
-        str(npz_path),
-        final_valid=final_valid,
-        aligned_valid_masks=np.array(aligned_valid_masks),
-        per_seq_valid_masks=np.array(per_seq_valid_masks),
-        displacement_fields_u=np.array([w[:, :, 0] for w in displacement_fields]),
-        displacement_fields_v=np.array([w[:, :, 1] for w in displacement_fields]),
-        temporal_averages=np.array(temporal_averages),
-        compensated_h5_paths=np.array([str(p) for p in compensated_h5_paths]),
-        reference_average=reference_average,
-        middle_idx=middle_idx,
-    )
+    save_dict = {
+        "final_valid": final_valid,
+        "aligned_valid_masks": np.array(aligned_valid_masks),
+        "per_seq_valid_masks": np.array(per_seq_valid_masks),
+        "displacement_fields_u": np.array([w[:, :, 0] for w in displacement_fields]),
+        "displacement_fields_v": np.array([w[:, :, 1] for w in displacement_fields]),
+        "temporal_averages": np.array(temporal_averages),
+        "compensated_h5_paths": np.array([str(p) for p in compensated_h5_paths]),
+        "reference_average": reference_average,
+        "middle_idx": middle_idx,
+    }
+
+    # Add aligned video paths if provided
+    if aligned_video_paths is not None:
+        save_dict["aligned_video_paths"] = np.array(
+            [str(p) for p in aligned_video_paths]
+        )
+
+    np.savez(str(npz_path), **save_dict)
 
     # Also save .mat for MATLAB compatibility
     try:
@@ -362,8 +459,39 @@ def run_stage3(
     align_toc = time() - align_tic
     print(f"Done after {align_toc:.2f} seconds.\n")
 
+    # Step 2b: Align video frames and persist (optional)
+    aligned_video_paths = []
+    print("Aligning video frames to reference coordinate system...\n")
+
+    for i in range(num_records):
+        print(f"Aligning video {i+1}/{num_records}: {input_files[i].stem}")
+
+        # Determine output path based on config
+        ext = (
+            "tif"
+            if config.align_output_format == "TIFF"
+            else config.align_output_format.lower()
+        )
+        aligned_video_path = final_results / f"aligned_{input_files[i].stem}.{ext}"
+
+        # Align and save the video
+        aligned_path = align_sequence_video(
+            compensated_h5_paths[i],
+            aligned_video_path,
+            displacement_fields[i],
+            reference_average,
+            resume=config.resume,
+            chunk_size=config.align_chunk_size,
+            output_format=config.align_output_format,
+        )
+        aligned_video_paths.append(aligned_path)
+
+        remaining = num_records - (i + 1)
+        if remaining > 0:
+            print(f"{remaining} video(s) remaining.\n")
+
     # Step 3: Compute final valid mask
-    print("Starting step 3, computing final valid index mask...\n")
+    print("\nStarting step 3, computing final valid index mask...\n")
     final_timer = time()
 
     # Initialize as all True, then AND with each aligned mask
@@ -385,6 +513,7 @@ def run_stage3(
         compensated_h5_paths,
         reference_average,
         middle_idx,
+        aligned_video_paths,
     )
 
     # Mark stage 3 as complete

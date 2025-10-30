@@ -40,6 +40,9 @@ class SessionConfig(BaseModel):
         Optical flow backend (passed to OFOptions)
     backend_params : dict, default={}
         Additional parameters for flow backend
+    stage1_quality_setting : Optional[str], default=None
+        Quality preset for Stage 1 motion correction ("quality", "balanced", or "fast").
+        If None, uses OFOptions default (usually "quality").
     cc_upsample : int, default=4
         Cross-correlation upsampling factor for rigid initialization
     sigma_smooth : float, default=6.0
@@ -48,6 +51,10 @@ class SessionConfig(BaseModel):
         Regularization for inter-sequence optical flow
     iterations_between : int, default=100
         Iterations for inter-sequence optical flow
+    align_chunk_size : int, default=64
+        Number of frames to process per batch during Stage 3 video alignment
+    align_output_format : str, default="TIFF"
+        Output format for aligned videos in Stage 3
 
     MATLAB Compatibility
     --------------------
@@ -65,11 +72,18 @@ class SessionConfig(BaseModel):
     flow_backend: str = "flowreg"
     backend_params: Dict = Field(default_factory=dict)
 
+    # Stage 1 parameters
+    stage1_quality_setting: Optional[str] = None  # Pass through to OF_options
+
     # Stage 2 parameters
     cc_upsample: int = 4
     sigma_smooth: float = 6.0
     alpha_between: float = 25.0
     iterations_between: int = 100
+
+    # Stage 3 parameters
+    align_chunk_size: int = 64
+    align_output_format: str = "TIFF"
 
     @field_validator("root", "output_root", "final_results", mode="before")
     @classmethod

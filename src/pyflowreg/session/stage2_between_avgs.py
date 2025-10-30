@@ -95,7 +95,7 @@ def compute_between_displacement(
 
     # Rigid initialization via cross-correlation
     # Use existing utility function with proper backward warp convention
-    shift_2d = estimate_rigid_xcorr_2d(img1, img2, target_hw=256, up=config.cc_upsample)
+    shift_2d = estimate_rigid_xcorr_2d(img1, img2, up=config.cc_upsample)
 
     # Create constant displacement field from 2D shift
     dx, dy = shift_2d[0], shift_2d[1]
@@ -111,7 +111,7 @@ def compute_between_displacement(
         img2,
         w_init[:, :, 0],
         w_init[:, :, 1],
-        reference_avg,
+        img1,
         interpolation_method="cubic",
     )
     img2 = img2.reshape(img2_dims)

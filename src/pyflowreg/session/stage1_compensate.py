@@ -372,6 +372,10 @@ def compensate_single_recording(
         "backend_params": config.backend_params,
     }
 
+    # Apply quality setting from config if specified
+    if config.stage1_quality_setting is not None:
+        of_params["quality_setting"] = config.stage1_quality_setting
+
     # Apply overrides if provided
     if of_options_override:
         of_params.update(of_options_override)
