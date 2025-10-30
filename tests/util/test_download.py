@@ -146,7 +146,7 @@ class TestDemoDataUrls:
 
     def test_all_expected_demos_present(self):
         """Test that all expected demo files are in DEMO_DATA_URLS."""
-        expected_demos = {"jupiter.tiff", "synth_frames.h5"}
+        expected_demos = {"jupiter.tiff", "synth_frames.h5", "injection.tiff"}
         actual_demos = set(DEMO_DATA_URLS.keys())
 
         assert (
