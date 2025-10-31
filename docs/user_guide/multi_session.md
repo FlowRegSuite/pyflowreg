@@ -92,6 +92,73 @@ pyflowreg-session session.toml --stage 2
 pyflowreg-session session.toml --stage 3
 ```
 
+## Deep Dive: Session Pipeline
+
+The `pyflowreg.session` pipeline always runs the same three deterministic stages and records progress in `status.json` files so every step can resume safely. Knowing what each stage consumes and produces makes it easier to debug, scale to clusters, or mix MATLAB and Python tooling.
+
+### Stage overview
+
+| Stage | Inputs | Key operations | Primary outputs | Resume markers |
+| --- | --- | --- | --- | --- |
+| 1. Per-recording compensation | Recordings discovered with `root` + `pattern` | `discover_input_files()` → `compensate_recording()` with `save_valid_idx=True`; streaming temporal mean via `compute_and_save_temporal_average()`; HDF5 completeness checks | `compensated.hdf5`, `idx.hdf`, `temporal_average.npy`, per-recording `status.json` | `status.json["stage1"]`, verified `compensated.hdf5` frame count |
+| 2. Inter-sequence alignment | Stage 1 temporal averages, center from `SessionConfig.resolve_center_file()` | `compute_between_displacement()` (phase cross-correlation init + optical flow refinement) | `w_to_reference.npz`, updated `status.json` | `status.json["stage2"]`, presence of `w_to_reference.npz` |
+| 3. Valid mask & reprojection | Stage 1 masks, Stage 2 displacement fields | `load_idx_and_compute_mask()`, `imregister_binary()`, optional `align_sequence()` reprojection, final AND | `final_valid_idx.*`, aligned per-recording masks, optional `aligned_<recording>.<ext>` | `final_results/status.json["stage3"]`, `final_valid_idx.npz/png` |
+
+### Stage 1 – Per-recording compensation
+
+- `discover_input_files()` builds the sorted worklist before any processing begins (see `src/pyflowreg/session/stage1_compensate.py`).
+- Each recording gets its own directory under `output_root/<stem>/` and runs through `compensate_recording()` with `save_valid_idx=True`, producing the motion-corrected video and `idx.hdf` mask stack.
+- After compensation, the helper verifies that `compensated.hdf5` (case-insensitive) contains the expected frame count to guard against half-written files.
+- Temporal averages are streamed with `compute_and_save_temporal_average()`, so even very long sequences never have to fit entirely in RAM.
+
+**Outputs:** `compensated.hdf5`, `idx.hdf`, `temporal_average.npy`, `status.json` with `"stage1": "done"`, plus optional `statistics.npz`.
+
+### Stage 2 – Inter-sequence alignment
+
+- Temporal averages are reloaded from disk and the reference recording (center) is selected automatically or from `SessionConfig.center`.
+- `compute_between_displacement()` smooths both averages, applies phase cross-correlation for a rigid guess, then refines with the configured flow backend (`src/pyflowreg/session/stage2_between_avgs.py`).
+- Results are written to `w_to_reference.npz` (separate `u`/`v` arrays) so MATLAB users can load them directly.
+
+**Outputs:** `w_to_reference.npz`, per-recording `status.json` updates, and `middle_idx` (0-based) pointing to the reference average.
+
+### Stage 3 – Valid mask & aligned stacks
+
+- `load_idx_and_compute_mask()` reduces each `idx.hdf` to a boolean mask via a temporal AND; raw and aligned masks are saved for inspection.
+- Masks are warped into the session reference frame with `imregister_binary()`, mirroring MATLAB’s `get_session_valid_index_v3`.
+- Each `compensated.hdf5` can optionally be reprojected into the reference grid via `align_sequence_video()` — controlled by `SessionConfig.align_chunk_size` and `SessionConfig.align_output_format`.
+- The final mask is the logical AND of all aligned masks; the routine writes `.npz`, `.mat`, and `.png` variants and caches aligned videos as `aligned_<recording>.<ext>`.
+
+**Outputs:** `final_valid_idx.{png,npz,mat}`, per-recording `*_valid_idx.png`/`*_valid_idx_aligned.png`, optional `aligned_<recording>.<ext>`, and `final_results/status.json`.
+
+### Result artifacts at a glance
+
+```
+compensated_outputs/
+└── recording_X/
+    ├── compensated.hdf5
+    ├── idx.hdf
+    ├── temporal_average.npy
+    ├── w_to_reference.npz
+    └── status.json
+final_results/
+├── final_valid_idx.{png,npz,mat}
+├── aligned_recording_X.tif  # format set by align_output_format
+└── status.json
+```
+
+### Resume strategy
+
+- Stage 1 re-runs automatically if `compensated.hdf5` is missing or its frame count no longer matches the source.
+- Stage 2 skips work whenever `w_to_reference.npz` already exists.
+- Stage 3 checks both `final_valid_idx.png` and `final_results/status.json` before recomputing.
+- Because each artifact is deterministic, deleting a corrupt file and re-running just that stage is safe.
+
+### CLI & scheduler coordination
+
+- `pyflowreg-session run` orchestrates all three stages locally; `run_stage1_array()` lets HPC array jobs handle Stage 1 while Stages 2–3 run as follow-up jobs.
+- The CLI prints reminders about running Stages 2–3 once all array tasks finish, and you can always call the Python APIs directly.
+- For Dask, `pyflowreg-session dask` spins up a jobqueue cluster, parallelizes Stage 1, then executes Stages 2–3 serially on the client.
+
 ## Advanced Configuration
 
 ### Quality vs Speed Trade-offs

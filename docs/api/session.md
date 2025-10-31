@@ -217,6 +217,8 @@ data.keys()
 #  'reference_average', 'middle_idx']
 ```
 
+**Aligned video export:** Stage 3 reprojects each per-recording `compensated.hdf5` into the session reference grid via `align_sequence()`. Tune behavior with `SessionConfig.align_chunk_size` (batch size) and `SessionConfig.align_output_format` (e.g., `TIFF`, `HDF5`). Outputs land in `final_results/aligned_<recording>.<ext>` and are skipped on resume when `resume=True`.
+
 ## Command-Line Interface
 
 ### pyflowreg-session
