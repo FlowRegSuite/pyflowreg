@@ -466,9 +466,26 @@ class OFOptions(BaseModel):
 
         # List of frame indices - preregister
         if isinstance(self.reference_frames, list) and video_reader is not None:
-            frames = video_reader[
-                self.reference_frames
-            ]  # (T,H,W,C) using array-like indexing
+            # Get actual frame count and clip reference indices to valid range
+            frame_count = len(video_reader)
+            valid_indices = []
+            clipped = False
+
+            for idx in self.reference_frames:
+                if idx >= frame_count:
+                    valid_indices.append(min(idx, frame_count - 1))
+                    clipped = True
+                else:
+                    valid_indices.append(idx)
+
+            if clipped:
+                print(
+                    f"Warning: Reference frames exceed video length ({frame_count} frames). "
+                    f"Clipping indices from {self.reference_frames[0]}-{self.reference_frames[-1]} "
+                    f"to {valid_indices[0]}-{valid_indices[-1]}"
+                )
+
+            frames = video_reader[valid_indices]  # (T,H,W,C) using array-like indexing
 
             if frames.ndim != 4:
                 if frames.ndim == 3:

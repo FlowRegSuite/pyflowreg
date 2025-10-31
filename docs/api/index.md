@@ -4,7 +4,7 @@ This section contains the complete API reference for PyFlowReg, automatically ge
 
 ## High-Level APIs
 
-::::{grid} 1 1 2 2
+::::{grid} 1 1 2 3
 :gutter: 2
 
 :::{grid-item-card} Motion Correction
@@ -18,6 +18,17 @@ High-level functions for applying motion correction to videos and arrays.
 - `OFOptions` - Configuration system
 :::
 
+:::{grid-item-card} Session Processing
+:link: session
+:link-type: doc
+
+Multi-recording session processing with inter-sequence alignment.
+- `SessionConfig` - Session configuration
+- `run_stage1()` - Per-recording correction
+- `run_stage2()` - Inter-sequence alignment
+- `run_stage3()` - Valid mask computation
+:::
+
 :::{grid-item-card} Core Algorithms
 :link: core
 :link-type: doc
@@ -25,6 +36,7 @@ High-level functions for applying motion correction to videos and arrays.
 Low-level optical flow computation engine.
 - `get_displacement()` - Main optical flow API
 - `compute_flow()` - Pyramid level solver
+- Warping utilities
 - Motion tensor computation
 :::
 
@@ -63,6 +75,7 @@ Image processing utilities.
 :hidden:
 
 motion_correction
+session
 core
 io
 utilities

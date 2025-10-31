@@ -62,6 +62,14 @@ def estimate_rigid_xcorr_2d(
     Th = H if target_hw is None else min(H, int(target_hw[0]))
     Tw = W if target_hw is None else min(W, int(target_hw[1]))
 
+    # Validate upsampling factor
+    if up < 1:
+        print(
+            f"Warning: upsampling factor {up} < 1 is invalid. "
+            f"Setting to 1 (no upsampling)."
+        )
+        up = 1
+
     # Calculate scaling factors
     sy = H / Th
     sx = W / Tw
@@ -109,7 +117,7 @@ def estimate_rigid_xcorr_2d(
 
 if __name__ == "__main__":
     from scipy.ndimage import shift as ndi_shift
-    from pyflowreg.core.optical_flow import imregister_wrapper
+    from pyflowreg.core.warping import imregister_wrapper
     import matplotlib.pyplot as plt
 
     print("Testing 2D rigid cross-correlation alignment...")

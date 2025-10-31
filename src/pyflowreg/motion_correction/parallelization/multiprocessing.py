@@ -31,14 +31,18 @@ def _init_shared(shm_specs: Dict[str, Tuple[str, tuple, str]]):
     Args:
         shm_specs: Dictionary mapping names to (shm_name, shape, dtype_str) tuples
     """
-    # Optional: Limit thread usage in numerical libraries to avoid oversubscription
-    # Uncomment if you experience performance issues with nested parallelism
-    # os.environ.update({
-    #     'OMP_NUM_THREADS': '1',
-    #     'MKL_NUM_THREADS': '1',
-    #     'OPENBLAS_NUM_THREADS': '1',
-    #     'NUMEXPR_NUM_THREADS': '1'
-    # })
+    # Limit thread usage in numerical libraries to avoid oversubscription
+    # Each worker process should use only 1 thread to avoid N processes × M threads saturation
+    import os
+
+    os.environ.update(
+        {
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+        }
+    )
 
     global _SHM
     _SHM = {}
@@ -63,7 +67,8 @@ def _process_frame_worker(
         Frame index (for tracking completion)
     """
     # Import functions inside worker to avoid pickling issues with Numba
-    from pyflowreg.core.optical_flow import get_displacement, imregister_wrapper
+    from pyflowreg.core.optical_flow import get_displacement
+    from ...core.warping import imregister_wrapper
 
     # Get arrays from shared memory
     batch = _SHM["batch"][1]

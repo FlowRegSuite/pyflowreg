@@ -20,6 +20,27 @@ To install with full visualization support (matplotlib, scikit-learn):
 pip install pyflowreg[vis]
 ```
 
+### With Session Processing Support
+
+For multi-session processing with configuration file support:
+
+```bash
+pip install pyflowreg[session]
+```
+
+This installs:
+- `pyyaml` for YAML configuration files
+- `Pillow` for PNG mask export
+- Command-line tool: `pyflowreg-session`
+
+### Complete Installation
+
+For all features including session processing, visualization, and cluster computing:
+
+```bash
+pip install pyflowreg[session,vis,dask]
+```
+
 ### For Development
 
 To install in development mode with test dependencies:
@@ -59,5 +80,13 @@ Test your installation:
 ```python
 import pyflowreg
 from pyflowreg.motion_correction import OFOptions
+from pyflowreg.session import SessionConfig
 print(pyflowreg.__version__)
+```
+
+Verify command-line tools:
+
+```bash
+# Check session CLI is installed
+pyflowreg-session --help
 ```

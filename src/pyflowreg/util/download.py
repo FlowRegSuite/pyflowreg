@@ -12,6 +12,7 @@ from typing import Optional, Union
 DEMO_DATA_URLS = {
     "jupiter.tiff": "https://drive.usercontent.google.com/download?id=12lEhahzKtOZsFgxLzwxnT8JsVBErvzJH&export=download&authuser=0",
     "synth_frames.h5": "https://drive.usercontent.google.com/download?id=10YxHVSdnz0L4WMLR0eIHH6bMxaojpVdY&export=download&authuser=0",
+    "injection.tiff": "https://drive.usercontent.google.com/download?id=15WiDimFrWheSLq6rYvdWMthiuMUb0DR6&export=download&authuser=0",
 }
 
 

@@ -9,6 +9,7 @@ Learn how to use PyFlowReg in different processing scenarios:
 - **[Array-Based Workflow](workflows.md#array-based-workflow)** - In-memory processing for smaller datasets
 - **[File-Based Workflow](workflows.md#file-based-workflow)** - Efficient processing of large video files
 - **[Real-Time Processing](workflows.md#real-time-processing)** - Online motion correction with adaptive reference
+- **[Multi-Session Processing](multi_session.md)** - Aligning multiple recordings across sessions
 
 ## Configuration
 
@@ -40,6 +41,7 @@ Optimizing performance with parallel processing:
 :hidden:
 
 workflows
+multi_session
 configuration
 file_formats
 parallelization
