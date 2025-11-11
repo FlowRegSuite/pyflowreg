@@ -10,13 +10,33 @@ Mirrors MATLAB align_full_v3_checkpoint.m Stage 1 logic.
 import json
 from pathlib import Path
 from time import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from pyflowreg.motion_correction.compensate_recording import compensate_recording
 from pyflowreg.motion_correction.OF_options import OFOptions
 from pyflowreg.session.config import SessionConfig, get_array_task_id
+
+
+def _build_overrides(
+    config: SessionConfig, runtime_override: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Merge config-level and runtime OFOptions overrides."""
+    overrides: Dict[str, Any] = {}
+
+    config_override = config.get_flow_options_override()
+    if config_override:
+        overrides.update(config_override)
+
+    if runtime_override:
+        overrides.update(runtime_override)
+
+    # Session module manages these fields per recording
+    overrides.pop("input_file", None)
+    overrides.pop("output_path", None)
+
+    return overrides
 
 
 def discover_input_files(config: SessionConfig) -> List[Path]:
@@ -479,11 +499,14 @@ def run_stage1(
 
     print("Starting Step 1: Motion correction of each sequence...\n")
 
+    overrides = _build_overrides(config, of_options_override)
+    effective_overrides = overrides or None
+
     # Process each recording
     output_folders = []
     for idx, input_file in enumerate(input_files):
         output_folder = compensate_single_recording(
-            input_file, config, of_options_override
+            input_file, config, effective_overrides
         )
         output_folders.append(output_folder)
 

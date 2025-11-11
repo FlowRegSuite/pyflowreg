@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from pyflowreg.motion_correction.OF_options import OFOptions
 from pyflowreg.session.config import SessionConfig, get_array_task_id
 
 
@@ -351,6 +352,55 @@ class TestSessionConfigBackendParameters:
         assert config.flow_backend == "torch"
         assert config.backend_params["device"] == "cuda:0"
         assert config.backend_params["precision"] == "fp16"
+
+
+class TestSessionConfigFlowOptions:
+    """Test flow_options parsing and loading."""
+
+    def test_inline_dict_override(self, tmp_path):
+        """Inline dictionary should be returned unchanged."""
+        config = SessionConfig(root=tmp_path, flow_options={"alpha": 8, "save_w": True})
+
+        overrides = config.get_flow_options_override()
+
+        assert overrides["alpha"] == 8
+        assert overrides["save_w"] is True
+
+    def test_blank_string_treated_as_none(self, tmp_path):
+        """Blank string should act as unset."""
+        config = SessionConfig(root=tmp_path, flow_options="   ")
+
+        assert config.flow_options is None
+        assert config.get_flow_options_override() == {}
+
+    def test_relative_json_path(self, tmp_path):
+        """Relative JSON path should load using OFOptions."""
+        options_dir = tmp_path / "options"
+        options_dir.mkdir()
+
+        options_path = options_dir / "stage1.json"
+        options = OFOptions(
+            input_file=str(tmp_path / "recording.tif"),
+            output_path=tmp_path / "outputs",
+            alpha=6,
+            save_meta_info=False,
+            save_w=True,
+        )
+        options.save_options(options_path)
+
+        config = SessionConfig(root=tmp_path, flow_options="options/stage1.json")
+
+        overrides = config.get_flow_options_override()
+
+        alpha_override = overrides["alpha"]
+        if isinstance(alpha_override, (tuple, list)):
+            assert all(val == pytest.approx(6) for val in alpha_override)
+        else:
+            assert alpha_override == pytest.approx(6)
+        assert overrides["save_meta_info"] is False
+        assert overrides["save_w"] is True
+        assert "input_file" not in overrides
+        assert "output_path" not in overrides
 
 
 if __name__ == "__main__":

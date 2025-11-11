@@ -104,15 +104,14 @@ from pyflowreg.session.stage1_compensate import run_stage1
 
 config = SessionConfig.from_toml("session.toml")
 
-# Run Stage 1 with custom OF options
-output_folders = run_stage1(
-    config,
-    of_options_override={
-        "quality_setting": "fast",
-        "save_w": True,
-        "buffer_size": 1000,
-    }
-)
+# Override OFOptions directly on the config (or set via TOML/YAML)
+config.flow_options = {
+    "quality_setting": "fast",
+    "save_w": True,
+    "buffer_size": 1000,
+}
+
+output_folders = run_stage1(config)
 ```
 
 ### run_stage1_array
@@ -323,11 +322,12 @@ config = SessionConfig(
 
 # Stage 1: Motion correct each recording
 print("Running Stage 1...")
-output_folders = run_stage1(config, of_options_override={
+config.flow_options = {
     "quality_setting": "balanced",
     "save_valid_idx": True,
-    "save_w": False
-})
+    "save_w": False,
+}
+output_folders = run_stage1(config)
 
 # Stage 2: Align temporal averages
 print("Running Stage 2...")

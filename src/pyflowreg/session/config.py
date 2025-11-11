@@ -7,7 +7,7 @@ session processing parameters.
 
 import os
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -40,6 +40,10 @@ class SessionConfig(BaseModel):
         Optical flow backend (passed to OFOptions)
     backend_params : dict, default={}
         Additional parameters for flow backend
+    flow_options : dict | str | Path, optional
+        Per-sequence optical flow overrides. Can be provided inline as a
+        dictionary or as a path (absolute or relative to ``root``) pointing to
+        an ``OF_options`` JSON file. Path form mirrors MATLAB saved options.
     stage1_quality_setting : Optional[str], default=None
         Quality preset for Stage 1 motion correction ("quality", "balanced", or "fast").
         If None, uses OFOptions default (usually "quality").
@@ -71,6 +75,7 @@ class SessionConfig(BaseModel):
     scheduler: Literal["local", "array", "dask"] = "local"
     flow_backend: str = "flowreg"
     backend_params: Dict = Field(default_factory=dict)
+    flow_options: Optional[Union[Dict[str, Any], Path]] = None
 
     # Stage 1 parameters
     stage1_quality_setting: Optional[str] = None  # Pass through to OF_options
@@ -92,6 +97,23 @@ class SessionConfig(BaseModel):
         if isinstance(v, str):
             return Path(v)
         return v
+
+    @field_validator("flow_options", mode="before")
+    @classmethod
+    def validate_flow_options_field(cls, v):
+        """Normalize flow_options to mapping or filesystem path."""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            return Path(v)
+        if isinstance(v, Path):
+            return v
+        raise TypeError("flow_options must be a mapping or path string")
 
     @field_validator("root")
     @classmethod
@@ -121,6 +143,41 @@ class SessionConfig(BaseModel):
             final_results = self.root / final_results
 
         return output_root, final_results
+
+    def get_flow_options_override(self) -> Dict[str, Any]:
+        """
+        Return OFOptions overrides defined in the config.
+
+        Supports inline dictionaries or JSON files saved via OF_options.
+        """
+        if self.flow_options is None:
+            return {}
+
+        if isinstance(self.flow_options, dict):
+            # Return a shallow copy so callers can mutate freely
+            return dict(self.flow_options)
+
+        flow_path = self.flow_options.expanduser()
+        if not flow_path.is_absolute():
+            flow_path = self.root / flow_path
+
+        if not flow_path.exists():
+            raise ValueError(f"Flow options file not found: {flow_path}")
+
+        from pyflowreg.motion_correction.OF_options import OFOptions
+
+        options = OFOptions.load_options(flow_path)
+        allowed_fields = set(OFOptions.model_fields.keys())
+
+        # Never allow users to override per-recording routing
+        allowed_fields.discard("input_file")
+        allowed_fields.discard("output_path")
+
+        return {
+            key: value
+            for key, value in options.model_dump().items()
+            if key in allowed_fields
+        }
 
     def resolve_center_file(self, input_files):
         """

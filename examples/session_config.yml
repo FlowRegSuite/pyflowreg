@@ -31,11 +31,14 @@ sigma_smooth: 6.0                 # Sigma for Gaussian filter
 alpha_between: 25.0               # Regularization strength (higher = smoother)
 iterations_between: 100           # Solver iterations (higher = more accurate)
 
-# Stage 1 Options (Optional)
-# Override specific parameters for per-recording motion correction
-# of_options_override:
-#   quality_setting: balanced      # Options: fast, balanced, quality
-#   buffer_size: 1000              # Frames per batch
-#   save_w: false                  # Save displacement fields
-#   save_valid_idx: true           # Required for Stage 3
-#   save_meta_info: true           # Save statistics
+# Stage 1 Flow Options (Optional)
+# Provide inline overrides passed to OFOptions
+flow_options:
+  quality_setting: balanced      # Options: fast, balanced, quality
+  buffer_size: 1000              # Frames per batch
+  save_w: false                  # Save displacement fields
+  save_valid_idx: true           # Required for Stage 3
+  save_meta_info: true           # Save statistics
+
+# Alternatively, reference a JSON file saved via OF_options:
+# flow_options: "./saved_options/session_stage1.json"
