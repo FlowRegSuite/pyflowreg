@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0a7] - 2025-12-12
+## [0.1.0a7]
 
 ### Added
 
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dtype preservation**: `VideoReader` and `compensate_recording` pipeline now preserve the input file dtype. Averaging for binning changed dtypes to float in the readers.
 - **BigTIFF**: tiff writers properly use the bigtiff property now.
 
-## [0.1.0a6] - 2025-11-06
+## [0.1.0a6]
 
 ### Added
 
@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Batch size parameter confusion (removed unused parameter from RegistrationConfig)
 - Thread oversubscription in multiprocessing executor (now sets thread limits)
 
-## [0.1.0a5] - 2025-10-23
+## [0.1.0a5]
 
 ### Added
 
