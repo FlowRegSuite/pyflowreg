@@ -281,13 +281,11 @@ class MultiprocessingExecutor(BaseExecutor):
             Tuple of (registered_frames, flow_fields)
         """
         # Normalize inputs to ensure consistent dimensions
-        print(f"batch dtype before {batch.dtype}")
         batch, batch_proc, reference_raw, reference_proc, w_init = (
             self._normalize_inputs(
                 batch, batch_proc, reference_raw, reference_proc, w_init
             )
         )
-        print(f"batch dtype after normalization {batch.dtype}")
 
         T, H, W, C = batch.shape
 
@@ -349,8 +347,6 @@ class MultiprocessingExecutor(BaseExecutor):
             shm.close()
             shm.unlink()
         self.shm_handles = {}
-
-        print(registered.dtype)
         return registered, flow_fields
 
     def get_info(self) -> dict:
