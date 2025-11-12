@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Dtype preservation**: `VideoReader` and `compensate_recording` pipeline now preserve the input file dtype. Averaging for binning changed dtypes to float in the readers.
+- **BigTIFF**: tiff writers properly use the bigtiff property now.
 
 ## [0.1.0a6] - 2025-11-06
 
