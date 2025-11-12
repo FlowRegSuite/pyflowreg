@@ -174,17 +174,16 @@ class TestFullSessionPipeline:
 
         # Stage 1: Per-recording compensation
         print("\n=== Running Stage 1 ===")
-        output_folders = run_stage1(
-            config,
-            of_options_override={
-                "quality_setting": "quality",
-                "min_level": 0,
-                "sigma": [[0.5, 0.5, 0.5]],
-                "alpha": 1,
-                "buffer_size": 32,
-                "reference_frames": list(range(10)),
-            },
-        )
+        config.flow_options = {
+            "quality_setting": "quality",
+            "min_level": 0,
+            "sigma": [[0.5, 0.5, 0.5]],
+            "alpha": 1,
+            "buffer_size": 32,
+            "reference_frames": list(range(10)),
+        }
+
+        output_folders = run_stage1(config)
 
         assert len(output_folders) == 3, "Should process 3 sequences"
 
@@ -273,13 +272,12 @@ class TestFullSessionPipeline:
         config = synthetic_session_data["config"]
 
         # Run Stage 1 first time
-        run_stage1(
-            config,
-            of_options_override={
-                "quality_setting": "fast",
-                "reference_frames": list(range(10)),
-            },
-        )
+        config.flow_options = {
+            "quality_setting": "fast",
+            "reference_frames": list(range(10)),
+        }
+
+        run_stage1(config)
 
         # Enable resume
         config.resume = True
@@ -296,13 +294,12 @@ class TestFullSessionPipeline:
         config = synthetic_session_data["config"]
 
         # Run Stages 1 and 2
-        run_stage1(
-            config,
-            of_options_override={
-                "quality_setting": "fast",
-                "reference_frames": list(range(10)),
-            },
-        )
+        config.flow_options = {
+            "quality_setting": "fast",
+            "reference_frames": list(range(10)),
+        }
+
+        run_stage1(config)
         middle_idx1, _, displacements1 = run_stage2(config)
 
         # Enable resume
@@ -323,13 +320,12 @@ class TestFullSessionPipeline:
         config = synthetic_session_data["config"]
 
         # Run all stages
-        run_stage1(
-            config,
-            of_options_override={
-                "quality_setting": "fast",
-                "reference_frames": list(range(10)),
-            },
-        )
+        config.flow_options = {
+            "quality_setting": "fast",
+            "reference_frames": list(range(10)),
+        }
+
+        run_stage1(config)
         middle_idx, _, displacements = run_stage2(config)
         final_mask1 = run_stage3(config, middle_idx, displacements)
 
@@ -364,14 +360,12 @@ class TestJobArrayIndexing:
 
         # Run with explicit task index (0-based)
         task_index = task_id - 1
-        output_folders = run_stage1(
-            config,
-            of_options_override={
-                "quality_setting": "fast",
-                "reference_frames": list(range(10)),
-            },
-            task_index=task_index,
-        )
+        config.flow_options = {
+            "quality_setting": "fast",
+            "reference_frames": list(range(10)),
+        }
+
+        output_folders = run_stage1(config, task_index=task_index)
 
         # Should only process 1 sequence
         assert len(output_folders) == 1

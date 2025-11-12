@@ -2,6 +2,7 @@
 Tests for compensate_recording with the new executor system.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,7 +13,9 @@ from pyflowreg.motion_correction.compensate_recording import (
     RegistrationConfig,
     compensate_recording,
 )
+from pyflowreg.motion_correction.OF_options import OutputFormat
 from pyflowreg._runtime import RuntimeContext
+from pyflowreg.util.io.factory import get_video_file_reader
 
 
 class TestRegistrationConfig:
@@ -248,6 +251,76 @@ class TestBackwardCompatibility:
         pipeline._setup_reference(reference_frame)
         assert pipeline.reference_raw is not None
         np.testing.assert_array_equal(pipeline.reference_raw, reference_frame)
+
+
+class TestOutputDataTypePreservation:
+    """Ensure compensated videos preserve the source dtype."""
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize(
+        ("output_format", "expected_files"),
+        [
+            (
+                OutputFormat.HDF5,
+                ("compensated.HDF5", "compensated.hdf5"),
+            ),
+            (
+                OutputFormat.TIFF,
+                ("compensated.TIFF", "compensated.tif", "compensated.tiff"),
+            ),
+        ],
+    )
+    def test_compensated_output_dtype_matches_input(
+        self, small_test_video, fast_of_options, output_format, expected_files
+    ):
+        """The dtype of the compensated video should match the source file."""
+        video_path, _ = small_test_video
+        fast_of_options.input_file = video_path
+        fast_of_options.output_format = output_format
+        fast_of_options.buffer_size = 5
+
+        input_reader = get_video_file_reader(video_path)
+        try:
+            input_frame = input_reader[0]  # Force a read so dtype is concrete
+            input_dtype = input_frame.dtype
+        finally:
+            input_reader.close()
+
+        # Fixture creates uint16 data – assert to ensure the test guards the desired case.
+        assert input_dtype == np.dtype(
+            "uint16"
+        ), f"Expected uint16 input video for this test, got {input_dtype}"
+
+        config = RegistrationConfig(
+            n_jobs=1,
+            verbose=False,
+            parallelization="sequential",
+        )
+
+        compensate_recording(fast_of_options, config=config)
+
+        output_dir = Path(fast_of_options.output_path)
+        output_file = next(
+            (
+                output_dir / name
+                for name in expected_files
+                if (output_dir / name).exists()
+            ),
+            None,
+        )
+
+        assert (
+            output_file is not None
+        ), f"Compensated output file not found. Checked: {expected_files}"
+
+        output_reader = get_video_file_reader(str(output_file))
+        try:
+            output_frame = output_reader[0]
+            assert (
+                output_frame.dtype == input_dtype
+            ), f"Expected dtype {input_dtype}, got {output_frame.dtype}"
+        finally:
+            output_reader.close()
 
 
 class TestReferenceFramePreregistration:
