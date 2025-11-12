@@ -60,7 +60,7 @@ class BaseExecutor(ABC):
         - reference_raw and reference_proc are 3D (H,W,C)
         - All arrays are contiguous float32
         """
-        batch = np.ascontiguousarray(self._as4d(batch).astype(np.float32, copy=False))
+        batch = np.ascontiguousarray(self._as4d(batch))
         batch_proc = np.ascontiguousarray(
             self._as4d(batch_proc).astype(np.float32, copy=False)
         )

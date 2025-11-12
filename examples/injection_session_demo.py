@@ -142,6 +142,11 @@ def main():
         resume=True,
         scheduler="local",
         flow_backend="flowreg",
+        flow_options={
+            "quality_setting": "balanced",
+            "bin_size": 5,
+            "buffer_size": 1000,
+        },
         cc_upsample=1,
         sigma_smooth=6.0,
         alpha_between=25.0,
