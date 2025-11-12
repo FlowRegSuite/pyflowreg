@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a7] - 2025-12-12
+
+### Added
+
+- **Flow parameter overrides for sessions**: `SessionConfig` now exposes a `flow_options` field (inline dict or path to a saved `OF_options` JSON), so Stage 1 optical-flow parameters can be managed directly from TOML/YAML configs, the CLI, or job-array invocations without ad-hoc override code.
+
+### Fixed
+
+- **Dtype preservation**: `VideoReader` and `compensate_recording` pipeline now preserve the input file dtype. Averaging for binning changed dtypes to float in the readers.
+
 ## [0.1.0a6] - 2025-11-06
 
 ### Added
@@ -68,7 +78,8 @@ Fixed batch normalization to use reference values.
 
 Initial alpha release with core variational optical flow engine, multi-channel 2D motion correction, and modular I/O system.
 
-[Unreleased]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a6...HEAD
+[Unreleased]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a7...HEAD
+[0.1.0a7]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a6...v0.1.0a7
 [0.1.0a6]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a5...v0.1.0a6
 [0.1.0a5]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a4...v0.1.0a5
 [0.1.0a4]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a3...v0.1.0a4
