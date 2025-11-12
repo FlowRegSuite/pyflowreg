@@ -726,7 +726,9 @@ class TIFFFileWriter(VideoWriter):
         ##else:
         # Append to existing file
         append = self._frame_count > 0
-        with tifffile.TiffWriter(self.file_path, append=append) as tif:
+        with tifffile.TiffWriter(
+            self.file_path, append=append, bigtiff=self.bigtiff, imagej=self.imagej
+        ) as tif:
             # Write each frame individually for append mode
             if frames.ndim == 3:  # (T, H, W)
                 for frame in frames:
