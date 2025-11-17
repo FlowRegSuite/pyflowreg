@@ -1,9 +1,12 @@
 numpy
 scipy
-scikit-imagenice
+scikit-image
 opencv-contrib-python
 h5py
 tifffile
 numba
 pydantic
 hdf5storage
+pyyaml
+Pillow
+tomli
