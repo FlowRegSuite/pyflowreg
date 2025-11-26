@@ -134,14 +134,6 @@ class RuntimeContext:
         except ImportError:
             pass
 
-        # GPU support via JAX
-        try:
-            jax = import_module("jax")
-            if len(jax.devices("gpu")) > 0:
-                cls._config["available_features"].add("gpu_jax")
-        except ImportError:
-            pass
-
         # Intel MKL acceleration
         try:
             import_module("mkl")
