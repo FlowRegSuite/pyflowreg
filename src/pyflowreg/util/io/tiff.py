@@ -86,8 +86,26 @@ class TIFFFileReader(VideoReader):
                 # Fallback to page-based reading
                 self._setup_from_pages()
 
+            # Clamp frame count to actual page count (accounts for bad metadata)
+            self._clamp_frame_count()
+
         except Exception as e:
             raise IOError(f"Failed to open TIFF file: {e}")
+
+    def _clamp_frame_count(self):
+        """Ensure frame_count does not exceed available pages (after deinterleave)."""
+        if self._tiff_file is None:
+            return
+
+        actual_pages = len(self._tiff_file.pages)
+        max_frames = actual_pages // max(1, self.deinterleave)
+
+        if self.frame_count > max_frames:
+            warnings.warn(
+                f"Clamping TIFF frame_count from {self.frame_count} to {max_frames} "
+                f"(pages={actual_pages}, deinterleave={self.deinterleave})"
+            )
+            self.frame_count = max_frames
 
     def _check_scanimage_metadata(self):
         """Check if this is a ScanImage TIFF and parse metadata if so."""
@@ -322,6 +340,9 @@ class TIFFFileReader(VideoReader):
         Returns:
             Array with shape (T, H, W, C)
         """
+        # Ensure frame_count does not exceed available pages
+        self._clamp_frame_count()
+
         # Convert slice to list
         if isinstance(frame_indices, slice):
             start, stop, step = frame_indices.indices(self.frame_count)
