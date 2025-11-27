@@ -21,7 +21,7 @@ scheduler: local                  # Options: local, array, dask
 flow_backend: flowreg             # Options: flowreg, torch, jax
 
 # Backend-specific parameters (optional)
-backend_params:
+backend_params: {}
   # device: cuda:0                # For torch backend
   # precision: float32            # Computation precision
 
