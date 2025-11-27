@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a8]
+
+### Fixed
+
+- **TIFF**: Reader now clamps `frame_count` to available pages (respecting deinterleave) to avoid out-of-range access when metadata overreports SizeT/series length.
+
 ## [0.1.0a7]
 
 ### Added
