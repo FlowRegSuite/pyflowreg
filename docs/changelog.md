@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0a6] - 2025-11-06
+## [0.1.0a8]
+
+### Fixed
+
+- **TIFF**: Reader now clamps `frame_count` to available pages (respecting deinterleave) to avoid out-of-range access when metadata overreports SizeT/series length.
+
+## [0.1.0a7]
+
+### Added
+
+- **Flow parameter overrides for sessions**: `SessionConfig` now exposes a `flow_options` field (inline dict or path to a saved `OF_options` JSON), so Stage 1 optical-flow parameters can be managed directly from TOML/YAML configs, the CLI, or job-array invocations without ad-hoc override code.
+
+### Fixed
+
+- **Dtype preservation**: `VideoReader` and `compensate_recording` pipeline now preserve the input file dtype. Averaging for binning changed dtypes to float in the readers.
+- **BigTIFF**: tiff writers properly use the bigtiff property now.
+
+## [0.1.0a6]
 
 ### Added
 
@@ -28,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Batch size parameter confusion (removed unused parameter from RegistrationConfig)
 - Thread oversubscription in multiprocessing executor (now sets thread limits)
 
-## [0.1.0a5] - 2025-10-23
+## [0.1.0a5]
 
 ### Added
 
@@ -68,7 +85,8 @@ Fixed batch normalization to use reference values.
 
 Initial alpha release with core variational optical flow engine, multi-channel 2D motion correction, and modular I/O system.
 
-[Unreleased]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a6...HEAD
+[Unreleased]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a7...HEAD
+[0.1.0a7]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a6...v0.1.0a7
 [0.1.0a6]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a5...v0.1.0a6
 [0.1.0a5]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a4...v0.1.0a5
 [0.1.0a4]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a3...v0.1.0a4

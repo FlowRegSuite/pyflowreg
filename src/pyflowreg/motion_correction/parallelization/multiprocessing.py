@@ -347,7 +347,6 @@ class MultiprocessingExecutor(BaseExecutor):
             shm.close()
             shm.unlink()
         self.shm_handles = {}
-
         return registered, flow_fields
 
     def get_info(self) -> dict:

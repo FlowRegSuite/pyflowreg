@@ -1,10 +1,10 @@
 # PyFlowReg
 
-**Variational Optical Flow for 2-Photon Microscopy**
+**Python implementation and extension of the Flow-Registration approach for motion correction of 2-photon microscopy videos**
 
 ## Documentation Status
 
-This documentation is currently **largely AI-generated** and under active development. While we strive for accuracy:
+This documentation has been generated with **AI-assistance** and is under active development. While we strive for accuracy:
 
 - Some sections may contain errors or outdated information
 - Not all features may be fully documented

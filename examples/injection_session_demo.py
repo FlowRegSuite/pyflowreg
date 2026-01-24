@@ -96,14 +96,17 @@ def main():
     # injection_0: shifted by -50, -50 (left, up)
     print("  Creating injection_0.tif (shift -50, -50)...")
     video_0 = create_shifted_video(video, shift_x=-50, shift_y=-50, crop_border=50)
+    video_0 = 256 * video_0.astype(np.uint16)
 
     # injection_1: original, cropped
     print("  Creating injection_1.tif (original, cropped)...")
     video_1 = video[:, 50:-50, 50:-50, :]
+    video_1 = 256 * video_1.astype(np.uint16)
 
     # injection_2: shifted by +50, +50 (right, down)
     print("  Creating injection_2.tif (shift +50, +50)...")
     video_2 = create_shifted_video(video, shift_x=50, shift_y=50, crop_border=50)
+    video_2 = 256 * video_2.astype(np.uint16)
 
     print(f"  Shifted video shapes: {video_0.shape}, {video_1.shape}, {video_2.shape}")
 
@@ -142,6 +145,11 @@ def main():
         resume=True,
         scheduler="local",
         flow_backend="flowreg",
+        flow_options={
+            "quality_setting": "balanced",
+            "bin_size": 5,
+            "buffer_size": 1000,
+        },
         cc_upsample=1,
         sigma_smooth=6.0,
         alpha_between=25.0,

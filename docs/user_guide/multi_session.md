@@ -164,11 +164,17 @@ final_results/
 ### Quality vs Speed Trade-offs
 
 ```toml
-[of_options_override]
+[flow_options]
 quality_setting = "fast"     # Options: fast, balanced, quality
-buffer_size = 1000          # Frames per batch
-save_w = false              # Don't save displacement fields
-save_valid_idx = true       # Required for Stage 3
+buffer_size = 1000           # Frames per batch
+save_w = false               # Don't save displacement fields
+save_valid_idx = true        # Required for Stage 3
+```
+
+Alternatively, point to a saved MATLAB/Python options file:
+
+```toml
+flow_options = "./saved_options/session_stage1.json"
 ```
 
 ### GPU Acceleration
@@ -305,7 +311,8 @@ masked_video = video[:, final_mask]  # Shape: (T, n_valid_pixels)
 
 **Solution:** Reduce buffer size:
 ```python
-run_stage1(config, of_options_override={"buffer_size": 500})
+config.flow_options = {"buffer_size": 500}
+run_stage1(config)
 ```
 
 ### Incomplete Files
@@ -381,7 +388,7 @@ for w in displacement_fields:
 ### 4. Save Intermediate Results
 Enable for debugging:
 ```toml
-[of_options_override]
+[flow_options]
 save_w = true           # Save displacement fields
 save_meta_info = true   # Save statistics
 ```
@@ -424,10 +431,10 @@ os.environ['MKL_NUM_THREADS'] = '1'
 Larger batches = better performance but more memory:
 ```python
 # For 16GB RAM
-of_options_override = {"buffer_size": 1000}
+config.flow_options = {"buffer_size": 1000}
 
 # For 64GB RAM
-of_options_override = {"buffer_size": 5000}
+config.flow_options = {"buffer_size": 5000}
 ```
 
 ### Storage Considerations
@@ -435,7 +442,7 @@ of_options_override = {"buffer_size": 5000}
 - Output to parallel filesystem (Lustre/GPFS)
 - Enable compression for final outputs:
   ```python
-  of_options_override = {"compression": "gzip"}
+  config.flow_options = {"compression": "gzip"}
   ```
 
 ## MATLAB Interoperability

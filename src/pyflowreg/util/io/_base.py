@@ -79,6 +79,8 @@ class VideoReader(ABC):
         if self.bin_size == 1:
             return frames
 
+        input_dtype = frames.dtype
+
         if frames.ndim != 4:
             raise ValueError(f"Expected 4D array (T, H, W, C), got {frames.ndim}D")
 
@@ -92,7 +94,7 @@ class VideoReader(ABC):
 
         # Reshape and average
         frames = frames.reshape(T // self.bin_size, self.bin_size, H, W, C)
-        frames = frames.mean(axis=1)
+        frames = frames.mean(axis=1).astype(input_dtype)
 
         return frames
 
@@ -128,7 +130,8 @@ class VideoReader(ABC):
 
             # Read and average frames
             raw_frames = self._read_raw_frames(slice(start, end))
-            return raw_frames.mean(axis=0)  # Average over time, return (H, W, C)
+            binned_frame = raw_frames.mean(axis=0).astype(raw_frames.dtype)
+            return binned_frame
 
         # Handle slice
         elif isinstance(key, slice):
@@ -146,7 +149,9 @@ class VideoReader(ABC):
                 frame_end = min((bin_idx + 1) * self.bin_size, self.frame_count)
 
                 raw_frames = self._read_raw_frames(slice(frame_start, frame_end))
-                binned_frame = raw_frames.mean(axis=0, keepdims=True)
+                binned_frame = raw_frames.mean(axis=0, keepdims=True).astype(
+                    raw_frames.dtype
+                )
                 binned_frames.append(binned_frame)
 
             return np.concatenate(binned_frames, axis=0)
@@ -171,7 +176,9 @@ class VideoReader(ABC):
                 frame_end = min((idx + 1) * self.bin_size, self.frame_count)
 
                 raw_frames = self._read_raw_frames(slice(frame_start, frame_end))
-                binned_frame = raw_frames.mean(axis=0, keepdims=True)
+                binned_frame = raw_frames.mean(axis=0, keepdims=True).astype(
+                    raw_frames.dtype
+                )
                 frames_list.append(binned_frame)
 
             # Return (T, H, W, C) for consistency with slice indexing
