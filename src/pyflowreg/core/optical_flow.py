@@ -154,6 +154,176 @@ def get_motion_tensor_gc(f1, f2, hy, hx):
     return J11, J22, J33, J12, J13, J23
 
 
+def get_motion_tensor_gray(f1, f2, hy, hx):
+    """
+    Compute motion tensor components for gray-value constancy assumption.
+
+    Calculates the motion tensor components that encode the linearized
+    optical flow constraints under the classic brightness (gray-value)
+    constancy assumption. Spatial derivatives are averaged between frames,
+    while the temporal term measures residual brightness changes after
+    warping.
+
+    Parameters
+    ----------
+    f1 : ndarray
+        Reference frame (2D array).
+    f2 : ndarray
+        Moving frame (2D array).
+    hy : float
+        Spatial grid spacing in y-direction.
+    hx : float
+        Spatial grid spacing in x-direction.
+
+    Returns
+    -------
+    J11, J22, J33, J12, J13, J23 : ndarray
+        Motion tensor components used by the optical flow solver. These
+        components encode the linearized gray-value constancy constraints
+        using averaged spatial gradients and the inter-frame difference.
+
+    Notes
+    -----
+    Gray-value constancy assumes that pixel intensities remain unchanged
+    between frames. It is sensitive to lighting changes but provides a
+    simple and fast data term that works well when illumination is stable.
+
+    Gradients are computed on symmetrically padded images to enforce
+    Neumann boundary conditions, with boundary entries zeroed to avoid
+    wrap-around artifacts.
+    """
+    f1p = np.pad(f1, ((1, 1), (1, 1)), mode="symmetric")
+    f2p = np.pad(f2, ((1, 1), (1, 1)), mode="symmetric")
+
+    fy1, fx1 = np.gradient(f1p, hy, hx)
+    fy2, fx2 = np.gradient(f2p, hy, hx)
+
+    fx = 0.5 * (fx1 + fx2)
+    fy = 0.5 * (fy1 + fy2)
+    ft = f2p - f1p
+
+    fx = np.pad(fx[1:-1, 1:-1], 1, mode="symmetric")
+    fy = np.pad(fy[1:-1, 1:-1], 1, mode="symmetric")
+    ft = np.pad(ft[1:-1, 1:-1], 1, mode="symmetric")
+
+    J11 = fx * fx
+    J22 = fy * fy
+    J33 = ft * ft
+    J12 = fx * fy
+    J13 = fx * ft
+    J23 = fy * ft
+
+    for arr in [J11, J22, J33, J12, J13, J23]:
+        arr[:, 0] = 0
+        arr[:, -1] = 0
+        arr[0, :] = 0
+        arr[-1, :] = 0
+
+    return J11, J22, J33, J12, J13, J23
+
+
+def get_motion_tensor_cs(f1, f2, hy, hx):
+    """
+    Compute motion tensor components for census-based constancy assumption.
+
+    Builds a robust motion tensor using a smoothed census transform that
+    matches the relative ordering of neighboring pixels instead of raw
+    intensity values. The tensor aggregates directional differences over a
+    3x3 neighborhood to enforce illumination-invariant constraints between
+    f1 and f2.
+
+    Parameters
+    ----------
+    f1 : ndarray
+        Reference frame (2D array).
+    f2 : ndarray
+        Moving frame (2D array).
+    hy : float
+        Spatial grid spacing in y-direction.
+    hx : float
+        Spatial grid spacing in x-direction.
+
+    Returns
+    -------
+    J11, J22, J33, J12, J13, J23 : ndarray
+        Motion tensor components used in the optical flow solver. These
+        components encode the linearized census constancy constraints,
+        averaged over the eight-connected neighborhood for robustness.
+
+    Notes
+    -----
+    The census transform is invariant to monotonically increasing grey-level
+    changes, improving robustness to illumination variations compared to
+    gray-value or gradient constancy. A smoothed Heaviside approximation
+    controlled by `eps` stabilizes the derivatives while preserving the
+    ordering information that drives the census constraint.
+
+    Symmetric padding enforces Neumann boundary conditions, and the border
+    is zeroed after aggregation to avoid wrap-around effects from the
+    cyclic shifts used during neighbor comparisons.
+
+    References
+    ----------
+    .. [1] Hafner, D., Demetz, O., and Weickert, J. "Why is the Census
+       Transform Good for Robust Optic Flow Computation?", SSVM 2013.
+    """
+    eps = 0.1
+    eps2 = eps * eps
+
+    f1p = np.pad(f1, ((1, 1), (1, 1)), mode="symmetric")
+    f2p = np.pad(f2, ((1, 1), (1, 1)), mode="symmetric")
+
+    offsets = [
+        (dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if not (dy == 0 and dx == 0)
+    ]
+    N = float(len(offsets))
+    scale = 2.0 / N
+
+    J11 = np.zeros_like(f1p, dtype=np.float64)
+    J22 = np.zeros_like(f1p, dtype=np.float64)
+    J33 = np.zeros_like(f1p, dtype=np.float64)
+    J12 = np.zeros_like(f1p, dtype=np.float64)
+    J13 = np.zeros_like(f1p, dtype=np.float64)
+    J23 = np.zeros_like(f1p, dtype=np.float64)
+
+    for dy, dx in offsets:
+        dist = float(np.sqrt((hy * dy) * (hy * dy) + (hx * dx) * (hx * dx)))
+
+        r1 = (np.roll(f1p, shift=(-dy, -dx), axis=(0, 1)) - f1p) / dist
+        r2 = (np.roll(f2p, shift=(-dy, -dx), axis=(0, 1)) - f2p) / dist
+
+        s1 = 0.5 * (1.0 + r1 / np.sqrt(r1 * r1 + eps2))
+        s2 = 0.5 * (1.0 + r2 / np.sqrt(r2 * r2 + eps2))
+
+        s1[0, :] = s1[1, :]
+        s1[-1, :] = s1[-2, :]
+        s1[:, 0] = s1[:, 1]
+        s1[:, -1] = s1[:, -2]
+        s2[0, :] = s2[1, :]
+        s2[-1, :] = s2[-2, :]
+        s2[:, 0] = s2[:, 1]
+        s2[:, -1] = s2[:, -2]
+
+        sy, sx = np.gradient(s1, hy, hx)
+        st = s2 - s1
+
+        J11 += sx * sx
+        J22 += sy * sy
+        J33 += st * st
+        J12 += sx * sy
+        J13 += sx * st
+        J23 += sy * st
+
+    for arr in (J11, J22, J33, J12, J13, J23):
+        arr *= scale
+        arr[:, 0] = 0
+        arr[:, -1] = 0
+        arr[0, :] = 0
+        arr[-1, :] = 0
+
+    return J11, J22, J33, J12, J13, J23
+
+
 def level_solver(
     J11,
     J22,
