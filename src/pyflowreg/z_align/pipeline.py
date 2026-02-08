@@ -12,6 +12,8 @@ PyFlowReg architecture:
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from time import time
 from typing import Any, Dict, Optional
@@ -80,6 +82,13 @@ def _parse_output_format(path: Path, fallback: str = "TIFF") -> str:
     if ext == ".mat":
         return "MAT"
     return fallback
+
+
+def _resolve_n_workers(n_jobs: int) -> int:
+    """Resolve worker count from config style semantics."""
+    if n_jobs == -1:
+        return os.cpu_count() or 4
+    return max(1, int(n_jobs))
 
 
 def _clip_and_cast(frames: np.ndarray, dtype_name: str) -> np.ndarray:
@@ -174,10 +183,11 @@ def _compute_batch_gradients(
     for c in range(C):
         fc = batch_hwct[:, :, c, :]
         fs3 = gaussian_filter(fc, sigma=(spatial_sigma, spatial_sigma, temporal_sigma))
-        for t in range(T):
-            gx, gy = _compute_xy_gradient(fs3[:, :, t])
-            gx_f[:, :, c, t] = gx
-            gy_f[:, :, c, t] = gy
+        gy, gx = np.gradient(
+            fs3.astype(np.float32, copy=False), axis=(0, 1), edge_order=1
+        )
+        gx_f[:, :, c, :] = gx.astype(np.float32, copy=False)
+        gy_f[:, :, c, :] = gy.astype(np.float32, copy=False)
 
     return gx_f, gy_f
 
@@ -208,6 +218,62 @@ def _generate_patch_starts(length: int, patch_size: int, stride: int) -> list[in
     return sorted(set(starts))
 
 
+def _score_patch(
+    patch_bounds: tuple[int, int, int, int],
+    gx_vol: np.ndarray,
+    gy_vol: np.ndarray,
+    gx_f: np.ndarray,
+    gy_f: np.ndarray,
+    z_candidates: np.ndarray,
+    z_indices: np.ndarray,
+    z_min: int,
+    z_max: int,
+    tau_scale: float,
+) -> np.ndarray:
+    """
+    Score one spatial patch against z candidates and return z_hat for all frames.
+
+    Returns
+    -------
+    ndarray, shape (T,)
+        Sub-voxel z estimates for this patch and each time sample.
+    """
+    r1, r2, c1, c2 = patch_bounds
+
+    gx_patch = gx_f[r1:r2, c1:c2, :, :]
+    gy_patch = gy_f[r1:r2, c1:c2, :, :]
+    gx_vol_patch = gx_vol[r1:r2, c1:c2, :, :]
+    gy_vol_patch = gy_vol[r1:r2, c1:c2, :, :]
+    T = gx_patch.shape[3]
+
+    e_patch = np.zeros((T, len(z_candidates)), dtype=np.float64)
+    for ii, z in enumerate(z_indices):
+        ex = np.abs(gx_vol_patch[:, :, :, z][:, :, :, None] - gx_patch)
+        ey = np.abs(gy_vol_patch[:, :, :, z][:, :, :, None] - gy_patch)
+        e_patch[:, ii] = np.sum(ex + ey, axis=(0, 1, 2), dtype=np.float64)
+
+    s_patch = -e_patch
+    k_rel = np.argmax(s_patch, axis=1)
+    km1 = np.maximum(k_rel - 1, 0)
+    kp1 = np.minimum(k_rel + 1, len(z_candidates) - 1)
+    t_idx = np.arange(T)
+
+    s0 = s_patch[t_idx, k_rel]
+    sm = s_patch[t_idx, km1]
+    sp = s_patch[t_idx, kp1]
+    den = sm - (2.0 * s0) + sp
+
+    tau = tau_scale * np.maximum(np.abs(s0), 1.0)
+    den[np.abs(den) < tau] = np.nan
+
+    delta = 0.5 * (sm - sp) / den
+    delta[~np.isfinite(delta)] = 0.0
+    delta = np.clip(delta, -0.5, 0.5)
+
+    z_hat_patch = np.clip(z_candidates[k_rel] + delta, z_min, z_max)
+    return z_hat_patch
+
+
 def _estimate_z_patchwise(
     gx_vol: np.ndarray,
     gy_vol: np.ndarray,
@@ -221,6 +287,8 @@ def _estimate_z_patchwise(
     tau_scale: float,
     z_smooth_sigma_spatial: float,
     z_smooth_sigma_temporal: float,
+    parallelization: str = "sequential",
+    n_jobs: int = -1,
 ) -> np.ndarray:
     """Patch-based z estimation with sub-voxel quadratic refinement."""
     H, W, _, T = gx_f.shape
@@ -230,51 +298,68 @@ def _estimate_z_patchwise(
     z_min = max(0, anchor_z - win_half)
     z_max = min(Z - 1, anchor_z + win_half)
     z_candidates = np.arange(z_min, z_max + 1, dtype=np.float64)
+    z_indices = z_candidates.astype(np.int32, copy=False)
 
     row_starts = _generate_patch_starts(H, patch_size, stride)
     col_starts = _generate_patch_starts(W, patch_size, stride)
-
-    z_accum = np.zeros((H, W, T), dtype=np.float64)
-    w_accum = np.zeros((H, W, T), dtype=np.float64)
-
+    patches: list[tuple[int, int, int, int]] = []
     for r1 in row_starts:
         r2 = min(H, r1 + patch_size)
         for c1 in col_starts:
             c2 = min(W, c1 + patch_size)
+            patches.append((r1, r2, c1, c2))
 
-            gx_patch = gx_f[r1:r2, c1:c2, :, :]
-            gy_patch = gy_f[r1:r2, c1:c2, :, :]
-            gx_vol_patch = gx_vol[r1:r2, c1:c2, :, :]
-            gy_vol_patch = gy_vol[r1:r2, c1:c2, :, :]
+    z_accum = np.zeros((H, W, T), dtype=np.float64)
+    w_accum = np.zeros((H, W, T), dtype=np.float64)
 
-            e_patch = np.zeros((T, len(z_candidates)), dtype=np.float64)
-            for ii, z in enumerate(z_candidates.astype(np.int32)):
-                ex = np.abs(gx_vol_patch[:, :, :, z][:, :, :, None] - gx_patch)
-                ey = np.abs(gy_vol_patch[:, :, :, z][:, :, :, None] - gy_patch)
-                e_patch[:, ii] = np.sum(ex + ey, axis=(0, 1, 2), dtype=np.float64)
+    n_patches = len(patches)
+    patch_scores: list[Optional[np.ndarray]] = [None] * n_patches
+    n_workers = min(_resolve_n_workers(n_jobs), n_patches) if n_patches else 1
+    use_threading = parallelization == "threading" and n_workers > 1
 
-            s_patch = -e_patch
-            k_rel = np.argmax(s_patch, axis=1)
-            km1 = np.maximum(k_rel - 1, 0)
-            kp1 = np.minimum(k_rel + 1, len(z_candidates) - 1)
-            t_idx = np.arange(T)
+    if use_threading:
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    _score_patch,
+                    patch,
+                    gx_vol,
+                    gy_vol,
+                    gx_f,
+                    gy_f,
+                    z_candidates,
+                    z_indices,
+                    z_min,
+                    z_max,
+                    tau_scale,
+                ): patch_idx
+                for patch_idx, patch in enumerate(patches)
+            }
+            for future in as_completed(future_to_idx):
+                patch_idx = future_to_idx[future]
+                patch_scores[patch_idx] = future.result()
+    else:
+        for patch_idx, patch in enumerate(patches):
+            patch_scores[patch_idx] = _score_patch(
+                patch,
+                gx_vol,
+                gy_vol,
+                gx_f,
+                gy_f,
+                z_candidates,
+                z_indices,
+                z_min,
+                z_max,
+                tau_scale,
+            )
 
-            s0 = s_patch[t_idx, k_rel]
-            sm = s_patch[t_idx, km1]
-            sp = s_patch[t_idx, kp1]
-            den = sm - (2.0 * s0) + sp
-
-            tau = tau_scale * np.maximum(np.abs(s0), 1.0)
-            den[np.abs(den) < tau] = np.nan
-
-            delta = 0.5 * (sm - sp) / den
-            delta[~np.isfinite(delta)] = 0.0
-            delta = np.clip(delta, -0.5, 0.5)
-
-            z_hat_patch = np.clip(z_candidates[k_rel] + delta, z_min, z_max)
-
-            z_accum[r1:r2, c1:c2, :] += z_hat_patch[np.newaxis, np.newaxis, :]
-            w_accum[r1:r2, c1:c2, :] += 1.0
+    # Deterministic accumulation: always add patch contributions in row-major order.
+    for patch_idx, (r1, r2, c1, c2) in enumerate(patches):
+        z_hat_patch = patch_scores[patch_idx]
+        if z_hat_patch is None:
+            raise RuntimeError("Missing patch score during z estimation")
+        z_accum[r1:r2, c1:c2, :] += z_hat_patch[np.newaxis, np.newaxis, :]
+        w_accum[r1:r2, c1:c2, :] += 1.0
 
     z_hat = z_accum / np.maximum(w_accum, np.finfo(np.float64).eps)
     z_hat = gaussian_filter(
@@ -293,6 +378,7 @@ def _apply_z_correction(
     H, W, C, T = batch_hwct.shape
     Z = diff_hwcz.shape[3]
     corrected = np.zeros_like(batch_hwct, dtype=np.float32)
+    one = np.float32(1.0)
 
     for t in range(T):
         zh = np.clip(z_hat_hwt[:, :, t], 0.0, float(Z - 1))
@@ -304,7 +390,7 @@ def _apply_z_correction(
             diff_c = diff_hwcz[:, :, c, :]
             d0 = np.take_along_axis(diff_c, z0[:, :, None], axis=2)[:, :, 0]
             d1 = np.take_along_axis(diff_c, z1[:, :, None], axis=2)[:, :, 0]
-            corr = (1.0 - alpha) * d0 + alpha * d1
+            corr = (one - alpha) * d0 + alpha * d1
             corrected[:, :, c, t] = batch_hwct[:, :, c, t] + corr
 
     return corrected
@@ -315,6 +401,7 @@ def _simulate_from_z(volume_hwcz: np.ndarray, z_hat_hwt: np.ndarray) -> np.ndarr
     H, W, C, Z = volume_hwcz.shape
     T = z_hat_hwt.shape[2]
     simulated = np.zeros((H, W, C, T), dtype=np.float32)
+    one = np.float32(1.0)
 
     for t in range(T):
         zh = np.clip(z_hat_hwt[:, :, t], 0.0, float(Z - 1))
@@ -327,7 +414,7 @@ def _simulate_from_z(volume_hwcz: np.ndarray, z_hat_hwt: np.ndarray) -> np.ndarr
             vol_c = volume_hwcz[:, :, c, :]
             v0 = np.take_along_axis(vol_c, z0[:, :, None], axis=2)[:, :, 0]
             v1 = np.take_along_axis(vol_c, z1[:, :, None], axis=2)[:, :, 0]
-            simulated[:, :, c, t] = (1.0 - alpha) * v0 + alpha * v1
+            simulated[:, :, c, t] = (one - alpha) * v0 + alpha * v1
 
     return simulated
 
@@ -545,6 +632,8 @@ def run_stage2(
                 tau_scale=config.parabolic_tau_scale,
                 z_smooth_sigma_spatial=config.z_smooth_sigma_spatial,
                 z_smooth_sigma_temporal=config.z_smooth_sigma_temporal,
+                parallelization=config.parallelization,
+                n_jobs=config.n_jobs,
             )
 
             # Persist z-shifts in MATLAB-style 1-based slice coordinates.

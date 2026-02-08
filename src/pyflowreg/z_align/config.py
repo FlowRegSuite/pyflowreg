@@ -67,6 +67,8 @@ class ZAlignConfig(BaseModel):
     z_smooth_sigma_temporal: float = 1.5
     parabolic_tau_scale: float = 1e-3
     output_dtype: str = "uint16"
+    n_jobs: int = -1
+    parallelization: str = "sequential"
 
     @field_validator(
         "root",
@@ -160,6 +162,26 @@ class ZAlignConfig(BaseModel):
         except TypeError as exc:
             raise ValueError(f"Invalid output_dtype: {v}") from exc
         return v
+
+    @field_validator("n_jobs")
+    @classmethod
+    def _validate_n_jobs(cls, v: int):
+        if v == -1:
+            return v
+        if v < 1:
+            raise ValueError("n_jobs must be -1 or >= 1")
+        return v
+
+    @field_validator("parallelization", mode="before")
+    @classmethod
+    def _validate_parallelization(cls, v):
+        if not isinstance(v, str):
+            raise TypeError("parallelization must be a string")
+        value = v.strip().lower()
+        allowed = {"sequential", "threading"}
+        if value not in allowed:
+            raise ValueError(f"parallelization must be one of {sorted(allowed)}")
+        return value
 
     def _resolve_from_root(self, path: Path) -> Path:
         p = path.expanduser()
