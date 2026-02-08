@@ -1,0 +1,56 @@
+# Example z-align configuration matching the MATLAB z-shift scripts.
+# Assumes these files are present in `root`:
+# - compensated.tiff
+# - file_00004_00001.tif
+
+# === Data Location ===
+root = "."                             # Run from folder containing MATLAB-style inputs
+input_file = "compensated.tiff"        # Recording to z-correct
+volume_input_file = "file_00004_00001.tif"  # Input for reference volume creation
+reference_source_file = "compensated.tiff"  # Used to compute Stage-1 reference image
+
+# MATLAB snippet: get_video_file_reader("compensated.tiff", 10, 20); mean(first 2000)
+reference_source_frames = 2000
+reference_source_buffer_size = 10
+reference_source_bin_size = 20
+
+# === Output Paths ===
+# Kept identical to MATLAB output names/locations.
+output_root = "."
+volume_output_dir = "aligned_stack"
+z_shift_file = "z_shift.HDF5"
+corrected_output_file = "compensated_shift_corrected.tif"
+simulated_output_file = "simulated_from_z.tif"
+
+# === Pipeline Controls ===
+resume = true
+write_corrected = true    # direct z-corrected signal
+write_simulated = true    # baseline simulated from z_shift + volume
+
+# === Stage 1: Reference Volume Build (compensate_recording) ===
+stage1_alpha = 5.0
+stage1_quality_setting = "quality"
+stage1_buffer_size = 500
+stage1_bin_size = 1
+stage1_update_reference = true
+flow_backend = "flowreg"
+
+# === Stage 2: Patch-Based z Estimation ===
+input_buffer_size = 50
+input_bin_size = 1
+volume_buffer_size = 500
+volume_bin_size = 1
+
+win_half = 10
+patch_size = 128
+overlap = 0.75
+
+spatial_sigma = 1.5
+temporal_sigma = 1.5
+z_smooth_sigma_spatial = 5.0
+z_smooth_sigma_temporal = 1.5
+parabolic_tau_scale = 1e-3
+
+output_dtype = "uint16"
+
+[backend_params]
