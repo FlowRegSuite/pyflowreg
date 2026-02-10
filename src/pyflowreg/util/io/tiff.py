@@ -276,8 +276,10 @@ class TIFFFileReader(VideoReader):
                 # Single frame or special format
                 self.frame_count = len(self._tiff_file.pages)
 
-        # Apply deinterleaving to frame count if needed
+        # Apply deinterleaving semantics consistently with page-based setup:
+        # deinterleave N means N interleaved single-channel pages form one frame.
         if self.deinterleave > 1:
+            self.n_channels = self.deinterleave
             self.frame_count = self.frame_count // self.deinterleave
 
         # Get data type
