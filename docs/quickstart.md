@@ -34,8 +34,8 @@ registered, flow = compensate_arr(video, reference, options)
 
 PyFlowReg provides preset quality configurations that control the finest pyramid level computed:
 
-- `quality_setting="fast"` - Computes to pyramid level 3, suitable for preview
-- `quality_setting="balanced"` - Computes to pyramid level 1 (recommended)
+- `quality_setting="fast"` - Computes to pyramid level 6, suitable for preview
+- `quality_setting="balanced"` - Computes to pyramid level 4 (recommended)
 - `quality_setting="quality"` - Computes to pyramid level 0 (full resolution), maximum accuracy
 
 Finer pyramid levels capture smaller motion details but require more computation time.
@@ -90,7 +90,7 @@ config = RegistrationConfig(
 compensate_recording(options, config=config)
 ```
 
-**GPU Acceleration:** PyFlowReg supports GPU backends via `flowreg_cuda` (CuPy) and `flowreg_torch` (PyTorch). Install with `pip install pyflowreg[gpu]` and set `flow_backend="cuda"` or `flow_backend="torch"` in `OFOptions`.
+**GPU Acceleration:** PyFlowReg supports GPU backends via `flowreg_cuda` (CuPy) and `flowreg_torch` (PyTorch). Install with `pip install pyflowreg[gpu]` and set `flow_backend="flowreg_cuda"` or `flow_backend="flowreg_torch"` in `OFOptions`.
 
 ## Multi-Session Processing
 
@@ -123,12 +123,12 @@ final_mask = run_stage3(config, middle_idx, displacements)
 Or use the command-line interface:
 ```bash
 # Run complete pipeline
-pyflowreg-session session.toml
+pyflowreg-session run --config session.toml
 
 # Or run stages individually (useful for HPC)
-pyflowreg-session session.toml --stage 1
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 1
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 ```
 
 See the [Multi-Session Processing Guide](user_guide/multi_session.md) for details on HPC integration and advanced configuration.

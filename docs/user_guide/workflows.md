@@ -1,10 +1,11 @@
 # Workflows
 
-PyFlowReg supports three primary workflows for motion correction, each optimized for different use cases. All workflows support flexible output handling and real-time data access through callbacks.
+PyFlowReg supports three primary workflows for motion correction, each optimized for different use cases, with real-time data access through callbacks.
 
 ## Output Formats
 
-All workflows support configurable output strategies through the `output_format` parameter:
+`output_format` is used by the file-based workflow (`compensate_recording`).
+`compensate_arr` is always in-memory and returns arrays.
 
 ### Standard File Formats
 - `OutputFormat.HDF5` - HDF5 file storage
@@ -18,7 +19,7 @@ All workflows support configurable output strategies through the `output_format`
 ### Example: Choosing Output Strategy
 
 ```python
-from pyflowreg.motion_correction import compensate_arr
+from pyflowreg.motion_correction import compensate_arr, compensate_recording
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
 import numpy as np
 
@@ -26,7 +27,9 @@ video = np.random.rand(100, 256, 256, 2)
 reference = np.mean(video[:10], axis=0)
 
 # Array-based workflow (compensate_arr) always returns arrays
-# For callback-only processing, use compensate_recording with NULL writer
+# NOTE: compensate_arr ignores options.output_format and always returns
+# (registered, w) arrays in memory.
+# For callback-only/no-storage processing, use compensate_recording with OutputFormat.NULL.
 
 # File storage
 options_file = OFOptions(
@@ -169,9 +172,10 @@ compensate_recording(options)
 
 By default, the following files are created in `output_path`:
 
-- `<basename>_corrected.<ext>`: Registered video
-- `<basename>_w.<ext>`: Displacement fields (if `save_w=True`)
-- `<basename>_metadata.json`: Processing metadata and parameters
+- `compensated.<ext>`: Registered video (or `<input>_compensated.<ext>` with `naming_convention="batch"`)
+- `w.h5`: Displacement fields (if `save_w=True`)
+- `idx.hdf`: Per-frame valid masks (if `save_valid_idx=True`)
+- `statistics.npz` and `reference_frame.npy`: Processing metadata (if `save_meta_info=True`)
 
 ### Manual Parallelization Control
 
@@ -322,7 +326,7 @@ Buffer size affects callback frequency and memory usage:
 # Real-time display - smaller buffers for responsive updates
 options_realtime = OFOptions(
     buffer_size=10,  # Update every 10 frames
-    output_format=OutputFormat.NULL
+    output_format=OutputFormat.NULL  # For compensate_recording callback-only mode
 )
 
 # Batch processing - larger buffers for efficiency
@@ -413,6 +417,6 @@ OFOptions(
     save_w=True,                       # Compute displacement fields
     levels=5,                          # Pyramid levels
     iterations=50,                     # Iterations per level
-    quality_setting="balanced",       # fast, balanced, accurate
+    quality_setting="balanced",       # fast, balanced, quality
 )
 ```

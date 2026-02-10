@@ -67,9 +67,9 @@ resume = true
 scheduler = "local"  # or "array" for HPC
 
 # Flow backend configuration
-flow_backend = "flowreg"  # or "torch", "jax", etc.
+flow_backend = "flowreg"  # or "flowreg_torch", "flowreg_cuda", "diso"
 [backend_params]
-device = "cuda:0"  # For torch backend
+device = "cuda:0"  # For flowreg_torch backend
 
 # Stage 2 parameters
 cc_upsample = 4
@@ -173,7 +173,7 @@ Stage 2 respects the `flow_backend` setting in configuration:
 ```python
 config = SessionConfig(
     root="/data/",
-    flow_backend="torch",  # Use PyTorch backend
+    flow_backend="flowreg_torch",  # Use PyTorch backend
     backend_params={"device": "cuda:0"}
 )
 middle_idx, center_file, displacements = run_stage2(config)
@@ -226,18 +226,18 @@ The session module provides a comprehensive CLI:
 
 ```bash
 # Run complete pipeline
-pyflowreg-session session.toml
+pyflowreg-session run --config session.toml
 
 # Run specific stages
-pyflowreg-session session.toml --stage 1
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 1
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 
 # Array job mode (auto-detects task ID)
-pyflowreg-session session.toml --stage 1 --array-job
+pyflowreg-session run --config session.toml --stage 1 --array
 
-# Override parameters
-pyflowreg-session session.toml --no-resume --stage 1
+# Override OFOptions parameters for Stage 1
+pyflowreg-session run --config session.toml --stage 1 --of-params quality_setting=fast
 ```
 
 **Help:**

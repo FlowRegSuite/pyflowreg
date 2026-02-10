@@ -6,9 +6,9 @@ High-level APIs for applying motion correction and motion analysis to microscopy
 
 ### Output Formats
 
-PyFlowReg supports flexible output handling through the `output_format` parameter:
+PyFlowReg supports flexible output handling through the `output_format` parameter for file-based workflows (`compensate_recording`):
 
-- **`OutputFormat.ARRAY`** - Accumulate in memory, return as array (default for array workflow)
+- **`OutputFormat.ARRAY`** - Accumulate in memory, return as array
 - **`OutputFormat.NULL`** - Discard output, callback-only processing (no storage overhead)
 - **`OutputFormat.HDF5`** - HDF5 file storage
 - **`OutputFormat.TIFF`** - TIFF stack output
@@ -27,7 +27,7 @@ All motion correction functions support real-time data access through callbacks:
 Callbacks enable:
 - Real-time visualization without waiting for completion
 - Motion tracking and analysis during processing
-- Memory-efficient processing with `OutputFormat.NULL`
+- Memory-efficient file-based processing with `OutputFormat.NULL`
 - Integration with visualization tools like napari
 
 ## Array-Based Workflow
@@ -50,7 +50,7 @@ compensate_arr(
 ```python
 import numpy as np
 from pyflowreg.motion_correction import compensate_arr
-from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
+from pyflowreg.motion_correction.OF_options import OFOptions
 
 def track_motion(w_batch, start_idx, end_idx):
     """Process displacement fields as they're computed."""
@@ -58,10 +58,9 @@ def track_motion(w_batch, start_idx, end_idx):
         magnitude = np.sqrt(w_batch[i, :, :, 0]**2 + w_batch[i, :, :, 1]**2)
         print(f"Frame {start_idx + i}: mean motion = {np.mean(magnitude):.2f}")
 
-# Configure for callback-only processing
+# Configure array workflow
 options = OFOptions(
-    output_format=OutputFormat.NULL,  # No storage
-    save_w=True,                       # Compute displacement fields
+    quality_setting="balanced",
     buffer_size=20                     # Process 20 frames at a time
 )
 
@@ -71,6 +70,9 @@ registered, w = compensate_arr(
     w_callback=track_motion
 )
 ```
+
+`compensate_arr` always returns arrays in memory and ignores `options.output_format`.
+Use `compensate_recording(..., OFOptions(output_format=OutputFormat.NULL))` for true callback-only/no-storage processing.
 
 ```{eval-rst}
 .. autofunction:: pyflowreg.motion_correction.compensate_arr

@@ -9,10 +9,10 @@ Quality settings control the finest pyramid level computed, balancing speed and 
 ```python
 from pyflowreg.motion_correction import OFOptions
 
-# Fast preview (pyramid level 3)
+# Fast preview (pyramid level 6)
 options = OFOptions(quality_setting="fast")
 
-# Balanced quality (pyramid level 1, recommended)
+# Balanced quality (pyramid level 4, recommended)
 options = OFOptions(quality_setting="balanced")
 
 # Maximum quality (pyramid level 0, full resolution)
@@ -24,8 +24,8 @@ options = OFOptions(quality_setting="quality")
 The optical flow solver operates on multi-scale image pyramids. Lower level numbers mean finer scales:
 
 - **Level 0**: Full resolution - captures finest motion details but slowest
-- **Level 1**: Half resolution - good balance of speed and accuracy
-- **Level 3**: 1/8 resolution - fast preview but misses fine details
+- **Level 4**: Coarser scale used by `quality_setting="balanced"`
+- **Level 6**: Coarse preview scale used by `quality_setting="fast"`
 
 Computation time decreases exponentially with higher minimum levels, while accuracy decreases.
 

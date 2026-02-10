@@ -84,12 +84,12 @@ final_mask = run_stage3(config, middle_idx, displacements)
 **Option B: Command Line**
 ```bash
 # Run complete pipeline
-pyflowreg-session session.toml
+pyflowreg-session run --config session.toml
 
 # Or run stages individually
-pyflowreg-session session.toml --stage 1
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 1
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 ```
 
 ## Deep Dive: Session Pipeline
@@ -181,7 +181,7 @@ flow_options = "./saved_options/session_stage1.json"
 
 Use PyTorch backend with CUDA:
 ```toml
-flow_backend = "torch"
+flow_backend = "flowreg_torch"
 [backend_params]
 device = "cuda:0"
 ```
@@ -297,7 +297,8 @@ print(f"Reference recording: {results['middle_idx']}")
 from pyflowreg.util.io.factory import get_video_file_reader
 
 reader = get_video_file_reader("compensated_outputs/baseline_001/compensated.hdf5")
-video = reader.read_frames(list(range(reader.frame_count)))
+video = reader[:]
+reader.close()
 
 # Apply mask to analysis
 masked_video = video[:, final_mask]  # Shape: (T, n_valid_pixels)
@@ -463,6 +464,6 @@ Mix processing stages:
 matlab -batch "align_full_v3_checkpoint('session.toml')"
 
 # Stages 2-3 in Python
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 ```
