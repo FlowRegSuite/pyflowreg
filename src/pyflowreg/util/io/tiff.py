@@ -92,18 +92,67 @@ class TIFFFileReader(VideoReader):
         except Exception as e:
             raise IOError(f"Failed to open TIFF file: {e}")
 
+    def _should_use_series_mode(self) -> bool:
+        """
+        Decide whether reads should come from tifffile series instead of pages.
+
+        Keep this narrow: contiguous ImageJ-like stacks can have many series
+        frames but only one TIFF page, while most existing paths (including
+        ScanImage/deinterleave) should remain page-based for compatibility.
+        """
+        if self._tiff_file is None or self._tiff_series is None:
+            return False
+        if self._sample_mode or self.deinterleave > 1:
+            return False
+        if self._is_scanimage:
+            return False
+
+        axes = getattr(self._tiff_series, "axes", "")
+        if "T" not in axes:
+            return False
+
+        return len(self._tiff_file.pages) < self.frame_count
+
+    def _series_frame_capacity(self) -> int:
+        """
+        Maximum safe frame count when reading through series mode.
+        """
+        if self._tiff_series is None:
+            return 0
+
+        shape = self._tiff_series.shape
+        axes = self._tiff_series.axes
+
+        if "T" in axes:
+            return int(shape[axes.index("T")])
+        if "Z" in axes:
+            return int(shape[axes.index("Z")])
+        if self._tiff_file is not None:
+            return len(self._tiff_file.pages)
+        return 0
+
     def _clamp_frame_count(self):
-        """Ensure frame_count does not exceed available pages (after deinterleave)."""
+        """
+        Clamp frame_count to what the active read path can safely provide.
+        """
         if self._tiff_file is None:
             return
 
         actual_pages = len(self._tiff_file.pages)
-        max_frames = actual_pages // max(1, self.deinterleave)
+        if self._should_use_series_mode():
+            max_frames = self._series_frame_capacity()
+            source_desc = (
+                f"series_axes={self._tiff_series.axes}, pages={actual_pages}, "
+                f"deinterleave={self.deinterleave}"
+            )
+        else:
+            max_frames = actual_pages // max(1, self.deinterleave)
+            source_desc = f"pages={actual_pages}, deinterleave={self.deinterleave}"
 
         if self.frame_count > max_frames:
             warnings.warn(
                 f"Clamping TIFF frame_count from {self.frame_count} to {max_frames} "
-                f"(pages={actual_pages}, deinterleave={self.deinterleave})"
+                f"({source_desc})"
             )
             self.frame_count = max_frames
 
@@ -361,15 +410,15 @@ class TIFFFileReader(VideoReader):
             (n_frames, self.height, self.width, self.n_channels), dtype=self.dtype
         )
 
-        # if self._sample_mode:
-        #    # Single page with multiple samples - read strips
-        #    self._read_sample_mode(frame_indices, output)
-        # elif self._tiff_series is not None and not self.deinterleave > 1:
-        #    # Use series for efficient reading
-        #    self._read_series_mode(frame_indices, output)
-        # else:
-        #    # Page-based reading (with possible deinterleaving)
-        self._read_page_mode(frame_indices, output)
+        if self._sample_mode:
+            # Single page with multiple samples - read strips
+            self._read_sample_mode(frame_indices, output)
+        elif self._should_use_series_mode():
+            # Contiguous ImageJ-like stacks: series carries full time axis.
+            self._read_series_mode(frame_indices, output)
+        else:
+            # Page-based reading (default, includes deinterleave path).
+            self._read_page_mode(frame_indices, output)
 
         return output
 

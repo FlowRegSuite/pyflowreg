@@ -135,13 +135,6 @@ def test_scanimage_overreported_zstack_count_still_clamps_to_pages(
         reader.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known limitation: contiguous single-page ImageJ hyperstacks are clamped to "
-        "len(pages), so only one frame is visible."
-    ),
-)
 def test_imagej_contiguous_single_page_stack_uses_series_frame_count(tmp_path):
     """
     Specification test for currently unsupported input:
@@ -176,6 +169,70 @@ def test_imagej_contiguous_single_page_stack_uses_series_frame_count(tmp_path):
         reader._ensure_initialized()
         assert reader.frame_count == t_count
         assert len(reader) == t_count
+        frames = reader[:]
+        assert frames.shape == (t_count, height, width, 1)
+        np.testing.assert_array_equal(frames[:, :, :, 0], data)
+    finally:
+        reader.close()
+
+
+def test_single_page_series_time_stack_reads_via_series_mode(tmp_path, monkeypatch):
+    """
+    Deterministic guard for contiguous stack behavior:
+    one TIFF page, but series exposes multiple TYX frames.
+    """
+    t_count, height, width = 6, 5, 4
+    data = np.arange(t_count * height * width, dtype=np.uint16).reshape(
+        t_count, height, width
+    )
+
+    class _FakeSeries:
+        def __init__(self, arr):
+            self._arr = arr
+            self.shape = arr.shape
+            self.axes = "TYX"
+            self.dtype = arr.dtype
+
+        def asarray(self, out=None):
+            return self._arr
+
+    class _FakePage:
+        def __init__(self, first_frame):
+            self._frame = first_frame
+            self.shape = first_frame.shape
+            self.dtype = first_frame.dtype
+            self.samplesperpixel = 1
+            self.imagelength = first_frame.shape[0]
+            self.imagewidth = first_frame.shape[1]
+            self.tags = {}
+
+        def asarray(self):
+            return self._frame
+
+    class _FakeTiffFile:
+        def __init__(self, arr):
+            self.is_scanimage = False
+            self.series = [_FakeSeries(arr)]
+            self.pages = [_FakePage(arr[0])]
+
+        def close(self):
+            return None
+
+    dummy_path = tmp_path / "single_page_series.tif"
+    dummy_path.write_bytes(b"not-a-real-tiff")
+
+    monkeypatch.setattr(
+        "pyflowreg.util.io.tiff.tifffile.TiffFile",
+        lambda _: _FakeTiffFile(data),
+    )
+
+    reader = TIFFFileReader(str(dummy_path), buffer_size=3, bin_size=1)
+    try:
+        reader._ensure_initialized()
+        assert reader.frame_count == t_count
+        assert len(reader) == t_count
+        assert reader.n_channels == 1
+
         frames = reader[:]
         assert frames.shape == (t_count, height, width, 1)
         np.testing.assert_array_equal(frames[:, :, :, 0], data)
