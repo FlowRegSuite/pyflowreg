@@ -47,6 +47,8 @@ class SessionConfig(BaseModel):
     stage1_quality_setting : Optional[str], default=None
         Quality preset for Stage 1 motion correction ("quality", "balanced", or "fast").
         If None, uses OFOptions default (usually "quality").
+    n_workers : int, default=-1
+        Number of workers for Stage 1 compensation (`-1` uses all available CPU cores).
     cc_upsample : int, default=4
         Cross-correlation upsampling factor for rigid initialization
     sigma_smooth : float, default=6.0
@@ -79,6 +81,7 @@ class SessionConfig(BaseModel):
 
     # Stage 1 parameters
     stage1_quality_setting: Optional[str] = None  # Pass through to OF_options
+    n_workers: int = -1
 
     # Stage 2 parameters
     cc_upsample: int = 4

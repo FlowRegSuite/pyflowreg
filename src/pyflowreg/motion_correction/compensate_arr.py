@@ -7,7 +7,10 @@ from typing import Optional, Tuple, Callable, Dict, Any
 import numpy as np
 
 from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
-from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrector
+from pyflowreg.motion_correction.compensate_recording import (
+    BatchMotionCorrector,
+    RegistrationConfig,
+)
 
 
 def compensate_arr(
@@ -22,6 +25,7 @@ def compensate_arr(
     get_displacement_factory: Optional[Callable[..., Callable]] = None,
     w_callback: Optional[Callable[[np.ndarray, int, int], None]] = None,
     registered_callback: Optional[Callable[[np.ndarray, int, int], None]] = None,
+    registration_config: Optional[RegistrationConfig] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Process arrays in memory matching MATLAB compensate_inplace functionality.
@@ -43,6 +47,7 @@ def compensate_arr(
         get_displacement_factory: Factory function override for creating displacement callable
         w_callback: Optional callback for displacement field batches, receives (w_batch, start_idx, end_idx)
         registered_callback: Optional callback for registered frame batches, receives (batch, start_idx, end_idx)
+        registration_config: Optional execution config (executor type/worker count).
 
     Returns:
         Tuple of:
@@ -116,7 +121,7 @@ def compensate_arr(
     options.save_meta_info = False
 
     # Run standard pipeline
-    compensator = BatchMotionCorrector(options)
+    compensator = BatchMotionCorrector(options, config=registration_config)
 
     # Register callbacks if provided
     if progress_callback is not None:

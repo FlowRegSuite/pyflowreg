@@ -145,6 +145,7 @@ def main():
         resume=True,
         scheduler="local",
         flow_backend="flowreg",
+        n_workers=-1,
         flow_options={
             "quality_setting": "balanced",
             "bin_size": 5,

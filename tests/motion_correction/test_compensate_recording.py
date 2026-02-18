@@ -377,6 +377,47 @@ class TestReferenceFramePreregistration:
         assert reference is not None
         assert reference.shape == (h, w, c)
 
+    def test_preregistration_receives_registration_config(self, tmp_path):
+        """Reference preregistration should receive parent RegistrationConfig."""
+        from pyflowreg.util.io.factory import get_video_file_writer
+        from pyflowreg.motion_correction import OFOptions
+
+        video_path = tmp_path / "test_prereg_config.h5"
+        n_frames, h, w, c = 3, 8, 8, 1
+        test_data = np.zeros((n_frames, h, w, c), dtype=np.float32)
+        test_data[:, 2:6, 2:6, 0] = 1.0
+
+        writer = get_video_file_writer(str(video_path), "HDF5")
+        try:
+            writer.write_frames(test_data)
+        finally:
+            writer.close()
+
+        options = OFOptions(
+            input_file=str(video_path),
+            reference_frames=[0, 1, 2],
+            quality_setting="fast",
+            buffer_size=3,
+            output_path=str(tmp_path / "output"),
+        )
+        config = RegistrationConfig(parallelization="sequential", n_jobs=7)
+        captured = {}
+
+        def fake_compensate_arr(frames, reference, options=None, **kwargs):
+            captured["registration_config"] = kwargs.get("registration_config")
+            T, H, W, _ = frames.shape
+            return frames, np.zeros((T, H, W, 2), dtype=np.float32)
+
+        with patch(
+            "pyflowreg.motion_correction.compensate_arr.compensate_arr",
+            side_effect=fake_compensate_arr,
+        ):
+            pipeline = BatchMotionCorrector(options, config)
+            pipeline.video_reader = options.get_video_reader()
+            pipeline._setup_reference()
+
+        assert captured["registration_config"] is config
+
     def test_weight_as_list(self, tmp_path):
         """Test that weight can be specified as a list [1, 2] for backwards compatibility."""
         from pyflowreg.motion_correction import OFOptions

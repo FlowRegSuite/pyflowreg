@@ -25,6 +25,12 @@ class TestSessionConfigBasics:
         assert config.pattern == "*.tif"
         assert config.resume is True
         assert config.scheduler == "local"
+        assert config.n_workers == -1
+
+    def test_n_workers_config(self, tmp_path):
+        """Test configuring explicit Stage 1 worker count."""
+        config = SessionConfig(root=tmp_path, n_workers=4)
+        assert config.n_workers == 4
 
     def test_root_must_exist(self, tmp_path):
         """Test that root directory must exist."""

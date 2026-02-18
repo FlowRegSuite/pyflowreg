@@ -14,7 +14,10 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from pyflowreg.motion_correction.compensate_recording import compensate_recording
+from pyflowreg.motion_correction.compensate_recording import (
+    RegistrationConfig,
+    compensate_recording,
+)
 from pyflowreg.motion_correction.OF_options import OFOptions
 from pyflowreg.session.config import SessionConfig, get_array_task_id
 
@@ -414,7 +417,8 @@ def compensate_single_recording(
     compensated_h5 = next((p for p in candidates if p.exists()), candidates[0])
 
     if not compensated_h5.exists():
-        compensate_recording(options)
+        reg_config = RegistrationConfig(n_jobs=config.n_workers)
+        compensate_recording(options, config=reg_config)
         # Re-check both candidates after compensation
         compensated_h5 = next((p for p in candidates if p.exists()), candidates[0])
     else:

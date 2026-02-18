@@ -66,9 +66,12 @@ class BatchMotionCorrector:
 
         # Get number of workers
         if self.config.n_jobs == -1:
-            import os
+            runtime_workers = RuntimeContext.get("max_workers", None)
+            if runtime_workers is None:
+                import os
 
-            self.n_workers = os.cpu_count() or 4
+                runtime_workers = os.cpu_count() or 4
+            self.n_workers = int(runtime_workers)
         else:
             self.n_workers = self.config.n_jobs
 
@@ -327,7 +330,7 @@ class BatchMotionCorrector:
         """Setup reference frame and weights."""
         if reference_frame is None:
             self.reference_raw = self.options.get_reference_frame(
-                self.video_reader
+                self.video_reader, registration_config=self.config
             ).astype(np.float64)
         else:
             self.reference_raw = reference_frame.astype(np.float64)
