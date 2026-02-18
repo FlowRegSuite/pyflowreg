@@ -558,6 +558,7 @@ class OFOptions(BaseModel):
                 a_data=self.a_data,
                 constancy_assumption=self.constancy_assumption,
                 weight=weight_2d,
+                buffer_size=self.buffer_size,
             )
 
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
