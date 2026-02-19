@@ -107,6 +107,7 @@ config = SessionConfig(
     root="/data/experiment/",
     pattern="recording_*.tif",
     output_root="compensated",
+    n_workers=-1,  # Stage 1 workers (-1 = all CPU cores)
     resume=True  # Enable resume for crash safety
 )
 

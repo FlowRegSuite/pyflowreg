@@ -52,6 +52,7 @@ final_results = "final_results"
 # Processing options
 resume = true
 scheduler = "local"
+n_workers = -1        # Stage 1 workers (-1 = all CPU cores)
 
 # Optical flow backend
 flow_backend = "flowreg"

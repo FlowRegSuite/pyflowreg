@@ -30,6 +30,7 @@ from pyflowreg.session.config import SessionConfig
             - final_results
             - resume
             - scheduler
+            - n_workers
             - flow_backend
             - backend_params
             - cc_upsample
@@ -65,6 +66,7 @@ output_root = "compensated_outputs"
 final_results = "final_results"
 resume = true
 scheduler = "local"  # or "array" for HPC
+n_workers = -1       # Stage 1 workers (-1 = all CPU cores)
 
 # Flow backend configuration
 flow_backend = "flowreg"  # or "flowreg_torch", "flowreg_cuda", "diso"
@@ -103,6 +105,7 @@ from pyflowreg.session import SessionConfig
 from pyflowreg.session.stage1_compensate import run_stage1
 
 config = SessionConfig.from_toml("session.toml")
+config.n_workers = -1
 
 # Override OFOptions directly on the config (or set via TOML/YAML)
 config.flow_options = {
@@ -313,6 +316,7 @@ config = SessionConfig(
     output_root="compensated",
     final_results="results",
     resume=True,
+    n_workers=-1,
     flow_backend="flowreg",
     cc_upsample=4,
     sigma_smooth=6.0,
