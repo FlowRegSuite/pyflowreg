@@ -333,7 +333,7 @@ class OFOptions(BaseModel):
         # Handle scalar or 1D weights
         if w.ndim <= 1:
             if w.size == 1:
-                return float(w)
+                return float(w.item())
 
             # Truncate if too many weights
             if w.size > n_channels:
