@@ -408,8 +408,14 @@ class TestReferenceFramePreregistration:
             T, H, W, _ = frames.shape
             return frames, np.zeros((T, H, W, 2), dtype=np.float32)
 
-        with patch(
-            "pyflowreg.motion_correction.compensate_arr.compensate_arr",
+        import importlib
+
+        compensate_arr_module = importlib.import_module(
+            "pyflowreg.motion_correction.compensate_arr"
+        )
+        with patch.object(
+            compensate_arr_module,
+            "compensate_arr",
             side_effect=fake_compensate_arr,
         ):
             pipeline = BatchMotionCorrector(options, config)
