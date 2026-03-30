@@ -407,6 +407,7 @@ class BatchMotionCorrector:
             "iterations": self.options.iterations,
             "a_smooth": self.options.a_smooth,
             "a_data": self.options.a_data,
+            "gnc_schedule": self.options.gnc_schedule,
         }
 
         if w_init is not None:
@@ -445,6 +446,7 @@ class BatchMotionCorrector:
             "iterations": self.options.iterations,
             "a_smooth": self.options.a_smooth,
             "a_data": self.options.a_data,
+            "gnc_schedule": self.options.gnc_schedule,
         }
 
         # Get interpolation method

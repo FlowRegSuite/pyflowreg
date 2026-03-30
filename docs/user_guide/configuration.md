@@ -47,8 +47,14 @@ options = OFOptions(
     # Nonlinear diffusion parameters
     a_smooth=1.0,  # Smoothness diffusion parameter
     a_data=0.45,  # Data term diffusion parameter
+
+    # Optional solver-level GNC stages for sublinear penalties
+    gnc_schedule=(0.0, 0.5, 1.0),
 )
 ```
+
+Set `gnc_schedule=None` to keep the legacy solver path. When provided, PyFlowReg reruns
+the pyramid once per stage, warm-starting each stage from the previous result.
 
 ### Alpha (Smoothness Weight)
 

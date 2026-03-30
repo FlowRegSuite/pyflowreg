@@ -38,6 +38,11 @@ The sublinear value follows best practices from {cite}`sun2010secrets` for handl
 - **Edge preservation**: Sublinear diffusion allows the model to handle brightness discontinuities at cell boundaries more gracefully
 - **Empirical validation**: This value has been validated across diverse 2-photon imaging datasets {cite}`flotho2022flow`
 
+Optional GNC staging can be enabled with `gnc_schedule`, for example
+`(0.0, 0.5, 1.0)`. This reruns the pyramid from quadratic to robust stages
+while keeping the final `a_data` and `a_smooth` values unchanged. Leaving
+`gnc_schedule=None` preserves the legacy solver path.
+
 ## Spatial-Temporal Filtering: `sigma`
 
 The `sigma` parameter controls Gaussian filtering applied to the video data before optical flow computation. It is specified as `[σx, σy, σt]` for each channel, where:

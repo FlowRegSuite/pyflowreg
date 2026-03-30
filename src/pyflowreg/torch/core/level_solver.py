@@ -28,6 +28,7 @@ def level_solver_rbgs_torch(
     omega=1.95,
     eps=1e-6,
     update_lag_semantics: str = "torch",
+    gnc_beta=None,
 ):
     with torch.no_grad():
         m, n, K = J11.shape
@@ -36,6 +37,12 @@ def level_solver_rbgs_torch(
         ax = torch.as_tensor(alpha[0], dtype=u.dtype, device=u.device) / (hx * hx)
         ay = torch.as_tensor(alpha[1], dtype=u.dtype, device=u.device) / (hy * hy)
         epsv = torch.as_tensor(eps, dtype=u.dtype, device=u.device)
+        use_gnc = gnc_beta is not None
+        beta = None
+        mix_quadratic = None
+        if use_gnc:
+            beta = torch.as_tensor(float(gnc_beta), dtype=u.dtype, device=u.device)
+            mix_quadratic = 1.0 - beta
         if isinstance(a_data, (float, int)):
             A_vec = torch.full(
                 (1, 1, K), float(a_data), dtype=J11.dtype, device=J11.device
@@ -82,6 +89,11 @@ def level_solver_rbgs_torch(
                 )
                 E.clamp_min_(0)
                 psi_data = A_vec * (E + epsv) ** (A_vec - 1)
+                if use_gnc:
+                    data_mask = (A_vec > 0) & (A_vec < 1)
+                    psi_data = torch.where(
+                        data_mask, mix_quadratic + beta * psi_data, psi_data
+                    )
                 if a_smooth != 1:
                     uc = u + du
                     vc = v + dv
@@ -95,6 +107,8 @@ def level_solver_rbgs_torch(
                     a_s = torch.as_tensor(a_smooth, dtype=u.dtype, device=u.device)
                     psi_smooth[c1, c2] = a_s * (mag[c1, c2] + epsv) ** (a_s - 1)
                     _set_boundary2d_(psi_smooth)
+                    if use_gnc and 0.0 < float(a_smooth) < 1.0:
+                        psi_smooth = mix_quadratic + beta * psi_smooth
                 else:
                     psi_smooth.fill_(1)
                 denom_u_data = torch.sum(W * psi_data * J11, dim=2)
