@@ -19,6 +19,7 @@ final_results = "final_results"      # Stage 2-3 outputs (session-wide)
 # === Processing Options ===
 resume = true                         # Skip completed steps on rerun
 scheduler = "local"                   # Options: "local", "array", "dask"
+n_workers = -1                        # Stage 1 workers (-1 = all CPU cores)
 
 # === Optical Flow Backend ===
 # Choose the backend for displacement computation

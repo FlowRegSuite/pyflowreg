@@ -364,7 +364,7 @@ class OFOptions(BaseModel):
         # Handle scalar or 1D weights
         if w.ndim <= 1:
             if w.size == 1:
-                return float(w)
+                return float(w.item())
 
             # Truncate if too many weights
             if w.size > n_channels:
@@ -467,7 +467,9 @@ class OFOptions(BaseModel):
         return self._video_writer
 
     def get_reference_frame(
-        self, video_reader: Optional[VideoReader] = None
+        self,
+        video_reader: Optional[VideoReader] = None,
+        registration_config: Optional[Any] = None,
     ) -> Union[np.ndarray, List[np.ndarray]]:
         """Get reference frame(s), with optional preregistration."""
         if self.n_references > 1:
@@ -476,7 +478,9 @@ class OFOptions(BaseModel):
             )
             # Create a copy with n_references=1 to avoid recursion
             single_ref_opts = self.model_copy(update={"n_references": 1})
-            ref = single_ref_opts.get_reference_frame(video_reader)
+            ref = single_ref_opts.get_reference_frame(
+                video_reader, registration_config=registration_config
+            )
             return [ref] * self.n_references
 
         # Direct ndarray
@@ -589,6 +593,7 @@ class OFOptions(BaseModel):
                 a_data=self.a_data,
                 constancy_assumption=self.constancy_assumption,
                 weight=weight_2d,
+                buffer_size=self.buffer_size,
             )
 
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
@@ -596,7 +601,10 @@ class OFOptions(BaseModel):
 
             # Compensate: compute displacement fields using normalized frames
             _, w_fields = compensate_arr(
-                frames_for_compensation, ref_mean, options=prereg_options
+                frames_for_compensation,
+                ref_mean,
+                options=prereg_options,
+                registration_config=registration_config,
             )
 
             # Warp the RAW frames using the computed displacement fields

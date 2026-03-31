@@ -16,6 +16,7 @@ final_results: final_results      # Stage 2-3 outputs (session-wide)
 # Processing Options
 resume: true                      # Skip completed steps on rerun
 scheduler: local                  # Options: local, array, dask
+n_workers: -1                     # Reduce n_workers on machines with low memory. -1 uses all available processors
 
 # Optical Flow Backend
 flow_backend: flowreg             # Options: flowreg, torch, jax
