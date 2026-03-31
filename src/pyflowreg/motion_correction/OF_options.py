@@ -130,6 +130,11 @@ class OFOptions(BaseModel):
         None,
         description="Optional graduated non-convexity stage weights from 0.0 to 1.0",
     )
+    warping_steps: Optional[StrictInt] = Field(
+        None,
+        ge=1,
+        description="Optional warp/relinearize steps per pyramid level in GNC mode",
+    )
 
     # Preprocessing
     sigma: Any = Field(
@@ -725,6 +730,7 @@ class OFOptions(BaseModel):
             "a_data": self.a_data,
             "a_smooth": self.a_smooth,
             "gnc_schedule": self.gnc_schedule,
+            "warping_steps": self.warping_steps,
             "const_assumption": self.constancy_assumption.value,  # Fixed: use const_assumption for API compatibility
         }
 

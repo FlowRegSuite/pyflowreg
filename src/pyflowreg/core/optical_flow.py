@@ -411,6 +411,17 @@ def normalize_gnc_schedule(gnc_schedule):
     return np.ascontiguousarray(schedule)
 
 
+def normalize_warping_steps(warping_steps):
+    """Validate and normalize an optional number of warping steps."""
+    if warping_steps is None:
+        return None
+
+    steps = int(warping_steps)
+    if steps < 1:
+        raise ValueError("warping_steps must be a positive integer")
+    return steps
+
+
 def _solve_displacement_stage(
     fixed,
     moving,
@@ -547,6 +558,151 @@ def _solve_displacement_stage(
     return w
 
 
+def _solve_displacement_stage_gnc(
+    fixed,
+    moving,
+    alpha,
+    update_lag,
+    iterations,
+    min_level,
+    levels,
+    eta,
+    a_smooth,
+    a_data_arr,
+    uv,
+    weight,
+    level_solver_backend,
+    gnc_beta,
+    warping_steps,
+):
+    """Solve one GNC stage with repeated warp/relinearize steps per level."""
+    m, n, n_channels = fixed.shape
+    f1_low = fixed
+    f2_low = moving
+    max_level_y = warpingDepth(eta, levels, m, m)
+    max_level_x = warpingDepth(eta, levels, n, n)
+    max_level = min(max_level_x, max_level_y) * 4
+    max_level_y = min(max_level_y, max_level)
+    max_level_x = min(max_level_x, max_level)
+    if max(max_level_x, max_level_y) <= min_level:
+        min_level = max(max_level_x, max_level_y) - 1
+    if min_level < 0:
+        min_level = 0
+    if uv is not None:
+        u_init = uv[:, :, 0]
+        v_init = uv[:, :, 1]
+    else:
+        u_init = np.zeros((m, n), dtype=np.float64)
+        v_init = np.zeros((m, n), dtype=np.float64)
+
+    solver_func = (
+        level_solver_backend if level_solver_backend is not None else level_solver
+    )
+    u = None
+    v = None
+    for i in range(max(max_level_x, max_level_y), min_level - 1, -1):
+        level_size = (
+            int(round(m * eta ** (min(i, max_level_y)))),
+            int(round(n * eta ** (min(i, max_level_x)))),
+        )
+        f1_level = resize(f1_low, level_size)
+        f2_level = resize(f2_low, level_size)
+        if f1_level.ndim == 2:
+            f1_level = f1_level[:, :, np.newaxis]
+            f2_level = f2_level[:, :, np.newaxis]
+        current_hx = float(m) / f1_level.shape[0]
+        current_hy = float(n) / f1_level.shape[1]
+
+        if i == max(max_level_x, max_level_y):
+            u = add_boundary(resize(u_init, level_size))
+            v = add_boundary(resize(v_init, level_size))
+        else:
+            u = add_boundary(resize(u[1:-1, 1:-1], level_size))
+            v = add_boundary(resize(v[1:-1, 1:-1], level_size))
+
+        u = np.ascontiguousarray(u)
+        v = np.ascontiguousarray(v)
+
+        weight_level = resize(weight, f1_level.shape[:2])
+        weight_level = cv2.copyMakeBorder(
+            weight_level, 1, 1, 1, 1, borderType=cv2.BORDER_CONSTANT, value=0.0
+        )
+        if weight_level.ndim < 3:
+            weight_level = weight_level[:, :, np.newaxis]
+        weight_level = np.ascontiguousarray(weight_level)
+
+        if i == min_level:
+            alpha_scaling = 1
+        else:
+            alpha_scaling = eta ** (-0.5 * i)
+        alpha_tmp = [alpha_scaling * alpha[j] for j in range(len(alpha))]
+
+        for _ in range(warping_steps):
+            tmp = imregister_wrapper(
+                f2_level,
+                u[1:-1, 1:-1] / current_hy,
+                v[1:-1, 1:-1] / current_hx,
+                f1_level,
+            )
+            if tmp.ndim == 2:
+                tmp = tmp[:, :, np.newaxis]
+
+            J_size = (f1_level.shape[0] + 2, f1_level.shape[1] + 2, n_channels)
+            J11 = np.zeros(J_size, dtype=np.float64)
+            J22 = np.zeros(J_size, dtype=np.float64)
+            J33 = np.zeros(J_size, dtype=np.float64)
+            J12 = np.zeros(J_size, dtype=np.float64)
+            J13 = np.zeros(J_size, dtype=np.float64)
+            J23 = np.zeros(J_size, dtype=np.float64)
+            for ch in range(n_channels):
+                J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(
+                    f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
+                )
+                J11[:, :, ch] = J11_ch
+                J22[:, :, ch] = J22_ch
+                J33[:, :, ch] = J33_ch
+                J12[:, :, ch] = J12_ch
+                J13[:, :, ch] = J13_ch
+                J23[:, :, ch] = J23_ch
+
+            du, dv = solver_func(
+                np.ascontiguousarray(J11),
+                np.ascontiguousarray(J22),
+                np.ascontiguousarray(J33),
+                np.ascontiguousarray(J12),
+                np.ascontiguousarray(J13),
+                np.ascontiguousarray(J23),
+                weight_level,
+                u,
+                v,
+                alpha_tmp,
+                iterations,
+                update_lag,
+                0,
+                a_data_arr,
+                a_smooth,
+                current_hx,
+                current_hy,
+                gnc_beta,
+            )
+            u = u + du
+            v = v + dv
+            if min(level_size) > 5:
+                u = add_boundary(
+                    median_filter(u[1:-1, 1:-1], size=(5, 5), mode="mirror")
+                )
+                v = add_boundary(
+                    median_filter(v[1:-1, 1:-1], size=(5, 5), mode="mirror")
+                )
+
+    w = np.zeros((u.shape[0] - 2, u.shape[1] - 2, 2), dtype=np.float64)
+    w[:, :, 0] = u[1:-1, 1:-1]
+    w[:, :, 1] = v[1:-1, 1:-1]
+    if min_level > 0:
+        w = cv2.resize(w, (n, m), interpolation=cv2.INTER_CUBIC)
+    return w
+
+
 def get_displacement(
     fixed,
     moving,
@@ -563,6 +719,7 @@ def get_displacement(
     weight=None,
     level_solver_backend=None,
     gnc_schedule=None,
+    warping_steps=None,
 ):
     """
     Compute optical flow displacement field using variational approach.
@@ -610,6 +767,9 @@ def get_displacement(
         Opt-in stage weights interpolating from quadratic (0.0) to fully robust
         (1.0). Each stage reruns the pyramid with the previous stage result used
         as initialization.
+    warping_steps : int, optional
+        Number of warp/relinearize steps per pyramid level in optional GNC mode.
+        If omitted, GNC defaults to 10 steps per level. Ignored when GNC is off.
     """
     assert (
         fixed.ndim == moving.ndim
@@ -656,6 +816,7 @@ def get_displacement(
     a_data_arr = np.ascontiguousarray(a_data_arr)
 
     gnc_schedule_arr = normalize_gnc_schedule(gnc_schedule)
+    warping_steps = normalize_warping_steps(warping_steps)
     if gnc_schedule_arr is None:
         return _solve_displacement_stage(
             fixed,
@@ -675,8 +836,9 @@ def get_displacement(
         )
 
     flow = uv
+    effective_warping_steps = 10 if warping_steps is None else warping_steps
     for gnc_beta in gnc_schedule_arr:
-        flow = _solve_displacement_stage(
+        flow = _solve_displacement_stage_gnc(
             fixed,
             moving,
             alpha,
@@ -691,5 +853,6 @@ def get_displacement(
             weight,
             level_solver_backend,
             float(gnc_beta),
+            effective_warping_steps,
         )
     return flow

@@ -186,6 +186,17 @@ class TestGNCScheduleValidation:
         with pytest.raises(ValueError, match=match):
             OFOptions(gnc_schedule=schedule)
 
+    def test_warping_steps_positive_integer(self):
+        """Test valid warping_steps values are preserved."""
+        opts = OFOptions(warping_steps=10)
+
+        assert opts.warping_steps == 10
+
+    def test_warping_steps_invalid(self):
+        """Test invalid warping_steps values raise validation errors."""
+        with pytest.raises(ValueError, match="greater than or equal to 1"):
+            OFOptions(warping_steps=0)
+
 
 class TestQualitySettingEffectiveMinLevel:
     """Test quality setting affects effective_min_level."""
@@ -322,6 +333,14 @@ class TestToDict:
         params = opts.to_dict()
 
         assert params["gnc_schedule"] == (0.0, 0.5, 1.0)
+
+    def test_to_dict_includes_warping_steps(self):
+        """Test to_dict forwards the optional GNC warping step count."""
+        opts = OFOptions(warping_steps=10)
+
+        params = opts.to_dict()
+
+        assert params["warping_steps"] == 10
 
 
 class TestExampleConfigurations:
