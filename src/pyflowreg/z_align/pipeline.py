@@ -6,7 +6,7 @@ PyFlowReg architecture:
 
 1) Build/load a compensated reference volume.
 2) Estimate per-frame/per-pixel z-shifts and optionally write z-corrected data.
-3) Optionally simulate a baseline recording from the estimated z-shifts.
+3) Optionally simulate a z-shift-only recording from the estimated z-shifts.
 """
 
 from __future__ import annotations
@@ -25,6 +25,22 @@ from pyflowreg.motion_correction.OF_options import OFOptions
 from pyflowreg.motion_correction.compensate_recording import compensate_recording
 from pyflowreg.util.io.factory import get_video_file_reader, get_video_file_writer
 from pyflowreg.z_align.config import ZAlignConfig
+
+
+_STAGE1_PROTECTED_OF_FIELDS = {
+    "input_file",
+    "output_path",
+    "output_format",
+    "output_file_name",
+    "reference_frames",
+}
+
+_RECORDING_PREALIGN_PROTECTED_OF_FIELDS = {
+    "input_file",
+    "output_path",
+    "output_format",
+    "output_file_name",
+}
 
 
 def load_or_create_status(output_root: Path) -> Dict[str, Any]:
@@ -98,21 +114,28 @@ def _clip_and_cast(frames: np.ndarray, dtype_name: str) -> np.ndarray:
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
         arr = np.clip(arr, info.min, info.max)
+        arr = np.rint(arr)
     return arr.astype(dtype, copy=False)
 
 
-def _compute_reference_from_source(config: ZAlignConfig) -> Optional[np.ndarray]:
+def _compute_reference_from_source(
+    config: ZAlignConfig, source_path: Optional[Path] = None
+) -> Optional[np.ndarray]:
     """
-    Build a reference image from ``reference_source_file``.
+    Build a reference image from the configured or provided reference source.
 
     Mirrors the MATLAB step:
     ``reference = mean(reader.read_frames(1:N), 4)``.
     """
-    ref_source = config.resolve_reference_source_file()
+    ref_source = (
+        source_path
+        if source_path is not None
+        else config.resolve_reference_source_file()
+    )
     if ref_source is None:
         return None
     if not ref_source.exists():
-        raise FileNotFoundError(f"reference_source_file not found: {ref_source}")
+        raise FileNotFoundError(f"Reference source file not found: {ref_source}")
 
     reader = get_video_file_reader(
         str(ref_source),
@@ -141,8 +164,16 @@ def _build_stage1_overrides(
         overrides.update(config_override)
     if runtime_override:
         overrides.update(runtime_override)
-    overrides.pop("input_file", None)
-    overrides.pop("output_path", None)
+    for field in _STAGE1_PROTECTED_OF_FIELDS:
+        overrides.pop(field, None)
+    return overrides
+
+
+def _build_recording_prealign_overrides(config: ZAlignConfig) -> Dict[str, Any]:
+    """Return workflow-safe OFOptions overrides for recording prealignment."""
+    overrides = config.get_recording_prealign_overrides()
+    for field in _RECORDING_PREALIGN_PROTECTED_OF_FIELDS:
+        overrides.pop(field, None)
     return overrides
 
 
@@ -364,7 +395,11 @@ def _estimate_z_patchwise(
     z_hat = z_accum / np.maximum(w_accum, np.finfo(np.float64).eps)
     z_hat = gaussian_filter(
         z_hat,
-        sigma=(z_smooth_sigma_spatial, z_smooth_sigma_spatial, z_smooth_sigma_temporal),
+        sigma=(
+            z_smooth_sigma_spatial,
+            z_smooth_sigma_spatial,
+            z_smooth_sigma_temporal,
+        ),
     )
     return np.clip(z_hat, z_min, z_max)
 
@@ -436,7 +471,7 @@ def _load_volume(config: ZAlignConfig, volume_path: Path) -> np.ndarray:
     reader = get_video_file_reader(
         str(volume_path),
         buffer_size=config.volume_buffer_size,
-        bin_size=config.volume_bin_size,
+        bin_size=config.effective_volume_bin_size(),
     )
     try:
         volume_thwc = _ensure_thwc(reader[:]).astype(np.float32, copy=False)
@@ -480,11 +515,6 @@ def run_stage1(
         print(f"Stage 1: using existing reference volume {volume_path}")
         return volume_path
 
-    expected_volume = _find_compensated_volume(volume_output_dir)
-    if config.resume and status.get("stage1") == "done" and expected_volume.exists():
-        print(f"Stage 1: reusing existing volume {expected_volume}")
-        return expected_volume
-
     volume_input_file = config.resolve_volume_input_file()
     if volume_input_file is None:
         raise ValueError(
@@ -493,7 +523,26 @@ def run_stage1(
     if not volume_input_file.exists():
         raise FileNotFoundError(f"volume_input_file not found: {volume_input_file}")
 
+    if not config.prealign_stack:
+        status["stage1"] = "done"
+        status["volume_path"] = str(volume_input_file)
+        status["prealign_stack"] = False
+        save_status(output_root, status)
+        print(f"Stage 1: using raw reference stack {volume_input_file}")
+        return volume_input_file
+
+    expected_volume = _find_compensated_volume(volume_output_dir)
+    if config.resume and status.get("stage1") == "done" and expected_volume.exists():
+        print(f"Stage 1: reusing existing volume {expected_volume}")
+        return expected_volume
+
     reference = _compute_reference_from_source(config)
+    stage1_buffer_size = config.stack_scans_per_slice or config.stage1_buffer_size
+    stage1_update_reference = (
+        True
+        if config.stack_scans_per_slice is not None
+        else config.stage1_update_reference
+    )
 
     of_params: Dict[str, Any] = {
         "input_file": str(volume_input_file),
@@ -501,9 +550,9 @@ def run_stage1(
         "output_format": "HDF5",
         "alpha": config.stage1_alpha,
         "quality_setting": config.stage1_quality_setting,
-        "buffer_size": config.stage1_buffer_size,
+        "buffer_size": stage1_buffer_size,
         "bin_size": config.stage1_bin_size,
-        "update_reference": config.stage1_update_reference,
+        "update_reference": stage1_update_reference,
         "flow_backend": config.flow_backend,
         "backend_params": config.backend_params,
     }
@@ -512,6 +561,9 @@ def run_stage1(
 
     overrides = _build_stage1_overrides(config, of_options_override)
     of_params.update(overrides)
+    if config.stack_scans_per_slice is not None:
+        of_params["buffer_size"] = config.stack_scans_per_slice
+        of_params["update_reference"] = True
 
     options = OFOptions(**of_params)
     print("Stage 1: running compensate_recording to build reference volume...")
@@ -533,6 +585,78 @@ def run_stage1(
     return volume_path
 
 
+def run_recording_prealignment(config: ZAlignConfig) -> Optional[Path]:
+    """
+    Optionally prealign the Stage-2 recording before z-shift estimation.
+
+    Returns
+    -------
+    Path or None
+        Path to the prealigned recording, or None when disabled.
+    """
+    if not config.prealign_recording:
+        return None
+
+    start_time = time()
+    output_root = config.resolve_output_root()
+    output_root.mkdir(parents=True, exist_ok=True)
+    status = load_or_create_status(output_root)
+
+    output_dir = config.resolve_recording_prealigned_output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    prealigned_path = config.resolve_recording_prealigned_file()
+
+    if (
+        config.resume
+        and status.get("recording_prealign") == "done"
+        and prealigned_path.exists()
+    ):
+        print(f"Recording prealignment: reusing {prealigned_path}")
+        return prealigned_path
+
+    input_path = config.resolve_input_file()
+    if not input_path.exists():
+        raise FileNotFoundError(f"input_file not found: {input_path}")
+
+    reference_source = config.resolve_reference_source_file() or input_path
+    reference = _compute_reference_from_source(config, reference_source)
+
+    of_params: Dict[str, Any] = {
+        "input_file": str(input_path),
+        "output_path": str(output_dir),
+        "output_format": "HDF5",
+        "alpha": config.stage1_alpha,
+        "quality_setting": config.stage1_quality_setting,
+        "buffer_size": config.input_buffer_size,
+        "bin_size": config.input_bin_size,
+        "update_reference": False,
+        "flow_backend": config.flow_backend,
+        "backend_params": config.backend_params,
+    }
+    if reference is not None:
+        of_params["reference_frames"] = reference
+
+    of_params.update(_build_recording_prealign_overrides(config))
+
+    options = OFOptions(**of_params)
+    print("Recording prealignment: running compensate_recording...")
+    compensate_recording(options)
+
+    if not prealigned_path.exists():
+        raise RuntimeError(
+            "Recording prealignment did not produce output. Expected "
+            f"{prealigned_path}"
+        )
+
+    status["recording_prealign"] = "done"
+    status["prealigned_recording_path"] = str(prealigned_path)
+    save_status(output_root, status)
+
+    elapsed = time() - start_time
+    print(f"Recording prealignment complete in {elapsed:.2f}s")
+    return prealigned_path
+
+
 def run_stage2(
     config: ZAlignConfig,
     volume_path: Optional[Path] = None,
@@ -543,7 +667,8 @@ def run_stage2(
     Returns
     -------
     dict
-        Keys: ``z_shift_path``, ``corrected_path``, ``anchor_z``.
+        Keys: ``z_shift_path``, ``corrected_path``, ``anchor_z``, and
+        ``prealigned_recording_path``.
     """
     start_time = time()
     output_root = config.resolve_output_root()
@@ -555,10 +680,6 @@ def run_stage2(
     if not volume_path.exists():
         raise FileNotFoundError(f"Reference volume not found: {volume_path}")
 
-    input_path = config.resolve_input_file()
-    if not input_path.exists():
-        raise FileNotFoundError(f"input_file not found: {input_path}")
-
     z_shift_path = config.resolve_z_shift_file()
     corrected_path = config.resolve_corrected_output_file()
     z_shift_path.parent.mkdir(parents=True, exist_ok=True)
@@ -568,13 +689,22 @@ def run_stage2(
         (not config.write_corrected) or corrected_path.exists()
     )
     if config.resume and status.get("stage2") == "done" and stage2_outputs_ready:
+        prealigned_recording_path = (
+            run_recording_prealignment(config) if config.prealign_recording else None
+        )
         anchor_z = status.get("anchor_z", None)
         print("Stage 2: existing outputs found, skipping")
         return {
             "z_shift_path": z_shift_path,
             "corrected_path": corrected_path if config.write_corrected else None,
             "anchor_z": anchor_z,
+            "prealigned_recording_path": prealigned_recording_path,
         }
+
+    prealigned_recording_path = run_recording_prealignment(config)
+    input_path = prealigned_recording_path or config.resolve_input_file()
+    if not input_path.exists():
+        raise FileNotFoundError(f"input_file not found: {input_path}")
 
     volume_hwcz = _load_volume(config, volume_path)
     H, W, C, Z = volume_hwcz.shape
@@ -601,9 +731,14 @@ def run_stage2(
             batch_thwc = _ensure_thwc(input_reader.read_batch())
             batch_hwct = _to_hwct(batch_thwc).astype(np.float32, copy=False)
             if batch_hwct.shape[:3] != (H, W, C):
+                input_shape = (
+                    batch_hwct.shape[0],
+                    batch_hwct.shape[1],
+                    batch_hwct.shape[2],
+                )
                 raise ValueError(
                     "Input recording dimensions do not match reference volume: "
-                    f"input {(batch_hwct.shape[0], batch_hwct.shape[1], batch_hwct.shape[2])} "
+                    f"input {input_shape} "
                     f"vs volume {(H, W, C)}"
                 )
 
@@ -668,6 +803,10 @@ def run_stage2(
         anchor_z_0based=np.array(anchor_z, dtype=np.int32),
         anchor_z_1based=np.array(anchor_z + 1, dtype=np.int32),
         volume_path=str(volume_path),
+        input_path=str(input_path),
+        prealigned_recording_path=(
+            "" if prealigned_recording_path is None else str(prealigned_recording_path)
+        ),
     )
 
     status["stage2"] = "done"
@@ -681,6 +820,7 @@ def run_stage2(
         "z_shift_path": z_shift_path,
         "corrected_path": corrected_path if config.write_corrected else None,
         "anchor_z": anchor_z,
+        "prealigned_recording_path": prealigned_recording_path,
     }
 
 
@@ -690,7 +830,7 @@ def run_stage3(
     z_shift_path: Optional[Path] = None,
 ) -> Optional[Path]:
     """
-    Stage 3: simulate baseline recording from volume + z-shift.
+    Stage 3: simulate a z-shift-only recording from volume + z-shift.
 
     Returns
     -------
@@ -795,7 +935,7 @@ def run_all_stages(
     simulated_path = None
     if config.write_simulated:
         print("\n" + "=" * 60)
-        print("Z-ALIGN STAGE 3: Simulate Baseline from z-shift")
+        print("Z-ALIGN STAGE 3: Simulate z-shift-only recording")
         print("=" * 60)
         simulated_path = run_stage3(
             config,

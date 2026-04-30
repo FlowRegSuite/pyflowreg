@@ -4,7 +4,7 @@ Configuration model for z-alignment workflows.
 The z-align pipeline mirrors the MATLAB prototypes with three stages:
 1) Build or load a reference volume.
 2) Estimate per-pixel z-shifts and optionally write a z-corrected signal.
-3) Optionally simulate a baseline recording from volume + z-shifts.
+3) Optionally simulate a z-shift-only recording from volume + z-shifts.
 """
 
 from __future__ import annotations
@@ -14,6 +14,22 @@ from typing import Any, Dict, Optional, Union
 
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
+
+
+_STAGE1_PROTECTED_OF_FIELDS = {
+    "input_file",
+    "output_path",
+    "output_format",
+    "output_file_name",
+    "reference_frames",
+}
+
+_RECORDING_PREALIGN_PROTECTED_OF_FIELDS = {
+    "input_file",
+    "output_path",
+    "output_format",
+    "output_file_name",
+}
 
 
 class ZAlignConfig(BaseModel):
@@ -34,12 +50,15 @@ class ZAlignConfig(BaseModel):
     # Outputs
     output_root: Path = Field(default=Path("z_align_outputs"))
     volume_output_dir: Path = Field(default=Path("aligned_stack"))
+    recording_prealigned_output_dir: Path = Field(default=Path("prealigned_recording"))
     z_shift_file: Path = Field(default=Path("z_shift.HDF5"))
     corrected_output_file: Path = Field(default=Path("compensated_shift_corrected.tif"))
     simulated_output_file: Path = Field(default=Path("simulated_from_z.tif"))
 
     # Control flags
     resume: bool = True
+    prealign_stack: bool = True
+    prealign_recording: bool = False
     write_corrected: bool = True
     write_simulated: bool = True
 
@@ -49,9 +68,11 @@ class ZAlignConfig(BaseModel):
     stage1_buffer_size: int = 500
     stage1_bin_size: int = 1
     stage1_update_reference: bool = True
+    stack_scans_per_slice: Optional[int] = None
     flow_backend: str = "flowreg"
     backend_params: Dict[str, Any] = Field(default_factory=dict)
     stage1_flow_options: Optional[Union[Dict[str, Any], Path]] = None
+    recording_prealign_flow_options: Optional[Union[Dict[str, Any], Path]] = None
 
     # Stage 2 (patch-based z estimation)
     input_buffer_size: int = 50
@@ -78,6 +99,7 @@ class ZAlignConfig(BaseModel):
         "reference_source_file",
         "output_root",
         "volume_output_dir",
+        "recording_prealigned_output_dir",
         "z_shift_file",
         "corrected_output_file",
         "simulated_output_file",
@@ -91,9 +113,13 @@ class ZAlignConfig(BaseModel):
             return Path(v)
         return v
 
-    @field_validator("stage1_flow_options", mode="before")
+    @field_validator(
+        "stage1_flow_options",
+        "recording_prealign_flow_options",
+        mode="before",
+    )
     @classmethod
-    def _normalize_stage1_flow_options(cls, v):
+    def _normalize_flow_options(cls, v):
         if v is None:
             return None
         if isinstance(v, dict):
@@ -103,7 +129,7 @@ class ZAlignConfig(BaseModel):
         if isinstance(v, str):
             stripped = v.strip()
             return Path(stripped) if stripped else None
-        raise TypeError("stage1_flow_options must be a mapping or path")
+        raise TypeError("Flow options must be a mapping or path")
 
     @field_validator("root")
     @classmethod
@@ -120,6 +146,7 @@ class ZAlignConfig(BaseModel):
         "reference_source_bin_size",
         "stage1_buffer_size",
         "stage1_bin_size",
+        "stack_scans_per_slice",
         "input_buffer_size",
         "input_bin_size",
         "volume_buffer_size",
@@ -128,7 +155,9 @@ class ZAlignConfig(BaseModel):
         "patch_size",
     )
     @classmethod
-    def _validate_positive_int(cls, v: int):
+    def _validate_positive_int(cls, v: Optional[int]):
+        if v is None:
+            return v
         if v < 1:
             raise ValueError("Value must be >= 1")
         return v
@@ -210,6 +239,12 @@ class ZAlignConfig(BaseModel):
     def resolve_volume_output_dir(self) -> Path:
         return self._resolve_from_output_root(self.volume_output_dir)
 
+    def resolve_recording_prealigned_output_dir(self) -> Path:
+        return self._resolve_from_output_root(self.recording_prealigned_output_dir)
+
+    def resolve_recording_prealigned_file(self) -> Path:
+        return self.resolve_recording_prealigned_output_dir() / "compensated.HDF5"
+
     def resolve_z_shift_file(self) -> Path:
         return self._resolve_from_output_root(self.z_shift_file)
 
@@ -239,37 +274,70 @@ class ZAlignConfig(BaseModel):
                 return candidate
         return default_candidates[0]
 
-    def get_stage1_overrides(self) -> Dict[str, Any]:
+    def effective_volume_bin_size(self) -> int:
+        """Return the bin size used when reading the reference stack as z slices."""
+        return self.stack_scans_per_slice or self.volume_bin_size
+
+    def _resolve_flow_options_path(self, path: Path) -> Path:
+        options_path = path.expanduser()
+        if not options_path.is_absolute():
+            options_path = self.root / options_path
+        return options_path
+
+    def _get_flow_option_overrides(
+        self,
+        option_source: Optional[Union[Dict[str, Any], Path]],
+        *,
+        protected_fields: set[str],
+        label: str,
+    ) -> Dict[str, Any]:
         """
-        Return OFOptions overrides for stage 1.
+        Return OFOptions overrides with workflow-owned fields removed.
 
         The config supports inline dict values or paths to saved OF_options JSON.
         """
-        if self.stage1_flow_options is None:
+        if option_source is None:
             return {}
 
-        if isinstance(self.stage1_flow_options, dict):
-            return dict(self.stage1_flow_options)
+        if isinstance(option_source, dict):
+            return {
+                key: value
+                for key, value in option_source.items()
+                if key not in protected_fields
+            }
 
-        options_path = self.stage1_flow_options.expanduser()
-        if not options_path.is_absolute():
-            options_path = self.root / options_path
+        options_path = self._resolve_flow_options_path(option_source)
 
         if not options_path.exists():
-            raise ValueError(f"Stage-1 flow options file not found: {options_path}")
+            raise ValueError(f"{label} flow options file not found: {options_path}")
 
         from pyflowreg.motion_correction.OF_options import OFOptions
 
         options = OFOptions.load_options(options_path)
         allowed_fields = set(OFOptions.model_fields.keys())
-        allowed_fields.discard("input_file")
-        allowed_fields.discard("output_path")
+        allowed_fields.difference_update(protected_fields)
 
         return {
             key: value
             for key, value in options.model_dump().items()
             if key in allowed_fields
         }
+
+    def get_stage1_overrides(self) -> Dict[str, Any]:
+        """Return OFOptions overrides for stage 1."""
+        return self._get_flow_option_overrides(
+            self.stage1_flow_options,
+            protected_fields=_STAGE1_PROTECTED_OF_FIELDS,
+            label="Stage-1",
+        )
+
+    def get_recording_prealign_overrides(self) -> Dict[str, Any]:
+        """Return OFOptions overrides for optional recording prealignment."""
+        return self._get_flow_option_overrides(
+            self.recording_prealign_flow_options,
+            protected_fields=_RECORDING_PREALIGN_PROTECTED_OF_FIELDS,
+            label="Recording prealignment",
+        )
 
     @classmethod
     def from_toml(cls, path: Union[str, Path]) -> "ZAlignConfig":

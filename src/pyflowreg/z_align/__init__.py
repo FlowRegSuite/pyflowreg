@@ -6,11 +6,12 @@ MATLAB prototype used for z-shift estimation/correction:
 
 1. Build/load a reference volume
 2. Estimate per-pixel z shifts and optionally write z-corrected output
-3. Optionally simulate a baseline recording from the estimated z shifts
+3. Optionally simulate a z-shift-only recording from the estimated z shifts
 """
 
 from pyflowreg.z_align.config import ZAlignConfig
 from pyflowreg.z_align.pipeline import (
+    run_recording_prealignment,
     run_stage1,
     run_stage2,
     run_stage3,
@@ -19,6 +20,7 @@ from pyflowreg.z_align.pipeline import (
 
 __all__ = [
     "ZAlignConfig",
+    "run_recording_prealignment",
     "run_stage1",
     "run_stage2",
     "run_stage3",

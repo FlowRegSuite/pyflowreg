@@ -40,12 +40,15 @@ def main():
         # Keep MATLAB output paths/names
         output_root=".",
         volume_output_dir="aligned_stack",
+        recording_prealigned_output_dir="prealigned_recording",
         z_shift_file="z_shift.HDF5",
         corrected_output_file="compensated_shift_corrected.tif",
         simulated_output_file="simulated_from_z.tif",
         # Stage toggles:
         # write_corrected=True  -> direct z-corrected signal
-        # write_simulated=True  -> baseline simulated from z-shifts
+        # write_simulated=True  -> z-shift-only video interpolated from the volume
+        prealign_stack=True,
+        prealign_recording=False,
         write_corrected=True,
         write_simulated=True,
         resume=True,
@@ -55,6 +58,8 @@ def main():
         stage1_buffer_size=500,
         stage1_bin_size=1,
         stage1_update_reference=True,
+        # Set to scans per z slice when the stack stores repeated scans per slice.
+        stack_scans_per_slice=None,
         # Stage 2 (patch-based z estimation) defaults from MATLAB snippet
         input_buffer_size=50,
         input_bin_size=1,
@@ -84,7 +89,7 @@ def main():
     if outputs["corrected_path"] is not None:
         print(f"Corrected signal:  {outputs['corrected_path']}")
     if outputs["simulated_path"] is not None:
-        print(f"Simulated baseline:{outputs['simulated_path']}")
+        print(f"Z-shift simulation:{outputs['simulated_path']}")
 
 
 if __name__ == "__main__":
