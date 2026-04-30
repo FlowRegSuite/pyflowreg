@@ -196,3 +196,7 @@ BibTeX entry
   doi = {https://doi.org/10.1002/jbio.202100330}
 }
 ```
+
+## License
+
+For commercial use rights, contact Okinawa Institute of Science and Technology, OIST Innovation, at  tls@oist.jp.
