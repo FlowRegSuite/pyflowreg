@@ -26,6 +26,32 @@ from pyflowreg.session.stage1_compensate import (
 from pyflowreg.util.xcorr_prealignment import estimate_rigid_xcorr_2d
 
 
+def normalize_constancy_assumption(value) -> str:
+    """
+    Normalize a constancy-assumption selector to the backend API value.
+
+    The default ``gc`` value is the MATLAB Flow-Registration behavior. Other
+    data terms are explicit opt-in extensions for the native flowreg backend.
+    """
+    if hasattr(value, "value"):
+        value = value.value
+
+    key = str(value).strip().lower()
+    aliases = {
+        "gradient": "gc",
+        "brightness": "gray",
+        "census": "cs",
+    }
+    key = aliases.get(key, key)
+    if key not in {"gc", "gray", "cs"}:
+        raise ValueError(
+            f"Unknown constancy assumption: '{value}'. "
+            "Supported values are: 'gc', 'gradient', 'gray', 'brightness', "
+            "'cs', and 'census'."
+        )
+    return key
+
+
 def mat2gray_ref(img: np.ndarray, ref: np.ndarray = None) -> np.ndarray:
     """
     Normalize image to [0, 1] range.
@@ -117,6 +143,16 @@ def compute_between_displacement(
     img2 = img2.reshape(img2_dims)
 
     # Get displacement function based on configured backend
+    constancy_assumption = normalize_constancy_assumption(
+        config.stage2_constancy_assumption
+    )
+    if config.flow_backend == "diso" and constancy_assumption != "gc":
+        raise ValueError(
+            "The 'diso' backend does not support variational constancy "
+            f"assumption '{constancy_assumption}'. Use flow_backend='flowreg' "
+            "for 'gray' or 'cs'."
+        )
+
     backend_factory = get_backend(config.flow_backend)
     get_displacement_func = backend_factory(**config.backend_params)
 
@@ -131,6 +167,7 @@ def compute_between_displacement(
         img2,
         alpha=alpha,
         iterations=config.iterations_between,
+        const_assumption=constancy_assumption,
     )
 
     return w + w_init

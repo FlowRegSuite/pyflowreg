@@ -14,6 +14,10 @@ get_displacement
     Main API function for computing optical flow between two frames
 get_motion_tensor_gc
     Compute motion tensor components for gradient constancy
+get_motion_tensor_gray
+    Compute motion tensor components for gray-value constancy
+get_motion_tensor_cs
+    Compute motion tensor components for census constancy
 imregister_wrapper
     Warp an image using computed displacement fields
 warpingDepth
@@ -422,6 +426,36 @@ def normalize_warping_steps(warping_steps):
     return steps
 
 
+def _resolve_motion_tensor_func(const_assumption):
+    """
+    Resolve a constancy-assumption selector to a motion tensor function.
+
+    The default ``gc`` path is the MATLAB Flow-Registration behavior. Census
+    and gray-value constancy are explicit opt-in alternatives.
+    """
+    if hasattr(const_assumption, "value"):
+        const_assumption = const_assumption.value
+
+    key = str(const_assumption).strip().lower()
+    tensor_funcs = {
+        "gc": get_motion_tensor_gc,
+        "gradient": get_motion_tensor_gc,
+        "gray": get_motion_tensor_gray,
+        "brightness": get_motion_tensor_gray,
+        "cs": get_motion_tensor_cs,
+        "census": get_motion_tensor_cs,
+    }
+
+    try:
+        return tensor_funcs[key]
+    except KeyError as e:
+        supported = "', '".join(sorted(tensor_funcs))
+        raise ValueError(
+            f"Unknown constancy assumption: '{const_assumption}'. "
+            f"Supported values are: '{supported}'."
+        ) from e
+
+
 def _solve_displacement_stage(
     fixed,
     moving,
@@ -436,6 +470,7 @@ def _solve_displacement_stage(
     uv,
     weight,
     level_solver_backend,
+    motion_tensor_func,
     gnc_beta,
 ):
     """Solve one full pyramid pass for a fixed GNC stage."""
@@ -496,7 +531,7 @@ def _solve_displacement_stage(
         J13 = np.zeros(J_size, dtype=np.float64)
         J23 = np.zeros(J_size, dtype=np.float64)
         for ch in range(n_channels):
-            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(
+            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = motion_tensor_func(
                 f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
             )
             J11[:, :, ch] = J11_ch
@@ -572,6 +607,7 @@ def _solve_displacement_stage_gnc(
     uv,
     weight,
     level_solver_backend,
+    motion_tensor_func,
     gnc_beta,
     warping_steps,
 ):
@@ -655,7 +691,7 @@ def _solve_displacement_stage_gnc(
             J13 = np.zeros(J_size, dtype=np.float64)
             J23 = np.zeros(J_size, dtype=np.float64)
             for ch in range(n_channels):
-                J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(
+                J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = motion_tensor_func(
                     f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
                 )
                 J11[:, :, ch] = J11_ch
@@ -756,7 +792,8 @@ def get_displacement(
     a_data : float, default=0.45
         Exponent for generalized Charbonnier penalty on data term.
     const_assumption : str, default='gc'
-        Constancy assumption: 'gc' for gradient constancy (only option implemented)
+        Constancy assumption. Supported values are 'gc'/'gradient',
+        'gray'/'brightness', and 'cs'/'census'.
     uv : np.ndarray, optional
         Initial displacement field (H, W, 2) with [u, v] components.
     weight : np.ndarray or list, optional
@@ -774,6 +811,7 @@ def get_displacement(
     assert (
         fixed.ndim == moving.ndim
     ), f"Fixed and moving must have same dimensions: fixed.shape={fixed.shape}, moving.shape={moving.shape}"
+    motion_tensor_func = _resolve_motion_tensor_func(const_assumption)
     fixed = fixed.astype(np.float64)
     moving = moving.astype(np.float64)
     if fixed.ndim == 3:
@@ -832,6 +870,7 @@ def get_displacement(
             uv,
             weight,
             level_solver_backend,
+            motion_tensor_func,
             None,
         )
 
@@ -852,6 +891,7 @@ def get_displacement(
             flow,
             weight,
             level_solver_backend,
+            motion_tensor_func,
             float(gnc_beta),
             effective_warping_steps,
         )

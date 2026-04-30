@@ -57,6 +57,9 @@ class SessionConfig(BaseModel):
         Regularization for inter-sequence optical flow
     iterations_between : int, default=100
         Iterations for inter-sequence optical flow
+    stage2_constancy_assumption : str, default="gc"
+        Constancy assumption for Stage 2 optical flow. The default "gc"
+        preserves the MATLAB Flow-Registration behavior.
     align_chunk_size : int, default=64
         Number of frames to process per batch during Stage 3 video alignment
     align_output_format : str, default="TIFF"
@@ -88,6 +91,7 @@ class SessionConfig(BaseModel):
     sigma_smooth: float = 6.0
     alpha_between: float = 25.0
     iterations_between: int = 100
+    stage2_constancy_assumption: str = "gc"
 
     # Stage 3 parameters
     align_chunk_size: int = 64

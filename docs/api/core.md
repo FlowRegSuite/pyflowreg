@@ -30,6 +30,14 @@ Low-level optical flow computation engine implementing variational optical flow 
 .. autofunction:: pyflowreg.core.optical_flow.get_motion_tensor_gc
 ```
 
+```{eval-rst}
+.. autofunction:: pyflowreg.core.optical_flow.get_motion_tensor_gray
+```
+
+```{eval-rst}
+.. autofunction:: pyflowreg.core.optical_flow.get_motion_tensor_cs
+```
+
 ### Boundary Handling
 
 ```{eval-rst}

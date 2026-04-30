@@ -78,6 +78,22 @@ class InterpolationMethod(str, Enum):
 class ConstancyAssumption(str, Enum):
     GRAY = "gray"
     GRADIENT = "gc"
+    CENSUS = "cs"
+
+
+def _normalize_constancy_assumption_value(v):
+    """Normalize constancy assumption aliases to serialized option values."""
+    if hasattr(v, "value"):
+        v = v.value
+    if isinstance(v, str):
+        aliases = {
+            "gradient": ConstancyAssumption.GRADIENT.value,
+            "brightness": ConstancyAssumption.GRAY.value,
+            "census": ConstancyAssumption.CENSUS.value,
+        }
+        key = v.strip().lower()
+        return aliases.get(key, key)
+    return v
 
 
 class NamingConvention(str, Enum):
@@ -185,7 +201,8 @@ class OFOptions(BaseModel):
         NamingConvention.DEFAULT, description="Output filename style"
     )
     constancy_assumption: ConstancyAssumption = Field(
-        ConstancyAssumption.GRADIENT, description="Constancy assumption"
+        ConstancyAssumption.GRADIENT,
+        description="Optical-flow data term: 'gc', 'gray', or 'cs'",
     )
 
     # Backend configuration
@@ -308,6 +325,12 @@ class OFOptions(BaseModel):
         if not np.isclose(schedule[-1], 1.0):
             raise ValueError("gnc_schedule must end at 1.0")
         return tuple(float(x) for x in schedule.tolist())
+
+    @field_validator("constancy_assumption", mode="before")
+    @classmethod
+    def normalize_constancy_assumption(cls, v):
+        """Normalize constancy assumption aliases to serialized option values."""
+        return _normalize_constancy_assumption_value(v)
 
     @model_validator(mode="after")
     def validate_and_normalize(self) -> "OFOptions":
@@ -722,6 +745,16 @@ class OFOptions(BaseModel):
         # Priority 3: Registry backend
         from pyflowreg.core.backend_registry import get_backend
 
+        constancy_assumption = _normalize_constancy_assumption_value(
+            self.constancy_assumption
+        )
+        if self.flow_backend == "diso" and constancy_assumption != "gc":
+            raise ValueError(
+                "The 'diso' backend does not support variational constancy "
+                f"assumption '{constancy_assumption}'. Use "
+                "flow_backend='flowreg' for 'gray' or 'cs'."
+            )
+
         factory = get_backend(self.flow_backend)
         return factory(**self.backend_params)
 
@@ -739,7 +772,9 @@ class OFOptions(BaseModel):
             "a_smooth": self.a_smooth,
             "gnc_schedule": self.gnc_schedule,
             "warping_steps": self.warping_steps,
-            "const_assumption": self.constancy_assumption.value,  # Fixed: use const_assumption for API compatibility
+            "const_assumption": _normalize_constancy_assumption_value(
+                self.constancy_assumption
+            ),
         }
 
     def __repr__(self) -> str:
