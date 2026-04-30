@@ -37,6 +37,7 @@ from pyflowreg.session.config import SessionConfig
             - sigma_smooth
             - alpha_between
             - iterations_between
+            - stage2_constancy_assumption
 
 **Configuration File Support**
 
@@ -78,6 +79,7 @@ cc_upsample = 4
 sigma_smooth = 6.0
 alpha_between = 25.0
 iterations_between = 100
+stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
 ```
 
 ## Stage 1: Per-Recording Compensation
@@ -321,13 +323,15 @@ config = SessionConfig(
     cc_upsample=4,
     sigma_smooth=6.0,
     alpha_between=25.0,
-    iterations_between=100
+    iterations_between=100,
+    stage2_constancy_assumption="gc",
 )
 
 # Stage 1: Motion correct each recording
 print("Running Stage 1...")
 config.flow_options = {
     "quality_setting": "balanced",
+    "constancy_assumption": "gc",
     "save_valid_idx": True,
     "save_w": False,
 }

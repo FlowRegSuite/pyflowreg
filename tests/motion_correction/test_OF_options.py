@@ -8,6 +8,7 @@ import pytest
 import numpy as np
 
 from pyflowreg.motion_correction.OF_options import (
+    ConstancyAssumption,
     OFOptions,
     QualitySetting,
 )
@@ -184,6 +185,42 @@ class TestQualitySettingEffectiveMinLevel:
         """Test explicit min_level overrides quality setting."""
         opts = OFOptions(quality_setting=QualitySetting.QUALITY, min_level=8)
         assert opts.effective_min_level == 8
+
+
+class TestConstancyAssumption:
+    """Test optical-flow data term configuration."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("gc", ConstancyAssumption.GRADIENT),
+            ("gradient", ConstancyAssumption.GRADIENT),
+            ("gray", ConstancyAssumption.GRAY),
+            ("brightness", ConstancyAssumption.GRAY),
+            ("cs", ConstancyAssumption.CENSUS),
+            ("census", ConstancyAssumption.CENSUS),
+        ],
+    )
+    def test_constancy_assumption_aliases(self, value, expected):
+        """Aliases normalize to the enum value used by get_displacement."""
+        opts = OFOptions(constancy_assumption=value)
+
+        assert opts.constancy_assumption == expected
+        assert opts.to_dict()["const_assumption"] == expected.value
+
+    def test_diso_rejects_non_default_constancy_assumption(self):
+        """DISO backend should not silently accept flowreg-only data terms."""
+        opts = OFOptions(flow_backend="diso", constancy_assumption="census")
+
+        with pytest.raises(ValueError, match="does not support"):
+            opts.resolve_get_displacement()
+
+    def test_to_dict_normalizes_assignment_alias(self):
+        """Assignment-time aliases should serialize to backend API values."""
+        opts = OFOptions()
+        opts.constancy_assumption = "census"
+
+        assert opts.to_dict()["const_assumption"] == "cs"
 
 
 class TestGetWeightAt:

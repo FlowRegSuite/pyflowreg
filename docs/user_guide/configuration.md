@@ -47,8 +47,16 @@ options = OFOptions(
     # Nonlinear diffusion parameters
     a_smooth=1.0,  # Smoothness diffusion parameter
     a_data=0.45,  # Data term diffusion parameter
+
+    # Data term, default preserves MATLAB Flow-Registration behavior
+    constancy_assumption="gc",  # Options: "gc", "gray", "cs"
 )
 ```
+
+`constancy_assumption="gc"` is the default gradient constancy data term used by
+the MATLAB Flow-Registration reference. `"gray"` selects gray-value constancy,
+and `"cs"` selects census constancy. These data terms are implemented by the
+native `flowreg` backend; the `diso` backend rejects non-default values.
 
 ### Alpha (Smoothness Weight)
 

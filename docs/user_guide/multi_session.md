@@ -62,6 +62,7 @@ cc_upsample = 4        # Subpixel accuracy
 sigma_smooth = 6.0     # Gaussian smoothing
 alpha_between = 25.0   # Regularization
 iterations_between = 100
+stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
 ```
 
 ### 3. Run Processing
@@ -118,6 +119,9 @@ The `pyflowreg.session` pipeline always runs the same three deterministic stages
 
 - Temporal averages are reloaded from disk and the reference recording (center) is selected automatically or from `SessionConfig.center`.
 - `compute_between_displacement()` smooths both averages, applies phase cross-correlation for a rigid guess, then refines with the configured flow backend (`src/pyflowreg/session/stage2_between_avgs.py`).
+- `stage2_constancy_assumption` controls the Stage 2 data term. The default
+  `"gc"` preserves MATLAB Flow-Registration behavior; `"cs"` enables the
+  census term for the native `flowreg` backend.
 - Results are written to `w_to_reference.npz` (separate `u`/`v` arrays) so MATLAB users can load them directly.
 
 **Outputs:** `w_to_reference.npz`, per-recording `status.json` updates, and `middle_idx` (0-based) pointing to the reference average.
@@ -170,6 +174,7 @@ quality_setting = "fast"     # Options: fast, balanced, quality
 buffer_size = 1000           # Frames per batch
 save_w = false               # Don't save displacement fields
 save_valid_idx = true        # Required for Stage 3
+# constancy_assumption = "cs"  # Optional Stage 1 data term override
 ```
 
 Alternatively, point to a saved MATLAB/Python options file:

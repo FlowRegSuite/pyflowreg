@@ -14,6 +14,10 @@ get_displacement
     Main API function for computing optical flow between two frames
 get_motion_tensor_gc
     Compute motion tensor components for gradient constancy
+get_motion_tensor_gray
+    Compute motion tensor components for gray-value constancy
+get_motion_tensor_cs
+    Compute motion tensor components for census constancy
 imregister_wrapper
     Warp an image using computed displacement fields
 warpingDepth
@@ -367,6 +371,36 @@ def level_solver(
     return du, dv
 
 
+def _resolve_motion_tensor_func(const_assumption):
+    """
+    Resolve a constancy-assumption selector to a motion tensor function.
+
+    The default ``gc`` path is the MATLAB Flow-Registration behavior. Census
+    and gray-value constancy are explicit opt-in alternatives.
+    """
+    if hasattr(const_assumption, "value"):
+        const_assumption = const_assumption.value
+
+    key = str(const_assumption).strip().lower()
+    tensor_funcs = {
+        "gc": get_motion_tensor_gc,
+        "gradient": get_motion_tensor_gc,
+        "gray": get_motion_tensor_gray,
+        "brightness": get_motion_tensor_gray,
+        "cs": get_motion_tensor_cs,
+        "census": get_motion_tensor_cs,
+    }
+
+    try:
+        return tensor_funcs[key]
+    except KeyError as e:
+        supported = "', '".join(sorted(tensor_funcs))
+        raise ValueError(
+            f"Unknown constancy assumption: '{const_assumption}'. "
+            f"Supported values are: '{supported}'."
+        ) from e
+
+
 def get_displacement(
     fixed,
     moving,
@@ -426,7 +460,9 @@ def get_displacement(
         - a = 0.5: linear (L1) penalty
         - a = 0.45: sublinear, robust to noisy microscopy data
     const_assumption : str, default='gc'
-        Constancy assumption: 'gc' for gradient constancy (only option implemented)
+        Constancy assumption. Supported values are 'gc'/'gradient' for gradient
+        constancy, 'gray'/'brightness' for gray-value constancy, and
+        'cs'/'census' for census constancy.
     uv : np.ndarray, optional
         Initial displacement field (H, W, 2) with [u, v] components to initialize
         the coarsest (highest) pyramid level. If None, initializes with zeros.
@@ -477,6 +513,7 @@ def get_displacement(
     assert (
         fixed.ndim == moving.ndim
     ), f"Fixed and moving must have same dimensions: fixed.shape={fixed.shape}, moving.shape={moving.shape}"
+    motion_tensor_func = _resolve_motion_tensor_func(const_assumption)
     fixed = fixed.astype(np.float64)
     moving = moving.astype(np.float64)
     if fixed.ndim == 3:
@@ -578,7 +615,7 @@ def get_displacement(
         J13 = np.zeros(J_size, dtype=np.float64)
         J23 = np.zeros(J_size, dtype=np.float64)
         for ch in range(n_channels):
-            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(
+            J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = motion_tensor_func(
                 f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
             )
             J11[:, :, ch] = J11_ch
