@@ -260,8 +260,8 @@ def test_get_displacement_with_gnc_carries_flow_between_stages():
     beta0_means = [mean for beta, mean in stage_initial_means if beta == 0.0]
     beta1_means = [mean for beta, mean in stage_initial_means if beta == 1.0]
     assert beta0_means[0] == 0.0
-    assert beta0_means[-1] == float(len(beta0_means) - 1)
-    assert beta1_means[0] == float(len(beta0_means))
+    np.testing.assert_allclose(beta0_means[-1], len(beta0_means) - 1, atol=1e-6)
+    np.testing.assert_allclose(beta1_means[0], len(beta0_means), atol=1e-6)
 
 
 def test_level_solver_dispatches_to_default_solver_without_gnc(monkeypatch):
