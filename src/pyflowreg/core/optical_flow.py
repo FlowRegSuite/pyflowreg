@@ -226,7 +226,7 @@ def get_motion_tensor_gray(f1, f2, hy, hx):
     return J11, J22, J33, J12, J13, J23
 
 
-def get_motion_tensor_cs(f1, f2, hy, hx):
+def get_motion_tensor_cs(f1, f2, hy, hx, eps=None):
     """
     Compute motion tensor components for census-based constancy assumption.
 
@@ -246,6 +246,14 @@ def get_motion_tensor_cs(f1, f2, hy, hx):
         Spatial grid spacing in y-direction.
     hx : float
         Spatial grid spacing in x-direction.
+    eps : float, optional
+        Smoothing width for the smoothed Heaviside function applied to
+        directional differences ``r = (neighbor - center) / dist``. If None,
+        uses ``0.1 / 255.0``, matching the Hafner/Demetz/Weickert
+        ``epsilon = 0.1`` convention for images scaled from ``[0, 255]`` to
+        approximately ``[0, 1]``. When ``hx`` or ``hy`` are physical units
+        rather than pixel-like units, callers may need to scale ``eps``
+        consistently.
 
     Returns
     -------
@@ -256,26 +264,33 @@ def get_motion_tensor_cs(f1, f2, hy, hx):
 
     Notes
     -----
-    The census transform is invariant to monotonically increasing grey-level
-    changes, improving robustness to illumination variations compared to
-    gray-value or gradient constancy. A smoothed Heaviside approximation
-    controlled by `eps` stabilizes the derivatives while preserving the
-    ordering information that drives the census constraint.
+    The hard census transform is invariant to global monotonically increasing
+    grey-value transforms because it depends only on ordering. This
+    implementation uses finite differences, Gaussian-preprocessed inputs, a
+    smoothed Heaviside function, and a linearized motion tensor, so invariance
+    is approximate.
 
-    Symmetric padding enforces Neumann boundary conditions, and the border
-    is zeroed after aggregation to avoid wrap-around effects from the
-    cyclic shifts used during neighbor comparisons.
+    Additive offsets cancel exactly in neighbor-center differences. Positive
+    multiplicative changes are approximately handled only when ``eps`` is small
+    relative to the directional-difference scale, or when ``eps`` is scaled
+    consistently with image intensity scale. Gamma and other nonlinear
+    monotone transforms preserve hard ordering but not exact smoothed
+    Heaviside values.
 
     References
     ----------
     .. [1] Hafner, D., Demetz, O., and Weickert, J. "Why is the Census
        Transform Good for Robust Optic Flow Computation?", SSVM 2013.
     """
-    eps = 0.1
+    if eps is None:
+        eps = 0.1 / 255.0
     eps2 = eps * eps
 
+    H, W = f1.shape
     f1p = np.pad(f1, ((1, 1), (1, 1)), mode="symmetric")
     f2p = np.pad(f2, ((1, 1), (1, 1)), mode="symmetric")
+    center1 = f1p[1:-1, 1:-1]
+    center2 = f2p[1:-1, 1:-1]
 
     offsets = [
         (dy, dx) for dy in (-1, 0, 1) for dx in (-1, 0, 1) if not (dy == 0 and dx == 0)
@@ -293,22 +308,22 @@ def get_motion_tensor_cs(f1, f2, hy, hx):
     for dy, dx in offsets:
         dist = float(np.sqrt((hy * dy) * (hy * dy) + (hx * dx) * (hx * dx)))
 
-        r1 = (np.roll(f1p, shift=(-dy, -dx), axis=(0, 1)) - f1p) / dist
-        r2 = (np.roll(f2p, shift=(-dy, -dx), axis=(0, 1)) - f2p) / dist
+        neigh1 = f1p[1 + dy : 1 + dy + H, 1 + dx : 1 + dx + W]
+        neigh2 = f2p[1 + dy : 1 + dy + H, 1 + dx : 1 + dx + W]
 
-        s1 = 0.5 * (1.0 + r1 / np.sqrt(r1 * r1 + eps2))
-        s2 = 0.5 * (1.0 + r2 / np.sqrt(r2 * r2 + eps2))
+        r1_core = (neigh1 - center1) / dist
+        r2_core = (neigh2 - center2) / dist
 
-        s1[0, :] = s1[1, :]
-        s1[-1, :] = s1[-2, :]
-        s1[:, 0] = s1[:, 1]
-        s1[:, -1] = s1[:, -2]
-        s2[0, :] = s2[1, :]
-        s2[-1, :] = s2[-2, :]
-        s2[:, 0] = s2[:, 1]
-        s2[:, -1] = s2[:, -2]
+        s1_core = 0.5 * (1.0 + r1_core / np.sqrt(r1_core * r1_core + eps2))
+        s2_core = 0.5 * (1.0 + r2_core / np.sqrt(r2_core * r2_core + eps2))
 
-        sy, sx = np.gradient(s1, hy, hx)
+        s1 = np.pad(s1_core, 1, mode="edge")
+        s2 = np.pad(s2_core, 1, mode="edge")
+
+        sy1, sx1 = np.gradient(s1, hy, hx)
+        sy2, sx2 = np.gradient(s2, hy, hx)
+        sx = 0.5 * (sx1 + sx2)
+        sy = 0.5 * (sy1 + sy2)
         st = s2 - s1
 
         J11 += sx * sx
