@@ -150,6 +150,7 @@ if TORCH_AVAILABLE:
             a_smooth,
             hx,
             hy,
+            gnc_beta=None,
         ):
             # Convert to tensors
             dtype_map = {"float64": torch.float64, "float32": torch.float32}
@@ -176,6 +177,8 @@ if TORCH_AVAILABLE:
                 a_smooth,
                 hx,
                 hy,
+                update_lag_semantics="matlab" if gnc_beta is not None else "torch",
+                gnc_beta=gnc_beta,
             )
 
             return du.cpu().numpy(), dv.cpu().numpy()
@@ -237,6 +240,7 @@ if CUPY_AVAILABLE:
             a_smooth,
             hx,
             hy,
+            gnc_beta=None,
         ):
             # CUDA solver handles numpy/cupy conversion internally
             return level_solver_rbgs_cuda(
@@ -256,6 +260,8 @@ if CUPY_AVAILABLE:
                 a_smooth,
                 hx,
                 hy,
+                update_lag_semantics="matlab" if gnc_beta is not None else "torch",
+                gnc_beta=gnc_beta,
             )
 
         # Return a partial function with the custom level solver

@@ -8,6 +8,7 @@ import pytest
 import numpy as np
 
 from pyflowreg.motion_correction.OF_options import (
+    ConstancyAssumption,
     OFOptions,
     QualitySetting,
 )
@@ -162,6 +163,42 @@ class TestSigmaValidation:
             OFOptions(sigma=[1.0, 1.0])  # Missing temporal component
 
 
+class TestGNCScheduleValidation:
+    """Test GNC schedule validation and normalization."""
+
+    def test_gnc_schedule_normalized_to_tuple(self):
+        """Test valid GNC schedules are normalized to tuples."""
+        opts = OFOptions(gnc_schedule=[0.0, 0.5, 1.0])
+
+        assert opts.gnc_schedule == (0.0, 0.5, 1.0)
+
+    @pytest.mark.parametrize(
+        "schedule,match",
+        [
+            ([0.5, 1.0], "must start at 0.0"),
+            ([0.0, 0.5], "must end at 1.0"),
+            ([0.0], "at least two stages"),
+            ([0.0, 0.75, 0.5, 1.0], "monotone nondecreasing"),
+            ([-0.1, 1.0], "must lie in \\[0, 1\\]"),
+        ],
+    )
+    def test_gnc_schedule_invalid(self, schedule, match):
+        """Test invalid GNC schedules raise validation errors."""
+        with pytest.raises(ValueError, match=match):
+            OFOptions(gnc_schedule=schedule)
+
+    def test_warping_steps_positive_integer(self):
+        """Test valid warping_steps values are preserved."""
+        opts = OFOptions(warping_steps=10)
+
+        assert opts.warping_steps == 10
+
+    def test_warping_steps_invalid(self):
+        """Test invalid warping_steps values raise validation errors."""
+        with pytest.raises(ValueError, match="greater than or equal to 1"):
+            OFOptions(warping_steps=0)
+
+
 class TestQualitySettingEffectiveMinLevel:
     """Test quality setting affects effective_min_level."""
 
@@ -184,6 +221,57 @@ class TestQualitySettingEffectiveMinLevel:
         """Test explicit min_level overrides quality setting."""
         opts = OFOptions(quality_setting=QualitySetting.QUALITY, min_level=8)
         assert opts.effective_min_level == 8
+
+
+class TestConstancyAssumption:
+    """Test optical-flow data term configuration."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("gc", ConstancyAssumption.GRADIENT),
+            ("gradient", ConstancyAssumption.GRADIENT),
+            ("gray", ConstancyAssumption.GRAY),
+            ("brightness", ConstancyAssumption.GRAY),
+            ("cs", ConstancyAssumption.CENSUS),
+            ("census", ConstancyAssumption.CENSUS),
+        ],
+    )
+    def test_constancy_assumption_aliases(self, value, expected):
+        """Aliases normalize to the enum value used by get_displacement."""
+        opts = OFOptions(constancy_assumption=value)
+
+        assert opts.constancy_assumption == expected
+        assert opts.to_dict()["const_assumption"] == expected.value
+
+    def test_diso_rejects_non_default_constancy_assumption(self):
+        """DISO backend should not silently accept flowreg-only data terms."""
+        opts = OFOptions(flow_backend="diso", constancy_assumption="census")
+
+        with pytest.raises(ValueError, match="does not support"):
+            opts.resolve_get_displacement()
+
+    @pytest.mark.parametrize(
+        "gnc_kwargs",
+        [
+            {"gnc_schedule": (0.0, 0.5, 1.0)},
+            {"warping_steps": 5},
+            {"gnc_schedule": (0.0, 1.0), "warping_steps": 5},
+        ],
+    )
+    def test_resolve_get_displacement_diso_rejects_gnc_parameters(self, gnc_kwargs):
+        """DISO backend should not silently accept flowreg-only GNC options."""
+        opts = OFOptions(flow_backend="diso", **gnc_kwargs)
+
+        with pytest.raises(ValueError, match="does not support"):
+            opts.resolve_get_displacement()
+
+    def test_to_dict_normalizes_assignment_alias(self):
+        """Assignment-time aliases should serialize to backend API values."""
+        opts = OFOptions()
+        opts.constancy_assumption = "census"
+
+        assert opts.to_dict()["const_assumption"] == "cs"
 
 
 class TestGetWeightAt:
@@ -289,6 +377,22 @@ class TestToDict:
         # Weight should be preserved as numpy array
         assert isinstance(params["weight"], np.ndarray)
         assert params["weight"].shape == (H, W, C)
+
+    def test_to_dict_includes_gnc_schedule(self):
+        """Test to_dict forwards the optional GNC schedule."""
+        opts = OFOptions(gnc_schedule=(0.0, 0.5, 1.0))
+
+        params = opts.to_dict()
+
+        assert params["gnc_schedule"] == (0.0, 0.5, 1.0)
+
+    def test_to_dict_includes_warping_steps(self):
+        """Test to_dict forwards the optional GNC warping step count."""
+        opts = OFOptions(warping_steps=10)
+
+        params = opts.to_dict()
+
+        assert params["warping_steps"] == 10
 
 
 class TestExampleConfigurations:

@@ -13,7 +13,7 @@ from pyflowreg.motion_correction.compensate_recording import (
     RegistrationConfig,
     compensate_recording,
 )
-from pyflowreg.motion_correction.OF_options import OutputFormat
+from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
 from pyflowreg._runtime import RuntimeContext
 from pyflowreg.util.io.factory import get_video_file_reader
 
@@ -110,6 +110,26 @@ class TestCompensateRecording:
         assert pipeline.executor is not None
         assert len(pipeline.mean_disp) == 0
         assert len(pipeline.max_disp) == 0
+
+    def test_flow_params_include_constancy_assumption(self, tmp_path):
+        """Batch flow calls should receive the configured data term."""
+        options = OFOptions(
+            output_path=tmp_path,
+            quality_setting="fast",
+            constancy_assumption="census",
+            levels=1,
+            iterations=2,
+        )
+        config = RegistrationConfig(
+            n_jobs=1, verbose=True, parallelization="sequential"
+        )
+        pipeline = BatchMotionCorrector(options, config)
+        pipeline.weight = np.ones((8, 8, 1), dtype=np.float64)
+
+        flow_params = pipeline._get_flow_params()
+
+        assert flow_params["const_assumption"] == "cs"
+        assert flow_params["weight"] is pipeline.weight
 
 
 class TestExecutorTypes:

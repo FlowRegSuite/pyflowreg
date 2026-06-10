@@ -47,8 +47,23 @@ options = OFOptions(
     # Nonlinear diffusion parameters
     a_smooth=1.0,  # Smoothness diffusion parameter
     a_data=0.45,  # Data term diffusion parameter
+
+    # Optional solver-level GNC stages for sublinear penalties
+    gnc_schedule=(0.0, 0.5, 1.0),
+
+    # Data term, default preserves MATLAB Flow-Registration behavior
+    constancy_assumption="gc",  # Options: "gc", "gray", "cs"
 )
 ```
+
+`constancy_assumption="gc"` is the default gradient constancy data term used by
+the MATLAB Flow-Registration reference. `"gray"` selects gray-value constancy,
+and `"cs"` selects census constancy. These data terms are implemented by the
+native `flowreg` backend; the `diso` backend rejects non-default values.
+
+Set `gnc_schedule=None` to keep the default solver path. When provided,
+PyFlowReg reruns the pyramid once per stage, warm-starting each stage from
+the previous result.
 
 ### Alpha (Smoothness Weight)
 
