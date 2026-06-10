@@ -134,8 +134,10 @@ def get_motion_tensor_gc(f1, f2, hy, hx):
         fyy[1:-1, 1:-1] = (f[0:-2, 1:-1] - 2 * f[1:-1, 1:-1] + f[2:, 1:-1]) / (hy_**2)
         return fxx, fyy
 
-    fxx1, fyy1 = gradient2(f1p, hy, hx)
-    fxx2, fyy2 = gradient2(f2p, hy, hx)
+    # gradient2's first spacing scales column (x) second differences and the
+    # second scales row (y) second differences.
+    fxx1, fyy1 = gradient2(f1p, hx, hy)
+    fxx2, fyy2 = gradient2(f2p, hx, hy)
     fxx = 0.5 * (fxx1 + fxx2)
     fyy = 0.5 * (fyy1 + fyy2)
     reg_x = 1.0 / ((np.sqrt(fxx**2 + fxy**2) ** 2) + 1e-6)
@@ -460,7 +462,15 @@ def get_displacement(
     When a_smooth=1.0 (quadratic), the smoothness penalty computation is
     optimized by skipping weight updates (psi_smooth = 1.0).
 
-    This implementation maintains compatibility with MATLAB Flow-Registration.
+    This implementation maintains compatibility with MATLAB Flow-Registration,
+    with one deliberate divergence: the level grid spacings are bound
+    geometrically (row spacing scales y-differences, column spacing scales
+    x-differences) consistently across the data term, warping, and the
+    smoothness term. The MATLAB reference applies the two spacings in swapped
+    roles throughout. The two implementations agree exactly for square
+    images, where both spacings coincide at every level; for non-square
+    images the coarse capped levels differ, and the MATLAB toolbox is
+    intended to adopt the geometric convention upstream.
 
     See Also
     --------
@@ -551,8 +561,12 @@ def get_displacement(
         if f1_level.ndim == 2:
             f1_level = f1_level[:, :, np.newaxis]
             f2_level = f2_level[:, :, np.newaxis]
-        current_hx = float(m) / f1_level.shape[0]
-        current_hy = float(n) / f1_level.shape[1]
+        # Grid spacings of this pyramid level in full-resolution pixel units:
+        # h_row scales row (y) differences, h_col scales column (x)
+        # differences. u is the horizontal (column) and v the vertical (row)
+        # displacement, both in full-resolution pixel units.
+        h_row = float(m) / f1_level.shape[0]
+        h_col = float(n) / f1_level.shape[1]
         if i == max(max_level_x, max_level_y):
             u = add_boundary(resize(u_init, level_size))
             v = add_boundary(resize(v_init, level_size))
@@ -562,8 +576,8 @@ def get_displacement(
             v = add_boundary(resize(v[1:-1, 1:-1], level_size))
             tmp = imregister_wrapper(
                 f2_level,
-                u[1:-1, 1:-1] / current_hy,
-                v[1:-1, 1:-1] / current_hx,
+                u[1:-1, 1:-1] / h_col,
+                v[1:-1, 1:-1] / h_row,
                 f1_level,
             )
         if tmp.ndim == 2:
@@ -579,7 +593,7 @@ def get_displacement(
         J23 = np.zeros(J_size, dtype=np.float64)
         for ch in range(n_channels):
             J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = get_motion_tensor_gc(
-                f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
+                f1_level[:, :, ch], tmp[:, :, ch], h_row, h_col
             )
             J11[:, :, ch] = J11_ch
             J22[:, :, ch] = J22_ch
@@ -623,8 +637,11 @@ def get_displacement(
             0,
             a_data_arr,
             a_smooth,
-            current_hx,
-            current_hy,
+            # The solver's hx scales column (x) differences and hy scales row
+            # (y) differences; passing (h_row, h_col) here would swap the
+            # smoothness metric relative to the data term and warping above.
+            h_col,
+            h_row,
         )
         if min(level_size) > 5:
             du[1:-1, 1:-1] = median_filter(du[1:-1, 1:-1], size=(5, 5), mode="mirror")
