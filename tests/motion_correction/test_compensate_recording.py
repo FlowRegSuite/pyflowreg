@@ -731,7 +731,10 @@ class TestFlowParamsWiring:
         )
 
         rng = np.random.default_rng(seed=3)
-        frames = rng.random((4, 32, 32)).astype(np.float32)
+        # At least 5 frames: _compute_initial_w routes through the (mocked)
+        # executor only for n_init > 4; its serial fallback calls
+        # get_displacement directly, which is not under test here.
+        frames = rng.random((6, 32, 32)).astype(np.float32)
         reference = frames.mean(axis=0)
 
         captured = {}
