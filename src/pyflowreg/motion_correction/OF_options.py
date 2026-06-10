@@ -754,6 +754,14 @@ class OFOptions(BaseModel):
                 f"assumption '{constancy_assumption}'. Use "
                 "flow_backend='flowreg' for 'gray' or 'cs'."
             )
+        if self.flow_backend == "diso" and (
+            self.gnc_schedule is not None or self.warping_steps is not None
+        ):
+            raise ValueError(
+                "The 'diso' backend does not support graduated non-convexity. "
+                "Use flow_backend='flowreg' for 'gnc_schedule' or "
+                "'warping_steps'."
+            )
 
         factory = get_backend(self.flow_backend)
         return factory(**self.backend_params)

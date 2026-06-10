@@ -251,6 +251,21 @@ class TestConstancyAssumption:
         with pytest.raises(ValueError, match="does not support"):
             opts.resolve_get_displacement()
 
+    @pytest.mark.parametrize(
+        "gnc_kwargs",
+        [
+            {"gnc_schedule": (0.0, 0.5, 1.0)},
+            {"warping_steps": 5},
+            {"gnc_schedule": (0.0, 1.0), "warping_steps": 5},
+        ],
+    )
+    def test_resolve_get_displacement_diso_rejects_gnc_parameters(self, gnc_kwargs):
+        """DISO backend should not silently accept flowreg-only GNC options."""
+        opts = OFOptions(flow_backend="diso", **gnc_kwargs)
+
+        with pytest.raises(ValueError, match="does not support"):
+            opts.resolve_get_displacement()
+
     def test_to_dict_normalizes_assignment_alias(self):
         """Assignment-time aliases should serialize to backend API values."""
         opts = OFOptions()
