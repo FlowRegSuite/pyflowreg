@@ -2,7 +2,12 @@
 
 This guide covers stack alignment for 3D volumetric data acquired through z-stack scanning in 2-photon microscopy.
 
-PyFlowReg performs **2D frame-by-frame motion correction**. It does not perform true 3D volumetric registration. For z-stack alignment, PyFlowReg uses an adaptive reference approach where the reference frame is updated slice-by-slice as you move through the stack.
+PyFlowReg performs **2D frame-by-frame motion correction**. It does not perform true
+3D volumetric registration. For z-stack alignment, PyFlowReg uses an adaptive
+reference approach where the reference frame is updated slice-by-slice as you move
+through the stack. The separate `pyflowreg.z_align` workflow can then estimate
+z-shifts against a reference stack and optionally write a z-corrected signal plus
+a z-shift-only simulation video.
 
 ## Z-Stack Acquisition Strategy
 
@@ -285,7 +290,8 @@ PyFlowReg's z-stack approach vs. true 3D volumetric registration:
 **PyFlowReg (2D + adaptive reference)**:
 - Registers each frame as a 2D image
 - Adapts reference slice-by-slice
-- Cannot correct through-plane (z-axis) motion
+- The core 2D workflow does not correct through-plane (z-axis) motion; use
+  `pyflowreg.z_align` for reference-stack z-shift estimation/correction
 - Fast and memory-efficient
 - Works well when z-motion is minimal and xy-motion dominates
 

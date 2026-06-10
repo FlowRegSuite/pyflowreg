@@ -44,6 +44,7 @@ dependencies = [
 
 [project.scripts]
 pyflowreg-session = "pyflowreg.session.cli:main"
+pyflowreg-z-align = "pyflowreg.z_align.cli:main"
 
 [project.optional-dependencies]
 vis = [
