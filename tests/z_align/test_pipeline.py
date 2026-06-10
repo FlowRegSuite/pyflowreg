@@ -106,6 +106,65 @@ class TestPipelineUtilities:
         out = pipeline._clip_and_cast(frames, "uint8")
         np.testing.assert_array_equal(out, np.array([0, 1, 2, 255], dtype=np.uint8))
 
+    def test_clip_and_cast_clips_negatives_for_unsigned_outputs(self):
+        frames = np.array([-5.0, -0.4, 2.4], dtype=np.float32)
+        out = pipeline._clip_and_cast(frames, "uint16")
+        np.testing.assert_array_equal(out, np.array([0, 0, 2], dtype=np.uint16))
+
+    def test_clip_and_cast_preserves_negative_floats(self):
+        frames = np.array([-3.7, -0.2, 0.5, 7.9], dtype=np.float32)
+        out = pipeline._clip_and_cast(frames, "float32")
+        assert out.dtype == np.float32
+        np.testing.assert_array_equal(out, frames)
+
+    def test_clip_and_cast_clips_signed_integers_to_range(self):
+        frames = np.array([-70000.0, -5.4, 5.6, 70000.0], dtype=np.float32)
+        out = pipeline._clip_and_cast(frames, "int16")
+        np.testing.assert_array_equal(
+            out, np.array([-32768, -5, 6, 32767], dtype=np.int16)
+        )
+
+    def test_iter_batches_with_temporal_halo_single_batch_passthrough(self):
+        batch = np.arange(3 * 2 * 2 * 1, dtype=np.float32).reshape(3, 2, 2, 1)
+        reader = DummyBatchReader([batch])
+
+        out = list(pipeline._iter_batches_with_temporal_halo(reader, 2))
+
+        assert len(out) == 1
+        extended, n_left, n_core = out[0]
+        np.testing.assert_array_equal(extended, batch)
+        assert (n_left, n_core) == (0, 3)
+
+    def test_iter_batches_with_temporal_halo_extends_with_neighbor_frames(self):
+        def frames(start, count):
+            return np.arange(start, start + count, dtype=np.float32).reshape(
+                count, 1, 1, 1
+            )
+
+        b1, b2, b3 = frames(0, 4), frames(4, 4), frames(8, 2)
+        reader = DummyBatchReader([b1, b2, b3])
+
+        out = list(pipeline._iter_batches_with_temporal_halo(reader, 2))
+
+        assert len(out) == 3
+        np.testing.assert_array_equal(out[0][0], np.concatenate([b1, b2[:2]]))
+        assert (out[0][1], out[0][2]) == (0, 4)
+        np.testing.assert_array_equal(out[1][0], np.concatenate([b1[-2:], b2, b3[:2]]))
+        assert (out[1][1], out[1][2]) == (2, 4)
+        np.testing.assert_array_equal(out[2][0], np.concatenate([b2[-2:], b3]))
+        assert (out[2][1], out[2][2]) == (2, 2)
+
+    def test_iter_batches_with_temporal_halo_zero_halo_passthrough(self):
+        b1 = np.zeros((2, 1, 1, 1), dtype=np.float32)
+        b2 = np.ones((2, 1, 1, 1), dtype=np.float32)
+        reader = DummyBatchReader([b1, b2])
+
+        out = list(pipeline._iter_batches_with_temporal_halo(reader, 0))
+
+        assert [(n_left, n_core) for _, n_left, n_core in out] == [(0, 2), (0, 2)]
+        np.testing.assert_array_equal(out[0][0], b1)
+        np.testing.assert_array_equal(out[1][0], b2)
+
     def test_load_volume_uses_stack_scans_per_slice_as_bin_size(
         self, tmp_path, monkeypatch
     ):
@@ -532,6 +591,185 @@ class TestStage2:
         assert out["prealigned_recording_path"] == prealigned_file
         assert out["corrected_path"] is None
         assert len(writers[str(cfg.resolve_z_shift_file())].writes) == 1
+
+    @pytest.mark.parametrize("input_bin_size", [2, 4])
+    def test_run_stage2_prealigned_recording_not_binned_twice(
+        self, tmp_path, monkeypatch, input_bin_size
+    ):
+        input_file = tmp_path / "compensated.tiff"
+        input_file.touch()
+        prealigned_file = (
+            tmp_path / "z_out" / "prealigned_recording" / "compensated.HDF5"
+        )
+        prealigned_file.parent.mkdir(parents=True)
+        prealigned_file.touch()
+        volume_file = tmp_path / "volume.h5"
+        volume_file.touch()
+
+        cfg = _make_config(
+            tmp_path,
+            reference_volume="volume.h5",
+            prealign_recording=True,
+            write_corrected=False,
+            input_bin_size=input_bin_size,
+            patch_size=2,
+            overlap=0.5,
+            win_half=1,
+        )
+
+        H, W, C, Z = 4, 4, 1, 3
+        T = 2
+        batch_thwc = np.full((T, H, W, C), 100.0, dtype=np.float32)
+        input_reader = DummyBatchReader([batch_thwc])
+        seen = {}
+
+        def fake_get_video_file_reader(path, *args, **kwargs):
+            seen["bin_size"] = kwargs.get("bin_size")
+            return input_reader
+
+        def fake_get_video_file_writer(path, output_format, **kwargs):
+            return RecordingWriter(path)
+
+        monkeypatch.setattr(
+            pipeline,
+            "run_recording_prealignment",
+            lambda _config: prealigned_file,
+        )
+        monkeypatch.setattr(
+            pipeline, "get_video_file_reader", fake_get_video_file_reader
+        )
+        monkeypatch.setattr(
+            pipeline, "get_video_file_writer", fake_get_video_file_writer
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_load_volume",
+            lambda _cfg, _path: np.arange(H * W * C * Z, dtype=np.float32).reshape(
+                H, W, C, Z
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_compute_volume_gradients",
+            lambda volume, sigma: (
+                np.zeros_like(volume, dtype=np.float32),
+                np.zeros_like(volume, dtype=np.float32),
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_compute_batch_gradients",
+            lambda batch, spatial_sigma, temporal_sigma: (
+                np.zeros_like(batch, dtype=np.float32),
+                np.zeros_like(batch, dtype=np.float32),
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_estimate_anchor_z",
+            lambda gx_vol, gy_vol, gx_f, gy_f: (1, np.zeros((Z,), dtype=np.float64)),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_estimate_z_patchwise",
+            lambda *args, **kwargs: np.zeros((H, W, T), dtype=np.float64),
+        )
+
+        pipeline.run_stage2(cfg, volume_path=volume_file)
+
+        # The prealigned recording was already binned by compensate_recording,
+        # so stage 2 must read it with bin_size=1 instead of binning again.
+        assert seen["bin_size"] == 1
+
+    def test_run_stage2_preserves_recording_prealign_status(
+        self, tmp_path, monkeypatch
+    ):
+        input_file = tmp_path / "compensated.tiff"
+        input_file.touch()
+        prealigned_file = (
+            tmp_path / "z_out" / "prealigned_recording" / "compensated.HDF5"
+        )
+        prealigned_file.parent.mkdir(parents=True)
+        prealigned_file.touch()
+        volume_file = tmp_path / "volume.h5"
+        volume_file.touch()
+
+        cfg = _make_config(
+            tmp_path,
+            reference_volume="volume.h5",
+            prealign_recording=True,
+            write_corrected=False,
+            patch_size=2,
+            overlap=0.5,
+            win_half=1,
+        )
+
+        H, W, C, Z = 4, 4, 1, 3
+        T = 2
+        batch_thwc = np.full((T, H, W, C), 100.0, dtype=np.float32)
+        input_reader = DummyBatchReader([batch_thwc])
+
+        def fake_prealign(config):
+            # Mimic the real run_recording_prealignment, which persists its
+            # completion marker to status.json after run_stage2 already took
+            # its own status snapshot.
+            output_root = config.resolve_output_root()
+            status = pipeline.load_or_create_status(output_root)
+            status["recording_prealign"] = "done"
+            status["prealigned_recording_path"] = str(prealigned_file)
+            pipeline.save_status(output_root, status)
+            return prealigned_file
+
+        monkeypatch.setattr(pipeline, "run_recording_prealignment", fake_prealign)
+        monkeypatch.setattr(
+            pipeline, "get_video_file_reader", lambda *args, **kwargs: input_reader
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "get_video_file_writer",
+            lambda path, output_format, **kwargs: RecordingWriter(path),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_load_volume",
+            lambda _cfg, _path: np.arange(H * W * C * Z, dtype=np.float32).reshape(
+                H, W, C, Z
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_compute_volume_gradients",
+            lambda volume, sigma: (
+                np.zeros_like(volume, dtype=np.float32),
+                np.zeros_like(volume, dtype=np.float32),
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_compute_batch_gradients",
+            lambda batch, spatial_sigma, temporal_sigma: (
+                np.zeros_like(batch, dtype=np.float32),
+                np.zeros_like(batch, dtype=np.float32),
+            ),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_estimate_anchor_z",
+            lambda gx_vol, gy_vol, gx_f, gy_f: (1, np.zeros((Z,), dtype=np.float64)),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_estimate_z_patchwise",
+            lambda *args, **kwargs: np.zeros((H, W, T), dtype=np.float64),
+        )
+
+        pipeline.run_stage2(cfg, volume_path=volume_file)
+
+        # Stage 2 must merge status.json instead of overwriting it with its
+        # pre-prealignment snapshot, or resume re-runs the prealignment.
+        status = pipeline.load_or_create_status(cfg.resolve_output_root())
+        assert status["recording_prealign"] == "done"
+        assert status["stage2"] == "done"
 
 
 class TestStage3:

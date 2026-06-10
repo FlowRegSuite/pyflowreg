@@ -102,6 +102,25 @@ class TestCLIRouting:
         cli.cmd_run(args)
         assert called["stage2"] == 1
 
+    @pytest.mark.parametrize("stage", ["2", "3"])
+    def test_cmd_run_warns_on_ignored_of_params(
+        self, config_file, monkeypatch, capsys, stage
+    ):
+        cfg = ZAlignConfig(root=config_file.parent, input_file="compensated.tiff")
+
+        monkeypatch.setattr(cli.ZAlignConfig, "from_file", lambda _p: cfg)
+        monkeypatch.setattr(cli, "run_stage2", lambda config: None)
+        monkeypatch.setattr(cli, "run_stage3", lambda config: None)
+
+        args = argparse.Namespace(
+            config=str(config_file), stage=stage, of_params=["alpha=8"]
+        )
+        cli.cmd_run(args)
+
+        out = capsys.readouterr().out
+        assert "--of-params" in out
+        assert "ignored" in out
+
     def test_cmd_run_all_stages(self, config_file, monkeypatch):
         cfg = ZAlignConfig(root=config_file.parent, input_file="compensated.tiff")
         called = {"all": 0}

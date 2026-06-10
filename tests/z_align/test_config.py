@@ -2,6 +2,7 @@
 Tests for z-align configuration.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,35 @@ class TestZAlignConfigBasics:
                 input_file="compensated.tiff",
                 output_dtype="not_a_dtype",
             )
+
+    def test_unknown_config_key_raises(self, tmp_path):
+        # Misspelled options must fail loudly instead of silently running
+        # with defaults (extra="forbid").
+        with pytest.raises(ValidationError):
+            ZAlignConfig(
+                root=tmp_path,
+                input_file="compensated.tiff",
+                winhalf=3,
+            )
+
+    def test_z_shift_file_rejects_non_hdf5_extension(self, tmp_path):
+        # Stage 2 always writes z-shifts as HDF5 while stage 3 dispatches the
+        # reader on extension, so non-HDF5 names break read-back.
+        with pytest.raises(ValidationError, match="HDF5 extension"):
+            ZAlignConfig(
+                root=tmp_path,
+                input_file="compensated.tiff",
+                z_shift_file="z_shift.tif",
+            )
+
+    @pytest.mark.parametrize("name", ["z_shift.h5", "z_shift.HDF5", "z_shift.hdf"])
+    def test_z_shift_file_accepts_hdf5_extensions(self, tmp_path, name):
+        cfg = ZAlignConfig(
+            root=tmp_path,
+            input_file="compensated.tiff",
+            z_shift_file=name,
+        )
+        assert cfg.z_shift_file == Path(name)
 
     def test_stack_scans_per_slice_must_be_positive(self, tmp_path):
         with pytest.raises(ValidationError, match="Value must be >= 1"):
@@ -194,6 +224,45 @@ class TestZAlignFlowOptions:
         assert overrides == {"reference_frames": [1, 2, 3], "alpha": 8.0}
         overrides["alpha"] = 2.0
         assert cfg.recording_prealign_flow_options["alpha"] == 8.0
+
+    def test_recording_prealign_flow_options_file_forwards_only_explicit_fields(
+        self, tmp_path
+    ):
+        options_path = tmp_path / "partial_options.json"
+        options_path.write_text(json.dumps({"alpha": 3.0}), encoding="utf-8")
+
+        cfg = ZAlignConfig(
+            root=tmp_path,
+            input_file="compensated.tiff",
+            recording_prealign_flow_options=options_path,
+        )
+        overrides = cfg.get_recording_prealign_overrides()
+
+        # Only fields written in the file are forwarded; OFOptions defaults
+        # (e.g. reference_frames) must not leak in and silently clobber the
+        # workflow-computed prealignment reference.
+        assert set(overrides) == {"alpha"}
+
+    @pytest.mark.parametrize(
+        "options_field, getter",
+        [
+            ("stage1_flow_options", "get_stage1_overrides"),
+            ("recording_prealign_flow_options", "get_recording_prealign_overrides"),
+        ],
+    )
+    def test_flow_options_protect_naming_convention(
+        self, tmp_path, options_field, getter
+    ):
+        cfg = ZAlignConfig(
+            root=tmp_path,
+            input_file="compensated.tiff",
+            **{options_field: {"naming_convention": "batch", "buffer_size": 9}},
+        )
+        overrides = getattr(cfg, getter)()
+
+        # The pipeline locates compensate_recording outputs at the default
+        # "compensated.HDF5" name, so naming_convention is workflow-owned.
+        assert overrides == {"buffer_size": 9}
 
     def test_effective_volume_bin_size_prefers_stack_scans_per_slice(self, tmp_path):
         cfg = ZAlignConfig(

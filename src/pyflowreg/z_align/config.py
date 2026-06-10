@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 _STAGE1_PROTECTED_OF_FIELDS = {
@@ -21,6 +21,7 @@ _STAGE1_PROTECTED_OF_FIELDS = {
     "output_path",
     "output_format",
     "output_file_name",
+    "naming_convention",
     "reference_frames",
 }
 
@@ -29,11 +30,14 @@ _RECORDING_PREALIGN_PROTECTED_OF_FIELDS = {
     "output_path",
     "output_format",
     "output_file_name",
+    "naming_convention",
 }
 
 
 class ZAlignConfig(BaseModel):
     """Configuration for z-shift alignment and correction."""
+
+    model_config = ConfigDict(extra="forbid")
 
     # Core paths
     root: Path
@@ -183,6 +187,19 @@ class ZAlignConfig(BaseModel):
             raise ValueError("overlap must satisfy 0 <= overlap < 1")
         return v
 
+    @field_validator("z_shift_file")
+    @classmethod
+    def _validate_z_shift_file(cls, v: Path):
+        # Stage 2 always writes this file with the HDF5 writer, while stage 3
+        # re-opens it through the extension-dispatched reader factory, so a
+        # non-HDF5 extension would break read-back after a successful run.
+        if v.suffix.lower() not in {".h5", ".hdf5", ".hdf"}:
+            raise ValueError(
+                "z_shift_file must have an HDF5 extension (.h5/.hdf5/.hdf), "
+                f"got: {v.name}"
+            )
+        return v
+
     @field_validator("output_dtype")
     @classmethod
     def _validate_output_dtype(cls, v: str):
@@ -294,7 +311,10 @@ class ZAlignConfig(BaseModel):
         """
         Return OFOptions overrides with workflow-owned fields removed.
 
-        The config supports inline dict values or paths to saved OF_options JSON.
+        The config supports inline dict values or paths to saved OF_options
+        JSON. For both sources, only fields the user explicitly provided are
+        forwarded; fields a loaded file does not mention keep their
+        workflow-computed values instead of leaking OFOptions defaults.
         """
         if option_source is None:
             return {}
@@ -319,7 +339,7 @@ class ZAlignConfig(BaseModel):
 
         return {
             key: value
-            for key, value in options.model_dump().items()
+            for key, value in options.model_dump(exclude_unset=True).items()
             if key in allowed_fields
         }
 

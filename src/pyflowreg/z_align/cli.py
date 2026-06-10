@@ -69,6 +69,12 @@ def cmd_run(args: argparse.Namespace) -> None:
     config = ZAlignConfig.from_file(config_path)
     overrides = _parse_overrides(args.of_params)
 
+    if overrides and args.stage in {"2", "3"}:
+        print(
+            "Warning: --of-params only applies to stage 1 and is ignored "
+            f"for stage {args.stage}"
+        )
+
     if args.stage == "1":
         run_stage1(config, overrides or None)
         return

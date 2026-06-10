@@ -32,6 +32,7 @@ _STAGE1_PROTECTED_OF_FIELDS = {
     "output_path",
     "output_format",
     "output_file_name",
+    "naming_convention",
     "reference_frames",
 }
 
@@ -40,6 +41,7 @@ _RECORDING_PREALIGN_PROTECTED_OF_FIELDS = {
     "output_path",
     "output_format",
     "output_file_name",
+    "naming_convention",
 }
 
 
@@ -88,6 +90,47 @@ def _from_hwct(batch_hwct: np.ndarray) -> np.ndarray:
     return np.transpose(batch_hwct, (3, 0, 1, 2))
 
 
+def _iter_batches_with_temporal_halo(reader, halo: int):
+    """
+    Yield reader batches extended with temporal context from adjacent batches.
+
+    Yields tuples ``(batch_thwc, n_left, n_core)`` where
+    ``batch_thwc[n_left:n_left + n_core]`` are the frames of the original
+    reader batch and the surrounding frames are up to ``halo`` true context
+    frames copied from the neighboring batches. The context lets temporal
+    filters see real neighbor frames at batch boundaries instead of their
+    reflected boundary handling, so filtered core frames match
+    whole-recording processing. At the start and end of the recording no
+    context exists, matching the boundary handling a whole-recording filter
+    would apply there. Context is limited to the immediately adjacent batch,
+    so ``halo`` should not exceed the reader buffer size.
+    """
+    if halo < 1:
+        while reader.has_batch():
+            batch = _ensure_thwc(reader.read_batch())
+            yield batch, 0, batch.shape[0]
+        return
+
+    pending: Optional[np.ndarray] = None
+    left_context: Optional[np.ndarray] = None
+
+    while reader.has_batch():
+        batch = _ensure_thwc(reader.read_batch())
+        if pending is not None:
+            parts = [left_context, pending, batch[:halo]]
+            extended = np.concatenate([p for p in parts if p is not None], axis=0)
+            n_left = 0 if left_context is None else left_context.shape[0]
+            yield extended, n_left, pending.shape[0]
+            left_context = pending[-halo:]
+        pending = batch
+
+    if pending is not None:
+        parts = [left_context, pending]
+        extended = np.concatenate([p for p in parts if p is not None], axis=0)
+        n_left = 0 if left_context is None else left_context.shape[0]
+        yield extended, n_left, pending.shape[0]
+
+
 def _parse_output_format(path: Path, fallback: str = "TIFF") -> str:
     """Infer writer format from file extension."""
     ext = path.suffix.lower()
@@ -108,9 +151,9 @@ def _resolve_n_workers(n_jobs: int) -> int:
 
 
 def _clip_and_cast(frames: np.ndarray, dtype_name: str) -> np.ndarray:
-    """Clip to dtype range and cast."""
+    """Clip to dtype range and cast. Floating-point outputs are not clipped."""
     dtype = np.dtype(dtype_name)
-    arr = np.maximum(frames, 0)
+    arr = frames
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
         arr = np.clip(arr, info.min, info.max)
@@ -710,10 +753,15 @@ def run_stage2(
     H, W, C, Z = volume_hwcz.shape
     gx_vol, gy_vol = _compute_volume_gradients(volume_hwcz, config.spatial_sigma)
 
+    # The prealigned recording was already temporally binned by
+    # compensate_recording, so it must not be binned a second time here.
+    input_bin_size = (
+        1 if prealigned_recording_path is not None else config.input_bin_size
+    )
     input_reader = get_video_file_reader(
         str(input_path),
         buffer_size=config.input_buffer_size,
-        bin_size=config.input_bin_size,
+        bin_size=input_bin_size,
     )
 
     z_writer = get_video_file_writer(str(z_shift_path), "HDF5")
@@ -725,10 +773,21 @@ def run_stage2(
     anchor_z: Optional[int] = None
     diff_hwcz: Optional[np.ndarray] = None
 
+    # Temporal context so the two temporal Gaussian filters (gradient
+    # pre-smoothing and z_hat regularization) see true neighbor frames at
+    # batch boundaries. The sum of both kernel radii (scipy truncates at
+    # 4*sigma) makes the cascaded filtering of core frames equivalent to
+    # whole-recording processing, so z estimates do not depend on
+    # input_buffer_size.
+    temporal_halo = int(np.ceil(4.0 * config.temporal_sigma)) + int(
+        np.ceil(4.0 * config.z_smooth_sigma_temporal)
+    )
+
     try:
         n_batches = 0
-        while input_reader.has_batch():
-            batch_thwc = _ensure_thwc(input_reader.read_batch())
+        for batch_thwc, n_left, n_core in _iter_batches_with_temporal_halo(
+            input_reader, temporal_halo
+        ):
             batch_hwct = _to_hwct(batch_thwc).astype(np.float32, copy=False)
             if batch_hwct.shape[:3] != (H, W, C):
                 input_shape = (
@@ -771,6 +830,11 @@ def run_stage2(
                 n_jobs=config.n_jobs,
             )
 
+            # Keep only the core frames; halo context frames are written by
+            # the batches that own them.
+            core = slice(n_left, n_left + n_core)
+            z_hat_hwt = z_hat_hwt[:, :, core]
+
             # Persist z-shifts in MATLAB-style 1-based slice coordinates.
             z_batch_thwc = _from_hwct(
                 (z_hat_hwt + 1.0)[:, :, None, :].astype(np.float32)
@@ -778,7 +842,9 @@ def run_stage2(
             z_writer.write_frames(z_batch_thwc)
 
             if corrected_writer is not None and diff_hwcz is not None:
-                corrected_hwct = _apply_z_correction(batch_hwct, z_hat_hwt, diff_hwcz)
+                corrected_hwct = _apply_z_correction(
+                    batch_hwct[:, :, :, core], z_hat_hwt, diff_hwcz
+                )
                 corrected_thwc = _from_hwct(corrected_hwct)
                 corrected_writer.write_frames(
                     _clip_and_cast(corrected_thwc, config.output_dtype)
@@ -809,6 +875,10 @@ def run_stage2(
         ),
     )
 
+    # Re-load before saving: run_recording_prealignment updated status.json
+    # after our snapshot was taken, and saving the stale dict would erase its
+    # "recording_prealign" completion marker.
+    status = load_or_create_status(output_root)
     status["stage2"] = "done"
     status["anchor_z"] = int(anchor_z)
     status["anchor_z_1based"] = int(anchor_z + 1)
