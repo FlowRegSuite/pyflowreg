@@ -312,8 +312,8 @@ def align_sequence(
 
     Examples
     --------
-    >>> batch = np.random.rand(100, 512, 512, 1)
-    >>> displacement = np.zeros((512, 512, 2))  # No displacement
+    >>> batch = np.random.rand(8, 64, 64, 1)
+    >>> displacement = np.zeros((64, 64, 2))  # No displacement
     >>> reference = np.mean(batch, axis=0)
     >>> aligned = align_sequence(batch, displacement, reference)
     """

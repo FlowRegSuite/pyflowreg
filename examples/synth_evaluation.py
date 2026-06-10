@@ -43,7 +43,7 @@ def run(flow_params, f1, f2):
     return w
 
 
-if __name__ == "__main__":
+def main():
     # Download data to data/ folder (default location)
     data_file = download_demo_data("synth_frames.h5")
 
@@ -101,3 +101,7 @@ if __name__ == "__main__":
 
             w = run({**base_params, "min_level": 5}, f1c, f2c)
             print(f"{epe(w_ref, w, b):.2f} for {name}, fast, ch {ch+1}")
+
+
+if __name__ == "__main__":
+    main()

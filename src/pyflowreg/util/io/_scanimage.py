@@ -26,22 +26,33 @@ def parse_scanimage_metadata(file_path: str) -> Dict[str, Any]:
     """
     Parse ScanImage metadata from a TIFF file.
 
-    Args:
-        file_path: Path to the ScanImage TIFF file
+    Parameters
+    ----------
+    file_path : str
+        Path to the ScanImage TIFF file.
 
-    Returns:
+    Returns
+    -------
+    dict
         Dictionary containing parsed metadata with keys:
-        - is_scanimage: Whether this is a ScanImage file
-        - version: ScanImage version
-        - channels: Number of channels
-        - volumes: Number of volumes/stacks
-        - slices_per_volume: Number of Z slices per volume
-        - frames_per_slice: Number of frames at each Z position
-        - total_frames: Total number of 2D frames (volumes * slices_per_volume)
-        - z_step: Z step size in microns (if available)
-        - frame_rate: Acquisition frame rate (if available)
-        - roi_data: ROI information (if available)
-        - raw_metadata: Complete raw metadata dictionary
+
+        - ``is_scanimage``: Whether this is a ScanImage file.
+        - ``version``: ScanImage version.
+        - ``channels``: Number of channels.
+        - ``volumes``: Number of volumes/stacks.
+        - ``slices_per_volume``: Number of Z slices per volume.
+        - ``frames_per_slice``: Number of frames at each Z position.
+        - ``total_frames``: Total number of 2D frames
+          (volumes * slices_per_volume).
+        - ``z_step``: Z step size in microns (if available).
+        - ``frame_rate``: Acquisition frame rate (if available).
+        - ``roi_data``: ROI information (if available).
+        - ``raw_metadata``: Complete raw metadata dictionary.
+
+    Raises
+    ------
+    ImportError
+        If the tifffile library is not installed.
     """
     if not TIFFFILE_SUPPORTED:
         raise ImportError("tifffile library required for ScanImage support")
@@ -221,10 +232,17 @@ def parse_scanimage_metadata(file_path: str) -> Dict[str, Any]:
 
 def _extract_from_description(description: str, metadata: Dict[str, Any]):
     """
-    Extract metadata from ImageDescription string using regex patterns.
+    Extract metadata from an ImageDescription string using regex patterns.
 
     This handles older ScanImage formats where metadata is stored as
     MATLAB-evaluable strings rather than JSON.
+
+    Parameters
+    ----------
+    description : str
+        ImageDescription tag content.
+    metadata : dict
+        Metadata dictionary that is updated in place.
     """
     import re
 
@@ -296,20 +314,29 @@ def interpret_scanimage_dimensions(
     """
     Interpret dimensions of a ScanImage TIFF based on shape, axes, and metadata.
 
-    Args:
-        tif_shape: Shape tuple from tifffile
-        tif_axes: Axes string from tifffile (e.g., 'TZYX', 'TYX', 'ZYX')
-        si_metadata: Parsed ScanImage metadata dictionary
+    Parameters
+    ----------
+    tif_shape : tuple of int
+        Shape tuple from tifffile.
+    tif_axes : str
+        Axes string from tifffile (e.g., 'TZYX', 'TYX', 'ZYX').
+    si_metadata : dict
+        Parsed ScanImage metadata dictionary.
 
-    Returns:
+    Returns
+    -------
+    dict
         Dictionary with interpreted dimensions:
-        - total_frames: Total 2D frames for processing
-        - height: Image height
-        - width: Image width
-        - channels: Number of channels
-        - volumes: Number of 3D volumes
-        - z_planes: Number of Z planes per volume
-        - true_time_frames: Actual time points (volumes)
+
+        - ``total_frames``: Total 2D frames for processing.
+        - ``height``: Image height.
+        - ``width``: Image width.
+        - ``channels``: Number of channels.
+        - ``volumes``: Number of 3D volumes.
+        - ``z_planes``: Number of Z planes per volume.
+        - ``true_time_frames``: Actual time points (volumes).
+        - ``interpretation``: String describing how the dimensions were
+          interpreted.
     """
     result = {
         "total_frames": 1,
@@ -400,11 +427,17 @@ def format_scanimage_metadata_report(metadata: Dict[str, Any]) -> str:
     """
     Format ScanImage metadata into a human-readable report.
 
-    Args:
-        metadata: Parsed metadata dictionary
+    Parameters
+    ----------
+    metadata : dict
+        Parsed metadata dictionary as returned by
+        ``parse_scanimage_metadata``.
 
-    Returns:
-        Formatted string report
+    Returns
+    -------
+    str
+        Formatted multi-line report, or "Not a ScanImage file" if the
+        metadata does not describe a ScanImage file.
     """
     lines = []
 

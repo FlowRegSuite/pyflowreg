@@ -42,7 +42,9 @@ myst_enable_extensions = [
 myst_heading_anchors = 3
 myst_url_schemes = ["http", "https"]
 
-napoleon_google_docstring = True
+# NumPy-style docstrings only (DOCS.md standard); Google style disabled so
+# accidental Args:/Returns: sections surface as plain text in review.
+napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = True
 napoleon_use_param = False
@@ -52,7 +54,7 @@ autoclass_content = "both"
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
-    "undoc-members": True,
+    "undoc-members": False,
     "exclude-members": "__weakref__",
     "show-inheritance": True,
 }
@@ -72,3 +74,22 @@ extlinks = {
 bibtex_bibfiles = ["references.bib"]
 
 nitpicky = True
+
+# Escape hatches for the strict build (nitpicky + RTD fail_on_warning):
+# references to external objects whose projects publish no intersphinx
+# inventory (cv2, tifffile, h5py, numba) or whose inventory does not
+# expose the referenced names (pydantic internals), plus docstring
+# shorthand like ``np.ndarray`` that is not a resolvable target.
+nitpick_ignore = [
+    ("py:class", "np.ndarray"),
+    ("py:class", "array_like"),
+    ("py:class", "optional"),
+]
+nitpick_ignore_regex = [
+    ("py:class", r"pydantic.*"),
+    ("py:class", r"pydantic_core.*"),
+    ("py:class", r"cv2.*"),
+    ("py:class", r"numba.*"),
+    ("py:class", r"h5py.*"),
+    ("py:class", r"tifffile.*"),
+]

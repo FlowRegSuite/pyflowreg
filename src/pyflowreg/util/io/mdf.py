@@ -26,7 +26,11 @@ except ImportError:
 
 class MDFFileReader(VideoReader):
     """
-    MDF file reader for Windows using MCSX.Data COM interface.
+    MDF file reader for Windows using the MCSX.Data COM interface.
+
+    Requires Windows with the 'pywin32' library and the 'MCSX.Data' COM
+    server installed (e.g. by installing the original MDF software).
+    Frames are returned in (T, H, W, C) format.
 
     Note: MDF files use 1-based indexing internally (MATLAB heritage).
     This reader transparently converts between 0-based Python indexing
@@ -39,11 +43,27 @@ class MDFFileReader(VideoReader):
         """
         Initialize MDF reader.
 
-        Args:
-            file_path: Path to .mdf file
-            buffer_size: Number of frames per batch
-            bin_size: Temporal binning factor
-            channel_idx: Optional list of channels to read (1-based)
+        Parameters
+        ----------
+        file_path : str
+            Path to the .mdf file.
+        buffer_size : int, optional
+            Number of frames per batch (default 500).
+        bin_size : int, optional
+            Temporal binning factor (default 1).
+        **kwargs
+            Additional options. Supported keys:
+
+            - ``channel_idx`` (list of int): 1-based channel numbers to
+              read. If not given, all available channels are read.
+
+        Raises
+        ------
+        NotImplementedError
+            If pywin32 is not available (non-Windows platform or missing
+            dependency).
+        FileNotFoundError
+            If ``file_path`` does not exist.
         """
         if not MDF_SUPPORTED:
             raise NotImplementedError(
@@ -117,14 +137,22 @@ class MDFFileReader(VideoReader):
 
     def _clean_frame_data(self, raw_data: tuple, frame_idx: int) -> np.ndarray:
         """
-        Clean and validate frame data from COM interface.
+        Clean and validate frame data from the COM interface.
 
-        Args:
-            raw_data: Raw data tuple from COM interface
-            frame_idx: Frame index (0-based) for error messages
+        Values outside the valid range of the target integer dtype are
+        clamped; a warning is printed once per reader instance.
 
-        Returns:
-            Cleaned numpy array with proper dtype
+        Parameters
+        ----------
+        raw_data : tuple
+            Raw data tuple from the COM interface.
+        frame_idx : int
+            Frame index (0-based) used in warning messages.
+
+        Returns
+        -------
+        ndarray
+            Cleaned array converted to the reader dtype.
         """
         # Convert to numpy array
         temp_array = np.array(raw_data)
@@ -161,13 +189,24 @@ class MDFFileReader(VideoReader):
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
         """
-        Read raw frames from MDF file.
+        Read raw frames from the MDF file.
 
-        Args:
-            frame_indices: 0-based indices (slice or list)
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            0-based raw frame indices.
 
-        Returns:
-            Array with shape (T, H, W, C)
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C).
+
+        Raises
+        ------
+        IndexError
+            If a frame index is out of range.
+        IOError
+            If a frame cannot be read from the COM interface.
         """
         # Convert slice to list of indices
         if isinstance(frame_indices, slice):
@@ -224,7 +263,14 @@ class MDFFileReader(VideoReader):
     def reset_connection(self):
         """
         Reset the MDF COM connection if it becomes unresponsive.
-        Useful when the COM server gets stuck.
+
+        Releases the current COM object, re-opens the file and resets
+        ``current_frame`` to 0. Useful when the COM server gets stuck.
+
+        Raises
+        ------
+        ConnectionError
+            If the connection cannot be re-established.
         """
         print("Resetting MDF connection...")
 
@@ -248,10 +294,15 @@ class MDFFileReader(VideoReader):
 
     def get_metadata(self) -> dict:
         """
-        Get comprehensive metadata from MDF file.
+        Get comprehensive metadata from the MDF file.
 
-        Returns:
-            Dictionary with file metadata
+        Returns
+        -------
+        dict
+            Dictionary with file name, frame count, shapes, channel
+            names, frame time step in seconds (scaled by ``bin_size``),
+            pixel size in microns, magnification, dtype and creation
+            date.
         """
         self._ensure_initialized()
 

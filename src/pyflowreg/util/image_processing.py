@@ -16,16 +16,36 @@ def normalize(
     eps: float = 1e-8,
 ) -> np.ndarray:
     """
-    Normalize array to [0,1] range.
+    Normalize an array to the [0, 1] range.
 
-    Args:
-        arr: Array to normalize, shape (H,W,C) or (T,H,W,C)
-        ref: Optional reference for normalization ranges (MATLAB compatibility)
-        channel_normalization: 'separate' for per-channel, 'together' for global
-        eps: Small value to avoid division by zero
+    Parameters
+    ----------
+    arr : np.ndarray
+        Array to normalize, shape (H, W, C) or (T, H, W, C).
+    ref : np.ndarray, optional
+        Reference array whose min/max values define the normalization
+        range instead of ``arr``'s own values (MATLAB compatibility).
+        Values in ``arr`` outside the reference range map outside [0, 1].
+    channel_normalization : {"together", "separate"}, optional
+        ``"separate"`` normalizes each channel independently using
+        per-channel min/max; ``"together"`` uses a single global range.
+        Default is ``"together"``.
+    eps : float, optional
+        Small value added to the denominator to avoid division by zero.
+        Default is 1e-8.
 
-    Returns:
-        Normalized array in [0,1] range
+    Returns
+    -------
+    np.ndarray
+        Normalized array scaled to the [0, 1] range. Per-channel
+        normalization returns a float64 array.
+
+    Notes
+    -----
+    With ``channel_normalization="separate"``, per-channel reference
+    ranges are only used when ``ref`` has at least 3 dimensions;
+    otherwise the array's own per-channel min/max is used. Inputs that
+    are not 3D or 4D fall back to global normalization.
     """
     if channel_normalization == "separate":
         # Per-channel normalization
@@ -84,16 +104,31 @@ def apply_gaussian_filter(
     """
     Apply Gaussian filtering matching MATLAB's imgaussfilt3 for multichannel data.
 
-    Args:
-        arr: Input array, shape (H,W,C) or (T,H,W,C)
-        sigma: Standard deviation for Gaussian kernel
-               - array shape (3,): [sy, sx, st] for all channels
-               - array shape (n_channels, 3): per-channel sigmas
-        mode: Boundary handling mode
-        truncate: Truncate filter at this many standard deviations
+    Each channel is filtered independently with
+    ``scipy.ndimage.gaussian_filter``. 3D inputs (H, W, C) are filtered
+    spatially only; 4D inputs (T, H, W, C) are filtered spatiotemporally.
 
-    Returns:
-        Filtered array
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array, shape (H, W, C) or (T, H, W, C).
+    sigma : np.ndarray
+        Standard deviations of the Gaussian kernel ordered as
+        ``[sy, sx, st]``. Shape (3,) applies the same sigmas to all
+        channels; shape (n_channels, 3) gives per-channel sigmas. For
+        (H, W, C) input only the spatial components ``[sy, sx]`` are used.
+    mode : str, optional
+        Boundary handling mode passed to ``scipy.ndimage.gaussian_filter``.
+        Default is "reflect".
+    truncate : float, optional
+        Truncate the filter at this many standard deviations.
+        Default is 4.0.
+
+    Returns
+    -------
+    np.ndarray
+        Filtered float64 array with the same shape as ``arr``. Inputs
+        that are not 3D or 4D are returned unchanged.
     """
     sigma = np.asarray(sigma)
 
@@ -134,17 +169,33 @@ def gaussian_filter_1d_half_kernel(
     buffer: deque, sigma_t: float, mode: str = "reflect", truncate: float = 4.0
 ) -> np.ndarray:
     """
-    Fast 1D Gaussian filter using half kernel for temporal dimension.
-    Optimized for real-time filtering with circular buffer.
+    Filter the newest buffered frame with a causal half-kernel 1D Gaussian.
 
-    Args:
-        buffer: deque of 2D filtered frames [oldest...newest]
-        sigma_t: Temporal standard deviation
-        mode: Boundary handling mode (unused, kept for API consistency)
-        truncate: Truncate filter at this many standard deviations
+    Optimized for real-time temporal filtering with a circular buffer:
+    only the current frame and past frames contribute, weighted by the
+    causal half of a normalized Gaussian kernel.
 
-    Returns:
-        Temporally filtered current frame (last in buffer)
+    Parameters
+    ----------
+    buffer : collections.deque
+        Buffer of spatially filtered frames ordered [oldest, ..., newest].
+    sigma_t : float
+        Temporal standard deviation. If <= 0, the newest frame is
+        returned unfiltered.
+    mode : str, optional
+        Boundary handling mode (unused, kept for API consistency).
+        Default is "reflect".
+    truncate : float, optional
+        Truncate the filter at this many standard deviations.
+        Default is 4.0.
+
+    Returns
+    -------
+    np.ndarray or None
+        Temporally filtered newest frame, cast to the dtype of the
+        newest buffered frame. Returns ``None`` if the buffer is empty;
+        returns a copy of the newest frame if the buffer holds a single
+        frame or ``sigma_t <= 0``.
     """
     if not buffer or len(buffer) == 0:
         return None

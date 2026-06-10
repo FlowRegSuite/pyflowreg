@@ -1,6 +1,6 @@
 # Session API Reference
 
-The session module provides multi-recording session processing with MATLAB-compatible workflow for large-scale 2-photon microscopy experiments.
+The session module provides multi-recording session processing for large-scale 2-photon microscopy experiments.
 
 ## Overview
 
@@ -10,7 +10,7 @@ The session processing pipeline consists of three stages:
 2. **Stage 2**: Inter-sequence displacement computation using phase cross-correlation and optical flow refinement
 3. **Stage 3**: Valid mask alignment and final session mask computation
 
-This implementation provides full parity with MATLAB `align_full_v3_checkpoint.m` and `get_session_valid_index_v3_progressprint.m`.
+The implementation is modeled on the MATLAB session workflow scripts `align_full_v3_checkpoint.m` and `get_session_valid_index_v3_progressprint.m`.
 
 ## Configuration
 
@@ -20,24 +20,11 @@ This implementation provides full parity with MATLAB `align_full_v3_checkpoint.m
 from pyflowreg.session.config import SessionConfig
 ```
 
-::: pyflowreg.session.config.SessionConfig
-    options:
-        members:
-            - root
-            - pattern
-            - center
-            - output_root
-            - final_results
-            - resume
-            - scheduler
-            - n_workers
-            - flow_backend
-            - backend_params
-            - cc_upsample
-            - sigma_smooth
-            - alpha_between
-            - iterations_between
-            - stage2_constancy_assumption
+```{eval-rst}
+.. autoclass:: pyflowreg.session.config.SessionConfig
+   :members:
+   :exclude-members: model_config, model_fields, model_computed_fields
+```
 
 **Configuration File Support**
 
@@ -62,17 +49,18 @@ config = SessionConfig.from_file("session.toml")  # or .yml/.yaml
 # session.toml
 root = "/data/experiment/"
 pattern = "*.tif"
-center = "recording_03.tif"  # Optional, auto-selects middle if not specified
+center = "recording_03.tif"  # Optional, defaults to lexicographic middle file
 output_root = "compensated_outputs"
 final_results = "final_results"
 resume = true
-scheduler = "local"  # or "array" for HPC
+scheduler = "local"  # "local", "array" (HPC job array), or "dask"
 n_workers = -1       # Stage 1 workers (-1 = all CPU cores)
 
 # Flow backend configuration
 flow_backend = "flowreg"  # or "flowreg_torch", "flowreg_cuda", "diso"
-[backend_params]
-device = "cuda:0"  # For flowreg_torch backend
+
+# Stage 1 parameters
+stage1_quality_setting = "balanced"  # Optional OFOptions quality preset
 
 # Stage 2 parameters
 cc_upsample = 4
@@ -80,6 +68,14 @@ sigma_smooth = 6.0
 alpha_between = 25.0
 iterations_between = 100
 stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
+
+# Stage 3 parameters
+align_chunk_size = 64
+align_output_format = "TIFF"
+
+# Backend parameters (TOML table; must come after all top-level keys)
+[backend_params]
+device = "cuda:0"  # For flowreg_torch backend
 ```
 
 ## Stage 1: Per-Recording Compensation
@@ -90,9 +86,9 @@ stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
 from pyflowreg.session.stage1_compensate import run_stage1
 ```
 
-::: pyflowreg.session.stage1_compensate.run_stage1
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.session.stage1_compensate.run_stage1
+```
 
 **Features:**
 - Automatic input file discovery
@@ -102,21 +98,10 @@ from pyflowreg.session.stage1_compensate import run_stage1
 - Atomic file writes for crash safety
 
 **Example:**
-```python
-from pyflowreg.session import SessionConfig
-from pyflowreg.session.stage1_compensate import run_stage1
-
-config = SessionConfig.from_toml("session.toml")
-config.n_workers = -1
-
-# Override OFOptions directly on the config (or set via TOML/YAML)
-config.flow_options = {
-    "quality_setting": "fast",
-    "save_w": True,
-    "buffer_size": 1000,
-}
-
-output_folders = run_stage1(config)
+```{literalinclude} ../snippets/api/session/run_stage1_example.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### run_stage1_array
@@ -125,9 +110,9 @@ output_folders = run_stage1(config)
 from pyflowreg.session.stage1_compensate import run_stage1_array
 ```
 
-::: pyflowreg.session.stage1_compensate.run_stage1_array
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.session.stage1_compensate.run_stage1_array
+```
 
 **Array Job Support:**
 
@@ -159,18 +144,19 @@ run_stage1_array(config)
 from pyflowreg.session.stage2_between_avgs import run_stage2
 ```
 
-::: pyflowreg.session.stage2_between_avgs.run_stage2
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.session.stage2_between_avgs.run_stage2
+```
 
 **Algorithm:**
 1. Load temporal averages from Stage 1
-2. Identify center reference (auto or specified)
+2. Identify center reference (auto or specified); the center recording gets a zero displacement field
 3. For each non-center recording:
-   - Phase cross-correlation initialization (subpixel)
-   - Gaussian smoothing (σ=6)
-   - Optical flow refinement (α=25, iterations=100)
-4. Save displacement fields as `w_to_reference.npz`
+   - Gaussian smoothing of both averages (`sigma_smooth`, default 6.0) and normalization to [0, 1]
+   - Rigid pre-alignment via subpixel phase cross-correlation (`cc_upsample`, default 4), applied to the current average as a constant-shift warp
+   - Optical flow refinement (`alpha_between`, default 25.0; `iterations_between`, default 100)
+   - Total displacement = refined flow + rigid initialization
+4. Save displacement fields as `w_to_reference.npz` (arrays `u` and `v`) in each output folder
 
 **Backend Selection:**
 
@@ -184,6 +170,18 @@ config = SessionConfig(
 middle_idx, center_file, displacements = run_stage2(config)
 ```
 
+### Troubleshooting Stage 2 alignment
+
+Stage 2 alignment is controlled by the following `SessionConfig` fields:
+
+- `sigma_smooth`: Gaussian smoothing sigma applied to both temporal averages before flow estimation. Increase for noisy averages; decrease if fine structure is being smoothed away.
+- `cc_upsample`: Upsampling factor for the phase cross-correlation pre-alignment (1 = integer-pixel shifts). The rigid estimate is computed on images downsampled to at most 256x256 pixels and rescaled to the full grid.
+- `alpha_between`: Regularization weight for the inter-sequence optical flow (applied isotropically as `(alpha, alpha)`). Larger values produce smoother, more rigid displacement fields.
+- `iterations_between`: Number of solver iterations for the inter-sequence flow refinement.
+- `stage2_constancy_assumption`: Data term for the Stage 2 flow. Accepts `"gc"` (default, gradient constancy), `"gray"`, and `"cs"` (census), plus the aliases `"gradient"`, `"brightness"`, and `"census"`. The `"diso"` backend only supports `"gc"`; other values raise a `ValueError`.
+
+When `resume=True`, existing `w_to_reference.npz` files are reused without recomputation. After changing any of the parameters above, delete the affected `w_to_reference.npz` files (or set `resume=False`) to force recomputation.
+
 ## Stage 3: Valid Mask Computation
 
 ### run_stage3
@@ -192,9 +190,9 @@ middle_idx, center_file, displacements = run_stage2(config)
 from pyflowreg.session.stage3_valid_mask import run_stage3
 ```
 
-::: pyflowreg.session.stage3_valid_mask.run_stage3
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.session.stage3_valid_mask.run_stage3
+```
 
 **Processing:**
 1. Load per-frame valid masks from `idx.hdf`
@@ -206,8 +204,8 @@ from pyflowreg.session.stage3_valid_mask import run_stage3
 **Output Files:**
 - `final_valid_idx.png`: Final session mask (visual)
 - `final_valid_idx.npz`: Complete results (Python)
-- `final_valid_idx.mat`: MATLAB-compatible output
-- Per-sequence masks and aligned versions
+- `final_valid_idx.mat`: MATLAB-compatible output (written when SciPy is available; `middle_idx` is stored 1-based)
+- Per-sequence masks (`<recording>_valid_idx.png`) and aligned versions (`<recording>_valid_idx_aligned.png`)
 
 **NPZ Bundle Contents:**
 ```python
@@ -218,7 +216,7 @@ data.keys()
 # ['final_valid', 'aligned_valid_masks', 'per_seq_valid_masks',
 #  'displacement_fields_u', 'displacement_fields_v',
 #  'temporal_averages', 'compensated_h5_paths',
-#  'reference_average', 'middle_idx']
+#  'reference_average', 'middle_idx', 'aligned_video_paths']
 ```
 
 **Aligned video export:** Stage 3 reprojects each per-recording `compensated.hdf5` into the session reference grid via `align_sequence()`. Tune behavior with `SessionConfig.align_chunk_size` (batch size) and `SessionConfig.align_output_format` (e.g., `TIFF`, `HDF5`). Outputs land in `final_results/aligned_<recording>.<ext>` and are skipped on resume when `resume=True`.
@@ -227,7 +225,7 @@ data.keys()
 
 ### pyflowreg-session
 
-The session module provides a comprehensive CLI:
+The session module installs a `pyflowreg-session` command:
 
 ```bash
 # Run complete pipeline
@@ -241,8 +239,14 @@ pyflowreg-session run --config session.toml --stage 3
 # Array job mode (auto-detects task ID)
 pyflowreg-session run --config session.toml --stage 1 --array
 
+# Process a single recording by index (0-based)
+pyflowreg-session run --config session.toml --stage 1 --index 2
+
 # Override OFOptions parameters for Stage 1
 pyflowreg-session run --config session.toml --stage 1 --of-params quality_setting=fast
+
+# Run Stage 1 in parallel via Dask (requires dask-jobqueue)
+pyflowreg-session dask --config session.toml --scheduler slurm --jobs 10
 ```
 
 **Help:**
@@ -262,17 +266,17 @@ from pyflowreg.core.warping import (
 )
 ```
 
-::: pyflowreg.core.warping.backward_valid_mask
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.core.warping.backward_valid_mask
+```
 
-::: pyflowreg.core.warping.imregister_binary
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.core.warping.imregister_binary
+```
 
-::: pyflowreg.core.warping.compute_batch_valid_masks
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.core.warping.compute_batch_valid_masks
+```
 
 ## Helper Functions
 
@@ -282,9 +286,9 @@ from pyflowreg.core.warping import (
 from pyflowreg.session.config import get_array_task_id
 ```
 
-::: pyflowreg.session.config.get_array_task_id
-    options:
-        show_source: false
+```{eval-rst}
+.. autofunction:: pyflowreg.session.config.get_array_task_id
+```
 
 ### atomic_save_npy / atomic_save_npz
 
@@ -302,61 +306,27 @@ atomic_save_npy(Path("data.npy"), array)
 atomic_save_npz(Path("data.npz"), array1=arr1, array2=arr2)
 ```
 
+```{eval-rst}
+.. autofunction:: pyflowreg.session.stage1_compensate.atomic_save_npy
+```
+
+```{eval-rst}
+.. autofunction:: pyflowreg.session.stage1_compensate.atomic_save_npz
+```
+
 ## Complete Example
 
-```python
-from pyflowreg.session import SessionConfig
-from pyflowreg.session.stage1_compensate import run_stage1
-from pyflowreg.session.stage2_between_avgs import run_stage2
-from pyflowreg.session.stage3_valid_mask import run_stage3
-
-# Configure session
-config = SessionConfig(
-    root="/data/2p_experiment/",
-    pattern="recording_*.tif",
-    center="recording_005.tif",
-    output_root="compensated",
-    final_results="results",
-    resume=True,
-    n_workers=-1,
-    flow_backend="flowreg",
-    cc_upsample=4,
-    sigma_smooth=6.0,
-    alpha_between=25.0,
-    iterations_between=100,
-    stage2_constancy_assumption="gc",
-)
-
-# Stage 1: Motion correct each recording
-print("Running Stage 1...")
-config.flow_options = {
-    "quality_setting": "balanced",
-    "constancy_assumption": "gc",
-    "save_valid_idx": True,
-    "save_w": False,
-}
-output_folders = run_stage1(config)
-
-# Stage 2: Align temporal averages
-print("Running Stage 2...")
-middle_idx, center_file, displacement_fields = run_stage2(config)
-
-# Stage 3: Compute final valid mask
-print("Running Stage 3...")
-final_mask = run_stage3(config, middle_idx, displacement_fields)
-
-print(f"Final valid region: {np.sum(final_mask)} pixels")
+```{literalinclude} ../snippets/api/session/complete_session_pipeline.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ## MATLAB Compatibility
 
-The session module maintains full compatibility with MATLAB Flow-Registration:
+The session module is modeled on the MATLAB Flow-Registration session scripts `align_full_v3_checkpoint.m` and `get_session_valid_index_v3_progressprint.m`, which are referenced throughout the implementation. MATLAB-oriented conventions in the Python code include:
 
-- File formats match exactly (HDF5, NPZ, MAT)
-- Numerical results match within floating-point precision
-- Resume behavior identical (can mix MATLAB/Python stages)
-- Array job indexing compatible (1-based conversion handled)
-
-**Verified against:**
-- `align_full_v3_checkpoint.m`
-- `get_session_valid_index_v3_progressprint.m`
+- Center reference selection defaults to the lexicographic middle file (MATLAB `ceil(num_records/2)`)
+- Per-frame valid masks are stored as `idx.hdf` in each output folder
+- Stage 3 writes `final_valid_idx.mat` via `scipy.io.savemat` with `middle_idx` converted to 1-based indexing
+- `run_stage1_array` converts 1-based scheduler task IDs (SLURM/SGE/PBS) to 0-based Python indices

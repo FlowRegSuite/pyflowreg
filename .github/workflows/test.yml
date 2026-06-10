@@ -28,7 +28,9 @@ jobs:
           cache: pip
       - run: python -m pip install -U pip
       - run: python -m pip install -e .[test,vis,gpu]
-      - run: pytest tests/ -v --cov=pyflowreg -k "not test_progress_callback_performance"
+      - run: pytest tests/ -v --cov=pyflowreg -m "not demo_data" -k "not test_progress_callback_performance"
+      - name: Doctest docstring examples
+        run: pytest --doctest-modules src/pyflowreg --ignore=src/pyflowreg/cuda --ignore=src/pyflowreg/torch --ignore=src/pyflowreg/util/io/mdf.py
       - name: Verify MDF support (Windows only)
         if: runner.os == 'Windows'
         run: python -c "from pyflowreg.util.io.mdf import MDFFileReader; print('MDF support verified')"

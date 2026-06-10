@@ -28,9 +28,12 @@ FlowRegLive
 
 Quick Start
 -----------
+>>> import numpy as np
 >>> from pyflowreg.motion_correction import compensate_arr, OFOptions
+>>> video = np.random.rand(10, 32, 32).astype(np.float32)
+>>> reference = video[:5].mean(axis=0)
 >>> options = OFOptions(quality_setting="balanced")
->>> registered, flow = compensate_arr(video, reference, options)
+>>> registered, flow = compensate_arr(video, reference, options)  # doctest: +SKIP
 
 See Also
 --------

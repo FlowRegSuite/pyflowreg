@@ -5,9 +5,9 @@ This guide covers stack alignment for 3D volumetric data acquired through z-stac
 PyFlowReg performs **2D frame-by-frame motion correction**. It does not perform true
 3D volumetric registration. For z-stack alignment, PyFlowReg uses an adaptive
 reference approach where the reference frame is updated slice-by-slice as you move
-through the stack. The separate `pyflowreg.z_align` workflow can then estimate
-z-shifts against a reference stack and optionally write a z-corrected signal plus
-a z-shift-only simulation video.
+through the stack. The separate [z-alignment workflow](z_align.md) (`pyflowreg.z_align`)
+can then estimate z-shifts against a reference volume and optionally write a
+z-corrected signal plus a z-shift-only simulation recording.
 
 ## Z-Stack Acquisition Strategy
 
@@ -94,7 +94,7 @@ This approach works because:
 - Ensures reference updates happen between z-slices, not within a slice
 
 **update_reference**: Must be True
-- Enables the adaptive reference strategy
+- Enables the adaptive reference strategy (default is `False`; see [Configuration](configuration.md) for reference selection options)
 - Without this, all frames would be registered to the first slice only
 
 **reference_frames**: First slice indices (e.g., [0, 1, 2, ..., 8] for 9 frames)
@@ -109,39 +109,18 @@ This approach works because:
 
 After registration, bin (average) the repeated frames for each z-slice:
 
-```python
-from pyflowreg.util.io.factory import get_video_file_reader
-
-# The reader can perform binning automatically
-reader = get_video_file_reader(
-    "aligned_sequence/compensated.HDF5",
-    buffer_size=100,
-    bin_size=9  # Bin every 9 frames
-)
-
-# This returns already-binned data where each "frame" is the average of 9 registered frames
-binned_volume = []
-while reader.has_batch():
-    batch = reader.read_batch()
-    binned_volume.append(batch)
-
-binned_volume = np.concatenate(binned_volume, axis=0)
+```{literalinclude} ../snippets/user_guide/3d_volumes/auto_binning.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 Alternatively, manual binning:
 
-```python
-import numpy as np
-
-# Load registered frames
-registered = np.load("registered_frames.npy")  # (T, H, W, C) where T = Z * frames_per_slice
-
-frames_per_slice = 9
-n_slices = registered.shape[0] // frames_per_slice
-
-# Reshape and average
-volume = registered.reshape(n_slices, frames_per_slice, H, W, C)
-volume = np.mean(volume, axis=1)  # (Z, H, W, C)
+```{literalinclude} ../snippets/user_guide/3d_volumes/manual_binning.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ## Complete Pipeline Example
@@ -291,8 +270,9 @@ PyFlowReg's z-stack approach vs. true 3D volumetric registration:
 - Registers each frame as a 2D image
 - Adapts reference slice-by-slice
 - The core 2D workflow does not correct through-plane (z-axis) motion; use
-  `pyflowreg.z_align` for reference-stack z-shift estimation/correction
-- Fast and memory-efficient
+  the [z-alignment workflow](z_align.md) (`pyflowreg.z_align`) for
+  reference-stack z-shift estimation and correction
+- Lower memory footprint than loading a full volume into memory
 - Works well when z-motion is minimal and xy-motion dominates
 
 **True 3D registration** (not available in PyFlowReg):
@@ -310,5 +290,6 @@ For most 2-photon z-stack applications, PyFlowReg's 2D approach with adaptive re
 ## See Also
 
 - [Workflows](workflows.md) - Basic 2D time series registration workflows
+- [Z-Alignment](z_align.md) - Reference-stack z-shift estimation and correction
 - [Configuration](configuration.md) - Parameter tuning guide
 - [Parameter Theory](../theory/parameters.md) - Understanding alpha and sigma parameters

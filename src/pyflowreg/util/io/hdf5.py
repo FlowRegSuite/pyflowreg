@@ -9,11 +9,37 @@ from pyflowreg.util.io._ds_io import DSFileReader, DSFileWriter
 
 
 class HDF5FileReader(DSFileReader, VideoReader):
-    """HDF5 video file reader with dataset discovery."""
+    """
+    HDF5 video file reader with dataset discovery.
+
+    Reads one or more HDF5 datasets as video channels. If no
+    ``dataset_names`` are given, suitable datasets are discovered with the
+    DSFileReader heuristic. 3D datasets are interpreted as (T, H, W) with
+    one dataset per channel; a 4D dataset is interpreted as (T, H, W, C).
+    Frames are returned in (T, H, W, C) format.
+    """
 
     def __init__(
         self, file_path: str, buffer_size: int = 500, bin_size: int = 1, **kwargs
     ):
+        """
+        Initialize HDF5 reader.
+
+        Parameters
+        ----------
+        file_path : str
+            Path to the HDF5 file.
+        buffer_size : int, optional
+            Number of frames per batch (default 500).
+        bin_size : int, optional
+            Temporal binning factor (default 1).
+        **kwargs
+            Additional options. Supported keys:
+
+            - ``dataset_names`` (list of str): Datasets to read, one per
+              channel. If not given, datasets are discovered
+              automatically.
+        """
         # Initialize parent classes
         DSFileReader.__init__(self)
         VideoReader.__init__(self)
@@ -63,7 +89,19 @@ class HDF5FileReader(DSFileReader, VideoReader):
         self.dtype = first_ds.dtype
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
-        """Read raw frames from HDF5 file."""
+        """
+        Read raw frames from the HDF5 file.
+
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            0-based raw frame indices.
+
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C).
+        """
         # Convert list to slice if contiguous
         if isinstance(frame_indices, list):
             if len(frame_indices) == 0:
@@ -124,15 +162,26 @@ class HDF5FileWriter(DSFileWriter, VideoWriter):
         """
         Initialize HDF5 writer.
 
-        Args:
-            file_path: Output file path
-            dataset_names: Optional dataset naming pattern or list
-                          Default: 'ch*' (produces ch1, ch2, etc.)
-            dimension_ordering: Storage order for MATLAB compatibility
-                               Default: (0, 1, 2) for (H, W, T) storage
-            compression: HDF5 compression ('gzip', 'lzf', or None)
-            compression_level: Compression level for gzip (1-9)
-            chunk_size: Chunk size for temporal dimension (default: 1)
+        Parameters
+        ----------
+        file_path : str
+            Output file path.
+        **kwargs
+            Additional options. Supported keys:
+
+            - ``dataset_names`` (str or list of str): Dataset naming
+              pattern or explicit list of names; '*' in a pattern is
+              replaced by the 1-based channel number (default 'ch*',
+              producing ch1, ch2, ...).
+            - ``dimension_ordering`` (tuple of int): Axis positions of
+              (H, W, T) in each stored per-channel dataset (default
+              (1, 2, 0), i.e. datasets are stored as (T, H, W)).
+            - ``compression`` (str or None): HDF5 compression ('gzip',
+              'lzf', or None; default None).
+            - ``compression_level`` (int): Compression level for gzip
+              (default 4).
+            - ``chunk_size`` (int): Chunk size for the temporal dimension
+              (default 1).
         """
         # Initialize parent classes
         DSFileWriter.__init__(self, **kwargs)
@@ -232,10 +281,24 @@ class HDF5FileWriter(DSFileWriter, VideoWriter):
 
     def write_frames(self, frames: np.ndarray):
         """
-        Write frames to HDF5 file.
+        Write frames to the HDF5 file.
 
-        Args:
-            frames: Array with shape (T, H, W, C) or (T, H, W) or (H, W)
+        Each channel is appended to its own expandable 3D dataset stored
+        in the configured dimension ordering.
+
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C), (T, H, W) or (H, W). A 3D
+            input is treated as a single (H, W, C) frame only if its
+            first two axes match the initialized frame size; otherwise it
+            is interpreted as (T, H, W).
+
+        Raises
+        ------
+        ValueError
+            If the input dimensionality is unsupported, or the frame size
+            or channel count does not match previously written frames.
         """
         # Normalize input to 4D (T, H, W, C)
         if frames.ndim == 2:  # Single frame, single channel (H, W)
@@ -322,7 +385,12 @@ class HDF5FileWriter(DSFileWriter, VideoWriter):
             self._h5file.flush()
 
     def close(self):
-        """Close the HDF5 file."""
+        """
+        Close the HDF5 file.
+
+        Writes file-level attributes (n_channels, frame_count, height,
+        width, dimension_ordering, format, dataset_names) before closing.
+        """
         if self._h5file:
             # Write final metadata for MATLAB compatibility
             if self._datasets:

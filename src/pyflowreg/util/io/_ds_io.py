@@ -5,20 +5,29 @@ from collections import defaultdict
 
 class DSFileReader:
     """
-    A mixin class that provides a generic, multi-pass heuristic for finding
-    the most likely data-containing datasets within a file.
+    Mixin class providing dataset-discovery heuristics for file readers.
+
+    Implements a generic multi-pass heuristic for finding the most likely
+    data-containing datasets within a file: channel naming conventions
+    (e.g. 'ch1', 'channel_2') first, then common generic names ('mov',
+    'data', 'dataset'), then a fallback based on dataset dimensions.
     """
 
     def _find_datasets(self, datasets_with_info: list[tuple]) -> list:
         """
-        Heuristic to find datasets based on a list of names and their shapes.
+        Find datasets based on a list of names and their shapes.
 
-        Args:
-            datasets_with_info (list[tuple]): A list where each element is a
-                tuple containing (dataset_name: str, dataset_shape: tuple).
+        Parameters
+        ----------
+        datasets_with_info : list of tuple
+            A list where each element is a tuple containing
+            (dataset_name, dataset_shape).
 
-        Returns:
-            A list of strings with the names of the selected datasets.
+        Returns
+        -------
+        list of str
+            Names of the selected datasets, or an empty list if no
+            candidates are found.
         """
         all_names = [info[0] for info in datasets_with_info]
 
@@ -92,8 +101,10 @@ class DSFileReader:
 
 class DSFileWriter:
     """
-    A mixin class that provides logic for generating dataset names for writers.
-    This is a direct port of the DS_file_writer.m functionality.
+    Mixin class providing dataset-name generation for writers.
+
+    This is a direct port of the DS_file_writer.m functionality from the
+    MATLAB Flow-Registration toolbox.
     """
 
     def __init__(self, **kwargs):
@@ -110,14 +121,27 @@ class DSFileWriter:
 
     def get_ds_name(self, channel_id: int, n_channels: int) -> str:
         """
-        Gets the dataset name for a specific channel.
+        Get the dataset name for a specific channel.
 
-        Args:
-            channel_id (int): The 1-based index of the channel.
-            n_channels (int): The total number of channels being written.
+        Parameters
+        ----------
+        channel_id : int
+            The 1-based index of the channel.
+        n_channels : int
+            The total number of channels being written.
 
-        Returns:
-            The dataset name as a string.
+        Returns
+        -------
+        str
+            The dataset name. A '*' in a configured name pattern is
+            replaced by the channel number; if no names are configured,
+            the default is ``ch<channel_id>``.
+
+        Raises
+        ------
+        ValueError
+            If a list of dataset names is provided whose length does not
+            match ``n_channels``.
         """
         if self.dataset_names:
             if isinstance(self.dataset_names, list):

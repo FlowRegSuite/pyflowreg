@@ -11,8 +11,11 @@ from ._base import VideoReader, VideoWriter
 
 class ArrayReader(VideoReader):
     """
-    Wraps numpy arrays to provide VideoReader interface.
-    Enables batch processing and binning for in-memory arrays.
+    In-memory array reader providing the VideoReader interface.
+
+    Wraps a numpy array so it can be processed through the same pipeline
+    as video files, enabling batch processing and temporal binning for
+    in-memory data. Frames are returned in (T, H, W, C) format.
     """
 
     def __init__(
@@ -25,12 +28,25 @@ class ArrayReader(VideoReader):
         """
         Initialize array reader.
 
-        Args:
-            array: Input array with shape (T,H,W,C) or (H,W,C) or (T,H,W)
-            buffer_size: Number of frames per batch
-            bin_size: Temporal binning factor
-            inplace: If True, return views for memory efficiency (no copy).
-                     If False (default), return copies for safety with multiprocessing.
+        Parameters
+        ----------
+        array : ndarray
+            Input array with shape (T, H, W, C), (H, W), (H, W, C) or
+            (T, H, W). 3D arrays are interpreted as (H, W, C) when the
+            last dimension is at most 4, otherwise as (T, H, W).
+        buffer_size : int, optional
+            Number of frames per batch (default 100).
+        bin_size : int, optional
+            Temporal binning factor (default 1).
+        inplace : bool, optional
+            If True, return views for memory efficiency (no copy).
+            If False (default), return copies for safety with
+            multiprocessing.
+
+        Raises
+        ------
+        ValueError
+            If ``array`` is not 2D, 3D or 4D.
         """
         super().__init__()
 
@@ -64,13 +80,18 @@ class ArrayReader(VideoReader):
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
         """
-        Read frames from array.
+        Read frames from the wrapped array.
 
-        Args:
-            frame_indices: Slice or list of frame indices
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            0-based raw frame indices.
 
-        Returns:
-            Array with shape (T,H,W,C), copy by default unless inplace=True
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C); a copy by default, or a view
+            if the reader was created with ``inplace=True``.
         """
         if isinstance(frame_indices, list):
             if len(frame_indices) == 0:
@@ -87,14 +108,17 @@ class ArrayReader(VideoReader):
         return result if self._inplace else result.copy()
 
     def close(self):
-        """No-op for array reader."""
+        """Close the reader (no-op; there are no resources to release)."""
         pass
 
 
 class ArrayWriter(VideoWriter):
     """
-    Accumulates frames in memory instead of writing to file.
-    Provides VideoWriter interface for array output.
+    In-memory writer that accumulates frames instead of writing to file.
+
+    Provides the VideoWriter interface for array output; the accumulated
+    frames can be retrieved as a single (T, H, W, C) array with
+    ``get_array()``.
     """
 
     def __init__(self):
@@ -104,10 +128,17 @@ class ArrayWriter(VideoWriter):
 
     def init(self, first_frame_batch: np.ndarray):
         """
-        Initialize writer from first batch following base class pattern.
+        Initialize writer properties from the first batch.
 
-        Args:
-            first_frame_batch: First batch with shape (T,H,W,C) or (H,W,C) or even (H,W)
+        Parameters
+        ----------
+        first_frame_batch : ndarray
+            First batch with shape (T, H, W, C), (H, W, C) or (H, W).
+
+        Raises
+        ------
+        ValueError
+            If the input is not a 2D, 3D or 4D array.
         """
         shape = first_frame_batch.shape
 
@@ -139,8 +170,17 @@ class ArrayWriter(VideoWriter):
         """
         Accumulate frames in memory.
 
-        Args:
-            frames: Array with shape (T,H,W,C), (H,W,C), or (H,W)
+        A copy of the input is stored to prevent external modifications.
+
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C), (H, W, C), or (H, W).
+
+        Raises
+        ------
+        ValueError
+            If the input is not a 2D, 3D or 4D array.
         """
         if not self.initialized:
             self.init(frames)
@@ -163,17 +203,20 @@ class ArrayWriter(VideoWriter):
 
     def get_array(self) -> Optional[np.ndarray]:
         """
-        Fetch accumulated frames as single array.
+        Fetch accumulated frames as a single array.
 
-        Returns:
-            Concatenated frames or None if empty
+        Returns
+        -------
+        ndarray or None
+            Frames concatenated along the time axis with shape
+            (T, H, W, C), or None if no frames have been written.
         """
         if not self._vid:
             return None
         return np.concatenate(self._vid, axis=0)
 
     def close(self):
-        """No-op for array writer."""
+        """Close the writer (no-op; frames remain available in memory)."""
         pass
 
     def __repr__(self):

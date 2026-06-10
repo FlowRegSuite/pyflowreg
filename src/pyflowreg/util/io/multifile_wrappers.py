@@ -15,17 +15,27 @@ from pyflowreg.util.io.factory import get_video_file_reader, get_video_file_writ
 class MULTIFILEFileWriter(VideoWriter):
     """
     File writer that writes one file per channel.
-    Each channel is saved to a separate file with _ch{N} suffix.
+
+    Each channel is saved to a separate file named
+    ``<basename>_ch<N>.<file_type>``, created through the writer factory.
+    If ``filename`` has no suffix, it is treated as an output directory
+    and the base name 'compensated' is used.
     """
 
     def __init__(self, filename: str, file_type: str = "TIFF", **kwargs):
         """
         Initialize multi-file writer.
 
-        Args:
-            filename: Base output filename or directory
-            file_type: Output format for each channel file
-            **kwargs: Additional parameters passed to individual writers
+        Parameters
+        ----------
+        filename : str
+            Base output filename or directory.
+        file_type : str, optional
+            Output format for each channel file (default 'TIFF'); also
+            used as the file extension.
+        **kwargs
+            Additional parameters passed to the individual channel
+            writers.
         """
         super().__init__()
 
@@ -49,8 +59,11 @@ class MULTIFILEFileWriter(VideoWriter):
         """
         Write frames to multiple files (one per channel).
 
-        Args:
-            frames: Array with shape (T, H, W, C) or compatible
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C), (T, H, W) or (H, W); each
+            channel is forwarded to its own writer.
         """
         # Normalize input to 4D
         if frames.ndim == 2:  # Single frame, single channel
@@ -99,8 +112,12 @@ class MULTIFILEFileWriter(VideoWriter):
 
 class MULTICHANNELFileReader(VideoReader):
     """
-    Generic multichannel reader that reads from multiple video files
-    and combines them into a single multichannel output.
+    Multichannel reader that combines several video files into one stream.
+
+    Reads from multiple video files and concatenates their channels into
+    a single (T, H, W, C_total) output. All files must have matching
+    resolution and frame count; if dtypes differ, the highest precision
+    dtype is used.
     """
 
     def __init__(
@@ -113,11 +130,16 @@ class MULTICHANNELFileReader(VideoReader):
         """
         Initialize multichannel reader.
 
-        Args:
-            input_files: List of input file paths
-            buffer_size: Buffer size for batch reading
-            bin_size: Temporal binning factor
-            **kwargs: Additional parameters passed to individual readers
+        Parameters
+        ----------
+        input_files : list of str
+            List of input file paths.
+        buffer_size : int, optional
+            Number of frames per batch (default 500).
+        bin_size : int, optional
+            Temporal binning factor (default 1).
+        **kwargs
+            Additional parameters passed to the individual file readers.
         """
         super().__init__()
 
@@ -184,8 +206,15 @@ class MULTICHANNELFileReader(VideoReader):
         """
         Read frames from all files and combine channels.
 
-        Returns:
-            Array with shape (T, H, W, C_total)
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            0-based raw frame indices.
+
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C_total).
         """
         # Convert indices to list for consistent handling
         if isinstance(frame_indices, slice):
@@ -236,7 +265,9 @@ class MULTICHANNELFileReader(VideoReader):
 class SUBSETFileReader(VideoReader):
     """
     Reader that provides a subset of frames from another video reader.
+
     Useful for reading non-contiguous frame indices or reordering frames.
+    The source reader is not closed by this wrapper.
     """
 
     def __init__(
@@ -245,9 +276,13 @@ class SUBSETFileReader(VideoReader):
         """
         Initialize subset reader.
 
-        Args:
-            video_file_reader: Source video reader
-            indices: Frame indices to include in subset (0-based)
+        Parameters
+        ----------
+        video_file_reader : VideoReader
+            Source video reader.
+        indices : list of int or ndarray
+            Frame indices to include in the subset (0-based, referring to
+            raw frames of the source reader).
         """
         super().__init__()
 
@@ -288,13 +323,18 @@ class SUBSETFileReader(VideoReader):
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
         """
-        Read frames from subset.
+        Read frames from the subset.
 
-        Args:
-            frame_indices: Indices into the subset (not the original video)
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            Indices into the subset (not into the original video).
 
-        Returns:
-            Array with shape (T, H, W, C)
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C). Binning in the source reader
+            is temporarily disabled while reading.
         """
         # Convert subset indices to original indices
         if isinstance(frame_indices, slice):
@@ -339,7 +379,7 @@ class SUBSETFileReader(VideoReader):
         return result
 
     def close(self):
-        """No-op as we don't own the source reader."""
+        """Close the wrapper (no-op; the source reader is not owned)."""
         pass  # Don't close the source reader as we don't own it
 
 

@@ -5,7 +5,7 @@
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/pyflowreg?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=all+time+downloads)](https://pepy.tech/projects/pyflowreg)[![GitHub Actions](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/FlowRegSuite/pyflowreg/actions/workflows/pypi-release.yml)
 [![Documentation Status](https://readthedocs.org/projects/pyflowreg/badge/?version=latest)](https://pyflowreg.readthedocs.io/en/latest/?badge=latest)
 
-## 🚧 Under Development
+## Under Development
 
 This project is still in an **alpha stage**. Expect rapid changes, incomplete features, and possible breaking updates between releases.
 
@@ -15,16 +15,17 @@ This project is still in an **alpha stage**. Expect rapid changes, incomplete fe
 
 # <img src="https://raw.githubusercontent.com/FlowRegSuite/pyflowreg/refs/heads/main/img/flowreglogo.png" alt="FlowReg logo" height="64"> PyFlowReg
 
-Python bindings for Flow-Registration - variational optical-flow motion correction for 2-photon (2P) microscopy videos and volumetric 3D scans.
+Python implementation of Flow-Registration - variational optical-flow motion correction for 2-photon (2P) microscopy videos and volumetric 3D scans.
 
 Derived from the Flow-Registration toolbox for compensation and stabilization of multichannel microscopy videos. The original implementation spans MATLAB, Java (ImageJ/Fiji plugin), and C++. See the [publication](https://doi.org/10.1002/jbio.202100330) and the [project website](https://www.snnu.uni-saarland.de/flow-registration/) for method details and video results.
 
-**[📖 Read the Documentation](https://pyflowreg.readthedocs.io/)**
+**[Read the Documentation](https://pyflowreg.readthedocs.io/)**
 
 **Related projects**
 - Original Flow-Registration repo: https://github.com/FlowRegSuite/flow_registration
 - ImageJ/Fiji plugin: https://github.com/FlowRegSuite/flow_registration_IJ
 - Napari plugin: https://github.com/FlowRegSuite/napari-flowreg
+- MCP tools for LLM workflows: https://github.com/FlowRegSuite/pyflowreg-mcp
 
 
 ![Fig1](https://raw.githubusercontent.com/FlowRegSuite/pyflowreg/refs/heads/main/img/bg.jpg)
@@ -66,12 +67,18 @@ pip install pyflowreg[vis]
 
 ## Getting started
 
-This repository contains demo scripts under ```experiments``` and
-demo notebooks under ```notebooks```. The demos with the jupiter sequence should run out of the box.
+This repository contains demo scripts under ```examples``` and
+demo notebooks under ```notebooks```. The demos with the jupiter sequence should run out of the box. Run the example scripts as modules from the project root, for example:
 
-The plugin supports most of the commonly used file types such as HDF5, tiff stacks and matlab mat files. To run the motion compensation, the options need to be defined into a ```OF_options``` object.
+```bash
+python -m examples.jupiter_demo
+```
 
-The python version of Flow-Registration aims at full MATLAB compatibility, any missing functionality should be reported as an issue. The API is designed to be similar to the original MATLAB code, with some adjustments for Python conventions.
+An overview of all examples is available in the [examples gallery](https://pyflowreg.readthedocs.io/en/latest/user_guide/examples_gallery.html) of the documentation.
+
+The package supports most of the commonly used file types such as HDF5, tiff stacks and matlab mat files. To run the motion compensation, the options need to be defined in an ```OFOptions``` object.
+
+The Python version of Flow-Registration aims at MATLAB compatibility; functionality mismatches are considered bugs - please report them as issues. The API is designed to be similar to the original MATLAB code, with some adjustments for Python conventions.
 
 
 ## Development
@@ -179,7 +186,7 @@ Details on the original method and video results can be found [here](https://www
 
 If you use parts of this code or the plugin for your work, please cite
 
-> “Pyflowreg,” (in preparation), 2025.
+> P. Flotho, S. Nomura, M. Flotho, A. Keller and B. Kuhn, “Pyflowreg: A python package for high accuracy motion correction of 2P microscopy videos and 3D scans,” (in preparation), 2025.
 
 
 and for Flow-Registration

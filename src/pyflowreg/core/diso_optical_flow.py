@@ -1,6 +1,44 @@
 """
-Dense Inverse Search Optical Flow (DIS) backend using OpenCV.
-Provides an alternative optical flow computation method to the variational approach.
+Dense Inverse Search (DIS) optical flow backend wrapping OpenCV's DISOpticalFlow.
+
+Provides :class:`DisoOF`, a callable wrapper around ``cv2.DISOpticalFlow``
+that follows the same ``(fixed, moving, ...) -> (H, W, 2)`` calling
+convention as the variational solver
+:func:`pyflowreg.core.optical_flow.get_displacement`, so it can be selected
+as an alternative, patch-based flow backend in the motion correction
+pipelines.
+
+Notes
+-----
+Registration and constraints as implemented:
+
+- ``pyflowreg.core`` (package ``__init__``) registers :func:`_diso_factory`
+  under the backend name ``"diso"`` only when ``import cv2`` succeeds, with
+  ``supported_executors={"sequential", "threading"}``. Multiprocessing is
+  excluded there because the multiprocessing workers import the flowreg
+  solver directly and do not reconstruct registry backends, so ``diso``
+  would silently fall back to the variational solver.
+- ``OFOptions.resolve_get_displacement`` raises ``ValueError`` when
+  ``flow_backend="diso"`` is combined with a constancy assumption other
+  than ``"gc"`` (the default; alias ``"gradient"``), or with the graduated
+  non-convexity options ``gnc_schedule`` / ``warping_steps``. The
+  ``"gc"`` value itself is not used by this wrapper; it is the only setting
+  that passes validation.
+- ``OFOptions.backend_params`` is expanded as keyword arguments into
+  :func:`_diso_factory` and therefore maps one-to-one onto the
+  :class:`DisoOF` constructor parameters (``preset``, ``finest_scale``,
+  ``gradient_descent_iterations``, ``patch_size``, ``patch_stride``,
+  ``use_mean_normalization``, ``use_spatial_propagation``).
+- Variational solver keywords forwarded by the pipelines (``alpha``,
+  ``iterations``, ``uv``, ``const_assumption``, ``gnc_schedule``, ...) are
+  accepted by :meth:`DisoOF.__call__` for signature compatibility but
+  ignored.
+
+References
+----------
+.. [Kroeger2016] T. Kroeger, R. Timofte, D. Dai, L. Van Gool,
+   "Fast Optical Flow using Dense Inverse Search", ECCV 2016.
+   Algorithm implemented by OpenCV's ``cv2.DISOpticalFlow``.
 """
 
 import cv2
@@ -10,32 +48,68 @@ from typing import Optional, Dict, Any
 
 class DisoOF:
     """
-    Dense Inverse Search Optical Flow (DIS) implementation using OpenCV.
+    Dense Inverse Search (DIS) optical flow wrapper around OpenCV.
 
-    This class provides a callable interface compatible with get_displacement
-    for computing optical flow between fixed and moving images.
-
-    Uses lazy initialization to ensure pickle compatibility for multiprocessing.
+    Wraps ``cv2.DISOpticalFlow`` behind a callable interface compatible with
+    :func:`pyflowreg.core.optical_flow.get_displacement`: instances are
+    called as ``w = diso(fixed, moving, ...)`` and return an ``(H, W, 2)``
+    displacement field. The OpenCV object is created lazily on first use so
+    that instances remain picklable.
 
     Parameters
     ----------
-    preset : int
-        DIS preset mode:
-        - cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST: Ultrafast preset
-        - cv2.DISOPTICAL_FLOW_PRESET_FAST: Fast preset
-        - cv2.DISOPTICAL_FLOW_PRESET_MEDIUM: Medium preset (default)
-    finest_scale : int
-        Finest scale for the image pyramid (0 = original scale)
-    gradient_descent_iterations : int
-        Number of gradient descent iterations at each pyramid level
-    patch_size : int
-        Size of the patch for matching (default: 8)
-    patch_stride : int
-        Stride between neighbor patches (default: 4)
-    use_mean_normalization : bool
-        Whether to use mean normalization (default: True)
-    use_spatial_propagation : bool
-        Whether to use spatial propagation (default: True)
+    preset : int, optional
+        OpenCV DIS preset passed to ``cv2.DISOpticalFlow_create``. One of
+        ``cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST``,
+        ``cv2.DISOPTICAL_FLOW_PRESET_FAST`` or
+        ``cv2.DISOPTICAL_FLOW_PRESET_MEDIUM``.
+        Default is ``cv2.DISOPTICAL_FLOW_PRESET_MEDIUM``.
+    finest_scale : int, optional
+        Finest pyramid scale on which the flow is computed; 0 corresponds to
+        the original image resolution. Applied via ``setFinestScale``.
+        Default is 2.
+    gradient_descent_iterations : int, optional
+        Number of gradient descent iterations in the patch inverse search
+        stage. Applied via ``setGradientDescentIterations``. Default is 12.
+    patch_size : int, optional
+        Size of an image patch for matching, in pixels. Applied via
+        ``setPatchSize``. Default is 8.
+    patch_stride : int, optional
+        Stride between neighboring patches. Applied via ``setPatchStride``.
+        Default is 4.
+    use_mean_normalization : bool, optional
+        Whether to use mean-normalized patches when computing patch
+        distances. Applied via ``setUseMeanNormalization``. Default is True.
+    use_spatial_propagation : bool, optional
+        Whether to use spatial propagation of flow vectors. Applied via
+        ``setUseSpatialPropagation``. Default is True.
+
+    See Also
+    --------
+    pyflowreg.core.optical_flow.get_displacement : Variational solver with
+        the same calling convention.
+    _diso_factory : Factory registered as flow backend ``"diso"``.
+
+    Notes
+    -----
+    Registered as flow backend ``"diso"`` in ``pyflowreg.core`` (only when
+    OpenCV is importable) with
+    ``supported_executors={"sequential", "threading"}``. The constructor
+    only stores the configuration; ``__getstate__`` / ``__setstate__`` drop
+    the OpenCV handle so instances can be pickled, and the handle is
+    re-created lazily on the next call.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pyflowreg.core.diso_optical_flow import DisoOF
+    >>> diso = DisoOF()
+    >>> fixed = np.zeros((64, 64), dtype=np.float32)
+    >>> fixed[24:40, 24:40] = 1.0
+    >>> moving = np.roll(fixed, 2, axis=1)
+    >>> w = diso(fixed, moving)  # doctest: +SKIP
+    >>> w.shape  # doctest: +SKIP
+    (64, 64, 2)
     """
 
     def __init__(
@@ -60,16 +134,40 @@ class DisoOF:
         self._dis = None
 
     def __getstate__(self):
-        """Support pickling for multiprocessing."""
+        """
+        Return picklable state with the OpenCV handle dropped.
+
+        Returns
+        -------
+        dict
+            State with the configuration under ``"_cfg"`` and ``"_dis"`` set
+            to None so unpickled instances re-create the OpenCV object
+            lazily.
+        """
         return {"_cfg": self._cfg, "_dis": None}
 
     def __setstate__(self, state):
-        """Support unpickling for multiprocessing."""
+        """
+        Restore instance state after unpickling.
+
+        Parameters
+        ----------
+        state : dict
+            State produced by ``__getstate__``. The OpenCV object is not
+            restored; it is re-created lazily on the next call.
+        """
         self._cfg = state["_cfg"]
         self._dis = None
 
     def _ensure(self):
-        """Lazy initialization of OpenCV DIS object."""
+        """
+        Create and configure the OpenCV DIS object if not yet created.
+
+        Instantiates ``cv2.DISOpticalFlow_create`` with the configured
+        preset and applies the remaining configuration values through the
+        corresponding OpenCV setters. Does nothing if the object already
+        exists.
+        """
         if self._dis is not None:
             return
 
@@ -86,22 +184,39 @@ class DisoOF:
         self, img: np.ndarray, weight: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Convert image to grayscale using weights if provided.
+        Reduce an image to a single channel using optional weights.
 
         Parameters
         ----------
-        img : np.ndarray
-            Input image of shape (H, W) or (H, W, C)
-        weight : np.ndarray, optional
-            Channel weights - can be:
-            - 1D array of channel weights
-            - 2D array (H, W) for spatial weights
-            - 3D array (H, W, C) for full spatial-channel weights
+        img : ndarray
+            Input image of shape (H, W) or (H, W, C).
+        weight : ndarray, optional
+            Channel and/or spatial weights:
+
+            - 1D array of length C: normalized to sum to 1 and used for a
+              weighted sum over channels. If the length does not match C,
+              equal weights ``1/C`` are used instead.
+            - 2D array of shape (H, W): broadcast over channels; the result
+              is the mean over channels of ``img * weight[..., None]``.
+            - 3D array of shape (H, W, C): used as-is (without
+              normalization) for a weighted sum over channels. If the shape
+              does not match ``img``, equal weights ``1/C`` are used
+              instead.
+
+            If None, or for any other dimensionality, equal weights ``1/C``
+            are used.
 
         Returns
         -------
-        np.ndarray
-            Grayscale image of shape (H, W)
+        ndarray
+            Single-channel image of shape (H, W). 2D inputs are returned
+            unchanged; (H, W, 1) inputs are returned with the channel axis
+            removed, without applying weights.
+
+        Raises
+        ------
+        ValueError
+            If ``img`` is neither 2D nor 3D.
         """
         if img.ndim == 2:
             return img
@@ -156,20 +271,27 @@ class DisoOF:
 
     def _normalize(self, a: np.ndarray, b: np.ndarray) -> tuple:
         """
-        Convert images to uint8 [0,255] range for OpenCV.
-        Handles both [0,1] float and [0,255] uint8 inputs.
+        Convert an image pair to uint8 in [0, 255] for OpenCV.
 
         Parameters
         ----------
-        a : np.ndarray
-            First image
-        b : np.ndarray
-            Second image
+        a : ndarray
+            First image (the fixed image in ``__call__``).
+        b : ndarray
+            Second image (the moving image in ``__call__``).
 
         Returns
         -------
-        tuple
-            Both images converted to uint8 [0,255] range
+        tuple of ndarray
+            ``(A, B)`` as uint8 arrays. If both inputs are already uint8,
+            they are returned unchanged. Otherwise, uint8 inputs are first
+            rescaled to [0, 1] float32, both images are clipped to [0, 1],
+            and the result is quantized to uint8 in [0, 255].
+
+        Notes
+        -----
+        Non-uint8 inputs are assumed to be normalized to [0, 1]; values
+        outside this range are clipped before quantization.
         """
         # Check if already uint8
         if a.dtype == np.uint8 and b.dtype == np.uint8:
@@ -201,27 +323,47 @@ class DisoOF:
         **kwargs,
     ) -> np.ndarray:
         """
-        Compute optical flow between fixed and moving images.
+        Compute the displacement field between fixed and moving images.
+
+        Both images are reduced to a single channel (see ``_to_gray``),
+        converted to uint8 (see ``_normalize``), and passed to
+        ``cv2.DISOpticalFlow.calc(fixed, moving, init)``.
 
         Parameters
         ----------
-        fixed : np.ndarray
-            Reference/fixed image of shape (H, W) or (H, W, C)
-            Expected to be normalized to [0,1] range or uint8 [0,255]
-        moving : np.ndarray
-            Moving image of shape (H, W) or (H, W, C)
-            Expected to be normalized to [0,1] range or uint8 [0,255]
-        w : np.ndarray, optional
-            Initial flow field of shape (H, W, 2) for warm start
-        weight : np.ndarray, optional
-            Channel weights for multi-channel images
+        fixed : ndarray
+            Reference (fixed) image of shape (H, W) or (H, W, C), either
+            float values normalized to [0, 1] or uint8 in [0, 255].
+        moving : ndarray
+            Moving image of shape (H, W) or (H, W, C), same value
+            conventions as ``fixed``.
+        w : ndarray, optional
+            Initial displacement field of shape (H, W, 2) used as warm
+            start. Used only if it is an ndarray with exactly this layout;
+            it is cast to float32.
+        weight : ndarray, optional
+            Channel weights for multi-channel inputs; see ``_to_gray`` for
+            the accepted formats.
         **kwargs : dict
-            Additional parameters (for compatibility, not used)
+            Accepted for signature compatibility with the variational
+            :func:`pyflowreg.core.optical_flow.get_displacement` (e.g.
+            ``alpha``, ``iterations``, ``uv``, ``const_assumption``,
+            ``gnc_schedule``); all extra keyword arguments are ignored.
 
         Returns
         -------
-        np.ndarray
-            Displacement field of shape (H, W, 2) as float32
+        ndarray
+            Displacement field of shape (H, W, 2), float32, with channel 0
+            the horizontal component ``u`` (x) and channel 1 the vertical
+            component ``v`` (y). Warping ``moving`` backward by ``(u, v)``
+            (as done by ``pyflowreg.core.warping.imregister_wrapper``)
+            aligns it to ``fixed``.
+
+        Notes
+        -----
+        The batch pipelines pass the flow initialization as the keyword
+        ``uv``, which this wrapper does not read; a warm start is only used
+        when supplied via ``w``.
         """
         self._ensure()
 
@@ -250,12 +392,17 @@ class DisoOF:
 
     def set_preset(self, preset: int):
         """
-        Update the DIS preset configuration.
+        Update the DIS preset and reset the OpenCV object.
 
         Parameters
         ----------
         preset : int
-            One of cv2.DISOPTICAL_FLOW_PRESET_*
+            One of the ``cv2.DISOPTICAL_FLOW_PRESET_*`` constants.
+
+        Notes
+        -----
+        The cached OpenCV object is discarded and re-created with the new
+        preset on the next call.
         """
         cfg = dict(self._cfg)
         cfg["preset"] = preset
@@ -264,23 +411,33 @@ class DisoOF:
 
     def get_params(self) -> Dict[str, Any]:
         """
-        Get current DIS parameters.
+        Return a copy of the current configuration.
 
         Returns
         -------
         dict
-            Dictionary containing current parameter values
+            Copy of the configuration dictionary with the keys ``preset``,
+            ``finest_scale``, ``gradient_descent_iterations``,
+            ``patch_size``, ``patch_stride``, ``use_mean_normalization``
+            and ``use_spatial_propagation``.
         """
         return dict(self._cfg)
 
     def set_params(self, **params):
         """
-        Update DIS parameters.
+        Update configuration values and reset the OpenCV object.
 
         Parameters
         ----------
         **params : dict
-            Parameters to update
+            Configuration entries merged into the current configuration.
+            Recognized keys are the constructor parameters; unrecognized
+            keys are stored but have no effect on the OpenCV object.
+
+        Notes
+        -----
+        The cached OpenCV object is discarded and re-created with the
+        updated configuration on the next call.
         """
         self._cfg.update(params)
         self._dis = None
@@ -288,18 +445,38 @@ class DisoOF:
 
 def _diso_factory(**kwargs):
     """
-    Factory function for creating DisoOF instances suitable for multiprocessing.
+    Create a DisoOF instance for use as the ``"diso"`` flow backend.
 
-    Returns a DisoOF instance that is pickle-safe due to lazy initialization.
+    This factory is registered under the backend name ``"diso"`` in
+    ``pyflowreg.core`` (only when OpenCV is importable) with
+    ``supported_executors={"sequential", "threading"}``.
+    ``OFOptions.backend_params`` is expanded into ``kwargs`` when the
+    backend is resolved, so its keys must match the :class:`DisoOF`
+    constructor parameters.
 
     Parameters
     ----------
     **kwargs : dict
-        Parameters to pass to DisoOF constructor
+        Keyword arguments forwarded to :class:`DisoOF` (``preset``,
+        ``finest_scale``, ``gradient_descent_iterations``, ``patch_size``,
+        ``patch_stride``, ``use_mean_normalization``,
+        ``use_spatial_propagation``).
 
     Returns
     -------
     DisoOF
-        DisoOF instance with specified parameters
+        Pickle-safe callable (lazy OpenCV initialization) computing DIS
+        optical flow.
+
+    Raises
+    ------
+    TypeError
+        If ``kwargs`` contains keys that are not :class:`DisoOF`
+        constructor parameters.
+
+    See Also
+    --------
+    DisoOF : The wrapper class returned by this factory.
+    pyflowreg.core.backend_registry.register_backend : Backend registration.
     """
     return DisoOF(**kwargs)

@@ -1,3 +1,37 @@
+"""
+Batch Motion Correction Pipeline
+================================
+
+File-based motion correction for video recordings, providing the Python
+counterpart of the MATLAB Flow-Registration ``compensate_recording``
+entry point.
+
+The pipeline reads the input recording batch-wise through the PyFlowReg
+I/O system, preprocesses each batch (normalization against the reference
+followed by Gaussian filtering), computes per-frame displacement fields
+with the configured optical flow backend through a parallelization
+executor (sequential, threading, or multiprocessing), warps the raw
+frames onto the reference, and writes the compensated output together
+with optional displacement fields, valid-pixel masks, and statistics.
+
+Classes
+-------
+RegistrationConfig
+    Runtime configuration (worker count, executor selection, verbosity).
+BatchMotionCorrector
+    Main batch registration pipeline class.
+
+Functions
+---------
+compensate_recording
+    Convenience entry point that builds and runs a BatchMotionCorrector.
+
+See Also
+--------
+pyflowreg.motion_correction.compensate_arr : In-memory array variant.
+pyflowreg.motion_correction.OF_options : Configuration system.
+"""
+
 from __future__ import annotations
 
 import warnings
@@ -19,7 +53,40 @@ import pyflowreg.motion_correction.parallelization as _parallelization  # noqa: 
 
 @dataclass
 class RegistrationConfig:
-    """Simplified configuration."""
+    """
+    Runtime configuration for the batch motion-correction pipeline.
+
+    Bundles execution settings (worker count, parallelization executor,
+    verbosity) that are independent of the optical flow and I/O
+    parameters held by ``OFOptions``.
+
+    Parameters
+    ----------
+    n_jobs : int, optional
+        Number of parallel workers, default ``-1``. With ``-1``, all
+        available cores are used: the ``max_workers`` value from
+        ``RuntimeContext`` if set, otherwise ``os.cpu_count()`` (falling
+        back to 4 if the core count cannot be determined). Any other
+        value is used directly as the worker count.
+    verbose : bool, optional
+        Verbosity flag, default ``False``. Note that in the current
+        implementation most pipeline progress messages (executor
+        selection, batch timings, final statistics) are printed when
+        this is ``False``.
+    parallelization : str or None, optional
+        Name of the parallelization executor: ``'sequential'``,
+        ``'threading'``, or ``'multiprocessing'``. ``None`` (default)
+        auto-selects the best executor that is both supported by the
+        configured flow backend and available on the system, preferring
+        ``'multiprocessing'``, then ``'threading'``, then
+        ``'sequential'``. If the requested executor is not usable, a
+        warning is emitted and the pipeline falls back in the same
+        order.
+
+    See Also
+    --------
+    BatchMotionCorrector : Pipeline class consuming this configuration.
+    """
 
     n_jobs: int = -1  # -1 = all cores
     verbose: bool = False
@@ -30,7 +97,57 @@ class RegistrationConfig:
 
 class BatchMotionCorrector:
     """
-    Main registration pipeline.
+    Batch-based motion correction pipeline for video recordings.
+
+    Orchestrates the complete file-to-file registration workflow:
+
+    1. Opens the video reader and writer configured in ``options`` and
+       determines the reference frame (from
+       ``options.get_reference_frame()`` or a user-supplied array).
+    2. Reads the recording batch-by-batch via the PyFlowReg I/O system;
+       each batch has shape (T, H, W, C).
+    3. Preprocesses every batch (normalization against the raw
+       reference, then Gaussian filtering, matching the MATLAB order).
+    4. Computes per-frame displacement fields with the configured
+       optical flow backend through a parallelization executor
+       (sequential, threading, or multiprocessing) and warps the raw
+       frames onto the reference.
+    5. Writes the compensated frames and, if enabled in ``options``,
+       displacement fields (``save_w``), valid-pixel masks
+       (``save_valid_idx``), and statistics plus reference frame
+       (``save_meta_info``); registered batch/displacement/progress
+       callbacks are notified along the way.
+
+    Displacement fields have shape (T, H, W, 2) where ``w[..., 0]`` is
+    the horizontal component u (x) and ``w[..., 1]`` the vertical
+    component v (y).
+
+    Parameters
+    ----------
+    options : OFOptions
+        Configuration with optical flow parameters, I/O paths and
+        formats, and preprocessing settings.
+    config : RegistrationConfig, optional
+        Runtime configuration (worker count, executor selection,
+        verbosity). If None, a default ``RegistrationConfig`` is used.
+
+    Attributes
+    ----------
+    mean_disp, max_disp, mean_div, mean_translation : list of float
+        Per-frame displacement statistics accumulated during ``run()``.
+    reference_raw : ndarray or None
+        Raw reference frame (float64), set during ``run()``.
+    reference_proc : ndarray or None
+        Preprocessed (normalized and filtered) reference frame.
+    executor : BaseExecutor
+        Parallelization executor instance used to process batches.
+    n_workers : int
+        Number of workers requested from the executor.
+
+    See Also
+    --------
+    compensate_recording : Functional entry point wrapping this class.
+    RegistrationConfig : Runtime configuration options.
     """
 
     def __init__(self, options: Any, config: Optional[RegistrationConfig] = None):
@@ -245,9 +362,12 @@ class BatchMotionCorrector:
         """
         Register a progress callback function.
 
-        Args:
-            callback: Function that receives (current_frame, total_frames) as arguments.
-                      For multiprocessing, updates are batch-wise rather than frame-wise.
+        Parameters
+        ----------
+        callback : callable
+            Function called as ``callback(current_frame, total_frames)``.
+            For multiprocessing, updates are batch-wise rather than
+            frame-wise. Callbacks already registered are not added again.
         """
         if callback not in self.progress_callbacks:
             self.progress_callbacks.append(callback)
@@ -258,10 +378,14 @@ class BatchMotionCorrector:
         """
         Register a callback for displacement field batches.
 
-        Args:
-            callback: Function receiving (w_batch, batch_start_idx, batch_end_idx)
-                      where w_batch has shape (T, H, W, 2) containing [u,v] components.
-                      batch_start_idx and batch_end_idx indicate the frame indices in the original video.
+        Parameters
+        ----------
+        callback : callable
+            Function called as ``callback(w_batch, batch_start_idx,
+            batch_end_idx)`` where ``w_batch`` has shape (T, H, W, 2)
+            containing the (u, v) components, and the indices give the
+            frame range of the batch in the original video. Callbacks
+            already registered are not added again.
         """
         if callback not in self.w_callbacks:
             self.w_callbacks.append(callback)
@@ -272,10 +396,14 @@ class BatchMotionCorrector:
         """
         Register a callback for registered/compensated frame batches.
 
-        Args:
-            callback: Function receiving (registered_batch, batch_start_idx, batch_end_idx)
-                      where registered_batch has shape (T, H, W, C).
-                      batch_start_idx and batch_end_idx indicate the frame indices in the original video.
+        Parameters
+        ----------
+        callback : callable
+            Function called as ``callback(registered_batch,
+            batch_start_idx, batch_end_idx)`` where ``registered_batch``
+            has shape (T, H, W, C), and the indices give the frame range
+            of the batch in the original video. Callbacks already
+            registered are not added again.
         """
         if callback not in self.registered_callbacks:
             self.registered_callbacks.append(callback)
@@ -284,9 +412,13 @@ class BatchMotionCorrector:
         """
         Notify all registered progress callbacks for a specific task.
 
-        Args:
-            frames_completed: Number of frames just completed (to add to total)
-            task_id: Identifier for the task being tracked (default: "main")
+        Parameters
+        ----------
+        frames_completed : int
+            Number of frames just completed (added to the task total).
+        task_id : str, optional
+            Identifier for the task being tracked, default ``"main"``.
+            Only the ``"main"`` task triggers the registered callbacks.
         """
         # Initialize task tracker if needed
         if task_id not in self._progress_trackers:
@@ -389,12 +521,21 @@ class BatchMotionCorrector:
     def _preprocess_frames(
         self, frames: np.ndarray, normalization_ref: Optional[np.ndarray] = None
     ) -> np.ndarray:
-        """Preprocess frames: normalize -> filter (MATLAB order).
+        """Preprocess frames: normalize then filter (MATLAB order).
 
-        Args:
-            frames: Frames to preprocess
-            normalization_ref: Reference array for normalization. If None, uses frames' own min/max.
-                              Should be the raw reference to ensure consistent normalization.
+        Parameters
+        ----------
+        frames : ndarray
+            Frames to preprocess, shape (T, H, W, C) or (H, W, C).
+        normalization_ref : ndarray, optional
+            Reference array for normalization. If None, the frames' own
+            min/max are used. Should be the raw reference to ensure
+            consistent normalization across batches.
+
+        Returns
+        -------
+        ndarray
+            Normalized and Gaussian-filtered frames, dtype float64.
         """
         # First normalize
         # Map enum to expected string: JOINT -> 'together', SEPARATE -> 'separate'
@@ -441,13 +582,28 @@ class BatchMotionCorrector:
         w_init: np.ndarray,
         task_id: str = "main",
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Process batch using the configured executor.
+        """Process a batch using the configured executor.
 
-        Args:
-            batch: Raw batch of frames
-            batch_proc: Preprocessed batch
-            w_init: Initial displacement field
-            task_id: Task identifier for progress tracking (default: "main")
+        Parameters
+        ----------
+        batch : ndarray
+            Raw batch of frames, shape (T, H, W, C).
+        batch_proc : ndarray
+            Preprocessed batch, shape (T, H, W, C).
+        w_init : ndarray
+            Initial displacement field, shape (H, W, 2).
+        task_id : str, optional
+            Task identifier for progress tracking, default ``"main"``.
+            Progress callbacks are only forwarded for the ``"main"``
+            task.
+
+        Returns
+        -------
+        registered : ndarray
+            Compensated frames, shape (T, H, W, C).
+        w : ndarray
+            Displacement fields, shape (T, H, W, 2) with (u, v)
+            components.
         """
         flow_params = self._get_flow_params()
         # Cross-correlation pre-alignment settings; the executors pop these
@@ -557,7 +713,42 @@ class BatchMotionCorrector:
         self.reference_proc = new_ref
 
     def run(self, reference_frame: Optional[np.ndarray] = None) -> np.ndarray:
-        """Run complete registration pipeline."""
+        """Run the complete registration pipeline.
+
+        Sets up I/O and the reference frame, then reads the input
+        recording batch-by-batch, computes displacement fields against
+        the reference, and writes compensated frames to the configured
+        output. Depending on ``options``, displacement fields
+        (``save_w``), valid-pixel masks (``save_valid_idx``), and
+        statistics plus the reference frame (``save_meta_info``) are
+        saved as well. Per-frame displacement statistics are accumulated
+        in ``mean_disp``, ``max_disp``, ``mean_div``, and
+        ``mean_translation``.
+
+        Parameters
+        ----------
+        reference_frame : ndarray, optional
+            Pre-computed reference frame. If None, the reference is
+            obtained from ``options.get_reference_frame()``.
+
+        Returns
+        -------
+        ndarray
+            The raw reference frame used for registration, cast to
+            float64.
+
+        Notes
+        -----
+        On the first batch, an initial displacement field is estimated
+        from up to the first 22 frames and used to initialize subsequent
+        flow computations. When ``options.update_initialization_w`` is
+        enabled (default), this initialization is updated after each
+        batch with the mean of the last (up to 20) flow fields. When
+        ``options.update_reference`` is enabled, the preprocessed
+        reference is re-estimated from compensated frames after each
+        batch. The executor is cleaned up even if an error occurs during
+        processing.
+        """
 
         # Setup
         self._setup_io()
@@ -746,15 +937,57 @@ def compensate_recording(
     config: Optional[RegistrationConfig] = None,
 ) -> np.ndarray:
     """
-    Main entry point matching MATLAB API.
+    Run batch motion correction on a recording (MATLAB-compatible API).
 
-    Args:
-        options: OF_options object with parameters
-        reference_frame: Optional pre-computed reference
-        config: Optional registration configuration
+    Convenience wrapper that constructs a ``BatchMotionCorrector`` from
+    ``options`` and ``config`` and executes its ``run()`` method. The
+    compensated video is written to the output configured in ``options``
+    (``output_path``, ``output_format``); depending on ``options``,
+    displacement fields (``save_w``), valid-pixel masks
+    (``save_valid_idx``), and statistics plus the reference frame
+    (``save_meta_info``) are saved as well.
 
-    Returns:
-        The reference frame used
+    Parameters
+    ----------
+    options : OFOptions
+        Configuration object with optical flow parameters and I/O
+        settings.
+    reference_frame : ndarray, optional
+        Pre-computed reference frame. If None, the reference is
+        determined from ``options`` via
+        ``options.get_reference_frame()``.
+    config : RegistrationConfig, optional
+        Runtime configuration (worker count, parallelization executor,
+        verbosity). If None, defaults are used.
+
+    Returns
+    -------
+    ndarray
+        The raw reference frame used for registration, cast to float64.
+
+    See Also
+    --------
+    BatchMotionCorrector : Underlying pipeline class.
+    pyflowreg.motion_correction.compensate_arr.compensate_arr :
+        In-memory array variant.
+
+    Notes
+    -----
+    Matches the MATLAB Flow-Registration ``compensate_recording`` entry
+    point. Displacement fields written with ``save_w`` have shape
+    (T, H, W, 2) with (u, v) components, where u is the horizontal (x)
+    and v the vertical (y) displacement.
+
+    Examples
+    --------
+    >>> from pyflowreg.motion_correction import OFOptions
+    >>> from pyflowreg.motion_correction import compensate_recording
+    >>> options = OFOptions(
+    ...     input_file="video.h5",
+    ...     output_path="results",
+    ...     quality_setting="balanced",
+    ... )  # doctest: +SKIP
+    >>> reference = compensate_recording(options)  # doctest: +SKIP
     """
     pipeline = BatchMotionCorrector(options, config)
     return pipeline.run(reference_frame)

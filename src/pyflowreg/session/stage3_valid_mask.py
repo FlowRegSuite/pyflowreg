@@ -328,8 +328,8 @@ def run_stage3(
 
     Examples
     --------
-    >>> config = SessionConfig.from_toml("session.toml")
-    >>> final_mask = run_stage3(config)
+    >>> config = SessionConfig.from_toml("session.toml")  # doctest: +SKIP
+    >>> final_mask = run_stage3(config)  # doctest: +SKIP
     """
     start_time = time()
 

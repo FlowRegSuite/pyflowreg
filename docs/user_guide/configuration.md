@@ -6,80 +6,59 @@ PyFlowReg uses the `OFOptions` class for comprehensive configuration of all moti
 
 Quality settings control the finest pyramid level computed, balancing speed and accuracy.
 
-```python
-from pyflowreg.motion_correction import OFOptions
-
-# Fast preview (pyramid level 6)
-options = OFOptions(quality_setting="fast")
-
-# Balanced quality (pyramid level 4, recommended)
-options = OFOptions(quality_setting="balanced")
-
-# Maximum quality (pyramid level 0, full resolution)
-options = OFOptions(quality_setting="quality")
+```{literalinclude} ../snippets/user_guide/configuration/quality_settings.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### Pyramid Levels Explained
 
-The optical flow solver operates on multi-scale image pyramids. Lower level numbers mean finer scales:
+The optical flow solver operates on multi-scale image pyramids. Level 0 (L0) is the finest, full-resolution level; higher levels are coarser:
 
-- **Level 0**: Full resolution - captures finest motion details but slowest
+- **Level 0**: Full resolution, used by `quality_setting="quality"` (the default)
 - **Level 4**: Coarser scale used by `quality_setting="balanced"`
 - **Level 6**: Coarse preview scale used by `quality_setting="fast"`
 
-Computation time decreases exponentially with higher minimum levels, while accuracy decreases.
+Stopping at a higher minimum level skips the finest scales, reducing computation time at the cost of accuracy. Setting `min_level` to a non-negative value overrides the preset and switches `quality_setting` to `"custom"`; resetting `min_level` to `-1` restores the previous preset.
 
 ## Core Optical Flow Parameters
 
-```python
-options = OFOptions(
-    # Smoothness regularization weight
-    alpha=4,  # Higher = smoother flow fields
-
-    # Solver iterations per pyramid level
-    iterations=50,  # More iterations = better convergence
-
-    # Pyramid configuration
-    levels=50,  # Maximum pyramid levels (auto-computed from image size)
-    eta=0.8,  # Downsampling factor between levels
-    min_level=1,  # Finest level to compute (set by quality_setting)
-
-    # Nonlinear diffusion parameters
-    a_smooth=1.0,  # Smoothness diffusion parameter
-    a_data=0.45,  # Data term diffusion parameter
-
-    # Optional solver-level GNC stages for sublinear penalties
-    gnc_schedule=(0.0, 0.5, 1.0),
-
-    # Data term, default preserves MATLAB Flow-Registration behavior
-    constancy_assumption="gc",  # Options: "gc", "gray", "cs"
-)
+```{literalinclude} ../snippets/user_guide/configuration/core_parameters.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
-
-`constancy_assumption="gc"` is the default gradient constancy data term used by
-the MATLAB Flow-Registration reference. `"gray"` selects gray-value constancy,
-and `"cs"` selects census constancy. These data terms are implemented by the
-native `flowreg` backend; the `diso` backend rejects non-default values.
-
-Set `gnc_schedule=None` to keep the default solver path. When provided,
-PyFlowReg reruns the pyramid once per stage, warm-starting each stage from
-the previous result.
 
 ### Alpha (Smoothness Weight)
 
-Controls the tradeoff between fitting the data and enforcing smooth flow fields:
+Controls the tradeoff between fitting the data and enforcing smooth flow fields. `alpha` is a 2-tuple `(alpha_x, alpha_y)` weighting smoothness along the x and y directions; a scalar is expanded to `(alpha, alpha)`. The default is `(1.5, 1.5)`.
 
-- **Low alpha (1-2)**: Fits data more closely, captures rapid motion changes, more noise-sensitive
-- **Medium alpha (3-5)**: Balanced (recommended for 2P microscopy)
-- **High alpha (6-10)**: Very smooth flow, may miss sharp motion boundaries
+- **Lower alpha**: Fits the data more closely and captures rapid motion changes, but is more noise-sensitive
+- **Higher alpha**: Smoother flow fields, may miss sharp motion boundaries
 
 ### Iterations
 
-Number of SOR iterations at each pyramid level:
+Number of SOR iterations at each pyramid level (default 50). More iterations improve convergence with diminishing returns; fewer iterations speed up previews but may not fully converge.
 
-- **25-50**: Typical range for most applications
-- **100+**: Better convergence but diminishing returns
-- **10-20**: Fast preview, may not fully converge
+See the [Parameter Guide](../theory/parameters.md) for guidance on the diffusion parameters `a_smooth` and `a_data`.
+
+### Data Term and GNC
+
+`constancy_assumption` selects the data term of the variational solver:
+
+- `"gc"` (alias `"gradient"`): gradient constancy, the default, matching the MATLAB Flow-Registration data term
+- `"gray"` (alias `"brightness"`): gray-value constancy
+- `"cs"` (alias `"census"`): census constancy
+
+Aliases are normalized to the serialized values `"gc"`, `"gray"`, and `"cs"` during validation. These data terms are implemented by the `flowreg` flow backend; the `diso` flow backend raises a `ValueError` for anything other than `"gc"`.
+
+Two optional fields enable graduated non-convexity (GNC):
+
+- `gnc_schedule` (default `None`): stage weights interpolating from a quadratic (0.0) to a fully robust (1.0) penalty, e.g. `gnc_schedule=(0.0, 0.5, 1.0)`. The schedule must be a 1D sequence with at least two entries in [0, 1], monotone nondecreasing, starting at 0.0 and ending at 1.0. Each stage reruns the pyramid, warm-started from the previous stage's result. With the default `None`, the standard single-pass solver is used.
+- `warping_steps` (default `None`): number of warp/relinearize steps per pyramid level in GNC mode; must be at least 1. When GNC is active and `warping_steps` is not set, 10 steps per level are used; the value is ignored when GNC is off.
+
+The `diso` flow backend also rejects `gnc_schedule` and `warping_steps`. See [Data Terms](../theory/data_terms.md) for the full background.
 
 ## Preprocessing
 
@@ -87,39 +66,34 @@ Number of SOR iterations at each pyramid level:
 
 Bin frames temporally to improve SNR and reduce computation:
 
-```python
-options = OFOptions(
-    bin_size=2,  # Average every 2 frames together
-)
+```{literalinclude} ../snippets/user_guide/configuration/temporal_binning.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
-Temporal binning is applied during video reading. The effective frame rate is reduced by the binning factor.
+Temporal binning is applied by the video reader. The effective frame rate is reduced by the binning factor.
 
 ### Gaussian Filtering
 
-Apply Gaussian blur to reduce noise:
+Apply Gaussian filtering to reduce noise:
 
-```python
-options = OFOptions(
-    # Sigma values: [spatial_x, spatial_y, temporal]
-    sigma=[1.0, 1.0, 0.1],  # Single-channel sigma
-    # Or per-channel:
-    sigma=[[1.0, 1.0, 0.1], [2.0, 2.0, 0.2]],  # For 2 channels
-)
+```{literalinclude} ../snippets/user_guide/configuration/gaussian_filtering.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
-Useful for very noisy data, but can reduce spatial accuracy.
+The default is `[[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]]`. Stronger filtering helps with very noisy data but can reduce spatial accuracy; see the [Parameter Guide](../theory/parameters.md) for tradeoffs.
 
 ### Channel Normalization
 
 Control channel normalization for multi-channel data:
 
-```python
-options = OFOptions(
-    channel_normalization="joint",  # Default: normalize all channels together
-    # Or:
-    channel_normalization="separate",  # Normalize each channel independently
-)
+```{literalinclude} ../snippets/user_guide/configuration/channel_normalization.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 Normalization modes:
@@ -130,76 +104,68 @@ Normalization modes:
 
 ### GPU Support Installation
 
-To use GPU-accelerated backends, install PyFlowReg with GPU support:
+To use the GPU flow backends (`flowreg_torch`, `flowreg_cuda`), install PyFlowReg with the GPU extra:
 
 ```bash
 pip install pyflowreg[gpu]
 ```
 
-**Linux/Windows:** Installs both PyTorch and CuPy for CUDA acceleration. Requirements:
+**Linux/Windows:** Installs both PyTorch and CuPy (`cupy-cuda12x`) for CUDA acceleration. Requirements:
 - NVIDIA GPU with CUDA support
 - CUDA 12.x installed
 - Compatible GPU drivers
 
-**macOS:** Installs only PyTorch (CuPy not available on macOS). Enables `flowreg_torch` backend with MPS (Metal Performance Shaders) on Apple Silicon.
+**macOS:** Installs only PyTorch (CuPy is not available on macOS).
 
-Without GPU support installed, only the CPU backend (`flowreg`) is available.
+Without the GPU extra, the CPU flow backends (`flowreg` and `diso`) are available.
 
-PyFlowReg supports multiple computational backends for optical flow calculation, including CPU and GPU acceleration.
+PyFlowReg supports multiple flow backends for the optical flow computation, including CPU and GPU implementations.
 
-### Available Backends
+### Available Flow Backends
 
-```python
-options = OFOptions(
-    flow_backend="flowreg",  # Choose backend
-    backend_params={"device": "cuda"}  # Backend-specific parameters
-)
+```{literalinclude} ../snippets/user_guide/configuration/flow_backend.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
-**Available backends:**
+**Available flow backends:**
 
-- **`flowreg`** (default): NumPy-based CPU implementation with Numba JIT compilation
-  - Best compatibility, works on all systems
-  - Good performance for small to medium datasets
-  - Supports all parallelization modes
+- **`flowreg`** (default): NumPy-based CPU implementation with a Numba-compiled level solver
+  - Works on all systems without optional dependencies
+  - Supports all executors
 
-- **`flowreg_torch`**: PyTorch-based implementation supporting CPU and GPU
-  - Requires PyTorch installation
-  - Automatically uses CUDA if available, falls back to CPU
-  - Significantly faster on GPU for large datasets
-  - **Requires sequential executor** (GPU memory management constraint)
+- **`flowreg_torch`**: variational solver with a PyTorch level solver, on CPU or GPU
+  - Requires PyTorch
+  - With `device=None`, uses CUDA if available, otherwise CPU
 
-- **`flowreg_cuda`**: CuPy-based GPU implementation
-  - Requires CuPy and CUDA installation
-  - Pure GPU computation for maximum performance
-  - Best for very large datasets with NVIDIA GPUs
-  - **Requires sequential executor** (GPU memory management constraint)
+- **`flowreg_cuda`**: variational solver with a CuPy level solver on NVIDIA GPUs
+  - Requires CuPy and CUDA
 
-- **`diso`**: OpenCV DISOpticalFlow implementation
-  - Designed for natural videos and non-2P microscopy data
-  - Alternative dense inverse search algorithm
+- **`diso`**: OpenCV `DISOpticalFlow` (Dense Inverse Search)
+  - Patch-based alternative to the variational solver
+  - Does not support the `"gray"`/`"cs"` data terms or GNC (see [Data Term and GNC](#data-term-and-gnc))
+
+The GPU flow backends (`flowreg_torch`, `flowreg_cuda`) only support the sequential executor, and `diso` does not support multiprocessing; see [Parallelization](parallelization.md) for the executor compatibility rules and fallback behavior.
 
 ### GPU Backend Configuration
-
-GPU backends require sequential execution due to GPU memory management:
 
 ```python
 from pyflowreg.motion_correction import compensate_recording, OFOptions
 from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
 
-# PyTorch backend (automatic CPU/GPU selection)
 options = OFOptions(
     input_file="video.h5",
     flow_backend="flowreg_torch",
     backend_params={"device": "cuda", "dtype": "float32"}  # or "cpu"
 )
 
-# Executor is automatically set to sequential for GPU backends
+# GPU flow backends run with the sequential executor
 config = RegistrationConfig(parallelization="sequential")
 compensate_recording(options, config=config)
 ```
 
-**Device selection:**
+**Device selection** (`flowreg_torch`):
 ```python
 # Automatic device selection (CUDA if available, otherwise CPU)
 backend_params={"device": None}
@@ -207,89 +173,84 @@ backend_params={"device": None}
 # Force CUDA
 backend_params={"device": "cuda"}
 
-# Force CPU (PyTorch only)
+# Force CPU
 backend_params={"device": "cpu"}
 
 # Specific GPU
 backend_params={"device": "cuda:1"}
 ```
 
-**Note:** If you request multiprocessing or threading with a GPU backend, PyFlowReg will automatically fall back to sequential execution and issue a warning.
-
-### Performance Considerations
-
-**For small datasets (< 1000 frames):**
-```python
-options = OFOptions(flow_backend="flowreg")  # CPU sufficient
-```
-
-**For large datasets with GPU:**
-```python
-options = OFOptions(
-    flow_backend="flowreg_torch",
-    backend_params={"device": "cuda", "dtype": "float32"}
-)
-```
-
-**For maximum GPU performance:**
-```python
-options = OFOptions(
-    flow_backend="flowreg_cuda",
-    backend_params={"device": "cuda"}
-)
-```
+The `flowreg_torch` backend additionally accepts `dtype` (`"float32"` or `"float64"`, default `"float64"`). The `flowreg_cuda` backend takes no device parameter and runs on the default CuPy device.
 
 ## Reference Selection
 
 ### Fixed Reference Frames
 
-Use specific frames as reference:
+`reference_frames` accepts frame indices, an image file path, or a precomputed reference array. The default is `list(range(50, 500))`, i.e. frames 50-499:
 
-```python
-# Single frame
-options = OFOptions(reference_frames=[0])
-
-# Average multiple frames
-options = OFOptions(reference_frames=list(range(100, 200)))
-
-# Load from file (TIFF image)
-options = OFOptions(reference_frames="reference.tif")
-
-# Provide directly as numpy array
-import numpy as np
-reference = np.load("reference.npy")
-options = OFOptions(reference_frames=reference)
+```{literalinclude} ../snippets/user_guide/configuration/reference_frames.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
+
+When a list of indices is given, the corresponding frames are read from the input, motion-compensated against their mean using increased regularization, and averaged to form the reference.
+
+### Updating the Reference Frame
+
+By default the reference stays fixed for the entire recording (`update_reference=False`). With `update_reference=True`, the batch pipeline (`compensate_recording`) re-estimates the preprocessed reference after each batch: up to the last 100 frames of the batch are warped onto the current reference using their computed displacement fields and averaged per channel.
+
+```{literalinclude} ../snippets/user_guide/configuration/update_reference.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
+```
+
+Related fields:
+
+- `update_initialization_w` (default `True`): propagates the flow initialization across batches; after each batch, the initialization is updated with the mean of the last (up to 20) flow fields.
+- `n_references` (default `1`): number of references. Multi-reference mode is not fully implemented; values above 1 repeat a single computed reference and emit a warning.
+
+## Cross-Correlation Pre-Alignment
+
+For recordings with large translational offsets, an optional rigid pre-alignment based on phase cross-correlation can initialize the variational flow:
+
+```{literalinclude} ../snippets/user_guide/configuration/cc_initialization.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
+```
+
+When enabled, the executors estimate a rigid (translation-only) shift between the reference and each frame by phase cross-correlation on images downsampled to at most `cc_hw`, apply it together with the current flow initialization, and let the variational solver refine only the remaining non-rigid residual. The rigid shift, initialization, and residual flow are summed into the final displacement field. See [Pre-Alignment](prealignment.md) for the full description.
 
 ## File I/O Configuration
 
 ### Input/Output Paths
 
-```python
-options = OFOptions(
-    input_file="raw_video.h5",
-    output_path="results/",
-    output_format="HDF5",  # HDF5, TIFF, or MAT
-)
+```{literalinclude} ../snippets/user_guide/configuration/io_paths.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
+
+Supported `output_format` values include `TIFF`, `HDF5`, `MAT`, the per-channel variants `MULTIFILE_TIFF`, `MULTIFILE_HDF5`, `MULTIFILE_MAT`, `CAIMAN_HDF5`, `SUITE2P_TIFF`, and the in-memory formats `ARRAY` and `NULL`; see [File Formats](file_formats.md). Note that `compensate_arr` returns arrays and ignores `output_format`; see the [Motion Correction API](../api/motion_correction.md).
 
 ### Saving Displacement Fields
 
-```python
-options = OFOptions(
-    save_w=True,  # Save displacement fields
-    output_typename="single",
-)
+```{literalinclude} ../snippets/user_guide/configuration/save_outputs.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### Buffer Size
 
 Control memory usage and I/O efficiency:
 
-```python
-options = OFOptions(
-    buffer_size=100,  # Number of frames per batch
-)
+```{literalinclude} ../snippets/user_guide/configuration/buffer_size.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 Larger buffers improve I/O efficiency but increase memory usage.
@@ -298,20 +259,16 @@ Larger buffers improve I/O efficiency but increase memory usage.
 
 `OFOptions` uses Pydantic for automatic validation:
 
-```python
-# Invalid parameter raises validation error
-options = OFOptions(alpha=-1)  # ValueError: alpha must be positive
-
-# Type conversion is automatic
-options = OFOptions(alpha="4")  # Converts string to float
+```{literalinclude} ../snippets/user_guide/configuration/validation.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ## Saving and Loading Configuration
 
-```python
-# Save configuration to JSON
-options.save_options("config.json")
-
-# Load configuration from JSON
-options = OFOptions.load_options("config.json")
+```{literalinclude} ../snippets/user_guide/configuration/save_load.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```

@@ -9,7 +9,7 @@ from ._base import VideoWriter
 
 class NullVideoWriter(VideoWriter):
     """
-    A writer that discards all frames without storing or writing them.
+    Writer that discards all frames without storing or writing them.
 
     Useful for running the motion correction pipeline when only intermediate
     computations (callbacks, displacement fields) are needed, without the
@@ -18,16 +18,22 @@ class NullVideoWriter(VideoWriter):
     This implements the Null Object Pattern, allowing the pipeline to run
     normally without special case handling for "no output" scenarios.
 
-    Attributes:
-        frames_written: Counter tracking total frames processed
-        batches_written: Counter tracking total batches processed
+    Attributes
+    ----------
+    frames_written : int
+        Counter tracking total frames processed.
+    batches_written : int
+        Counter tracking total batches processed.
 
-    Example:
-        >>> from pyflowreg.util.io import NullVideoWriter
-        >>> writer = NullVideoWriter()
-        >>> frames = np.random.rand(10, 256, 256, 2)  # 10 frames
-        >>> writer.write_frames(frames)
-        >>> print(writer)  # NullVideoWriter(frames_written=10, batches=1)
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pyflowreg.util.io import NullVideoWriter
+    >>> writer = NullVideoWriter()
+    >>> frames = np.random.rand(10, 256, 256, 2)  # 10 frames
+    >>> writer.write_frames(frames)
+    >>> print(writer)
+    NullVideoWriter(frames_written=10, batches=1)
     """
 
     def __init__(self):
@@ -38,10 +44,17 @@ class NullVideoWriter(VideoWriter):
 
     def init(self, first_frame_batch: np.ndarray):
         """
-        Initialize writer properties from first batch.
+        Initialize writer properties from the first batch.
 
-        Args:
-            first_frame_batch: First batch with shape (T,H,W,C), (H,W,C), or (H,W)
+        Parameters
+        ----------
+        first_frame_batch : ndarray
+            First batch with shape (T, H, W, C), (H, W, C), or (H, W).
+
+        Raises
+        ------
+        ValueError
+            If the input is not a 2D, 3D or 4D array.
         """
         shape = first_frame_batch.shape
 
@@ -71,11 +84,18 @@ class NullVideoWriter(VideoWriter):
 
     def write_frames(self, frames: np.ndarray):
         """
-        Discard frames but track count for debugging/monitoring.
+        Discard frames while tracking counts for debugging/monitoring.
 
-        Args:
-            frames: Array with shape (T,H,W,C), (H,W,C), or (H,W)
-                    These frames are not stored, only counted.
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C), (H, W, C), or (H, W). The
+            frames are not stored, only counted.
+
+        Raises
+        ------
+        ValueError
+            If the input is not a 2D, 3D or 4D array.
         """
         if not self.initialized:
             self.init(frames)
@@ -96,11 +116,11 @@ class NullVideoWriter(VideoWriter):
         self.batches_written += 1
 
     def close(self):
-        """No-op for null writer - no resources to clean up."""
+        """Close the writer (no-op; there are no resources to clean up)."""
         pass
 
     def __repr__(self):
-        """String representation showing processing statistics."""
+        """Return a string representation showing processing statistics."""
         return (
             f"NullVideoWriter(frames_written={self.frames_written}, "
             f"batches={self.batches_written})"

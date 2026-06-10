@@ -75,6 +75,18 @@ docs = [
     "sphinx-autodoc-typehints~=2.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "executor: marks tests that test specific executors",
+    "integration: marks integration tests",
+    "unit: marks unit tests",
+    "docs_example: executes a documentation code example (docs snippets, README, docstring mirrors)",
+    "demo_data: needs downloaded demo data; skipped unless cached in data/ or PYFLOWREG_TEST_DEMO_DATA=1",
+]
+doctest_optionflags = ["NORMALIZE_WHITESPACE", "ELLIPSIS"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

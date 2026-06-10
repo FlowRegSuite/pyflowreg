@@ -29,6 +29,16 @@ Multi-recording session processing with inter-sequence alignment.
 - `run_stage3()` - Valid mask computation
 :::
 
+:::{grid-item-card} Z-Alignment
+:link: z_align
+:link-type: doc
+
+Stage-based z-shift estimation and correction against a reference volume.
+- `ZAlignConfig` - Pipeline configuration
+- `run_all_stages()` - Full pipeline
+- `run_stage1()`, `run_stage2()`, `run_stage3()` - Individual stages
+:::
+
 :::{grid-item-card} Core Algorithms
 :link: core
 :link-type: doc
@@ -76,6 +86,7 @@ Image processing utilities.
 
 motion_correction
 session
+z_align
 core
 io
 utilities

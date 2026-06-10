@@ -248,8 +248,8 @@ def run_stage2(config: SessionConfig) -> Tuple[int, Path, List[np.ndarray]]:
 
     Examples
     --------
-    >>> config = SessionConfig.from_toml("session.toml")
-    >>> middle_idx, center_file, displacements = run_stage2(config)
+    >>> config = SessionConfig.from_toml("session.toml")  # doctest: +SKIP
+    >>> middle_idx, center_file, displacements = run_stage2(config)  # doctest: +SKIP
     """
     start_time = time()
 

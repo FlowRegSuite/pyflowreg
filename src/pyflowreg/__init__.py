@@ -5,19 +5,24 @@ PyFlowReg: Variational Optical Flow for 2-Photon Microscopy
 PyFlowReg provides high-accuracy motion correction for 2-photon microscopy
 videos and volumetric 3D scans using variational optical flow techniques.
 
-This is a Python port of the Flow-Registration MATLAB toolbox, maintaining
-full compatibility while adding modern Python features and optimizations.
+This is a Python port of the Flow-Registration MATLAB toolbox, aiming at
+algorithmic compatibility while adding modern Python features and
+optimizations.
 
 Quick Start
 -----------
->>> import pyflowreg
+>>> import numpy as np
 >>> from pyflowreg.motion_correction import compensate_arr, OFOptions
+>>>
+>>> # Small synthetic video (T, H, W) and a reference frame
+>>> video = np.random.rand(10, 32, 32).astype(np.float32)
+>>> reference = video[:5].mean(axis=0)
 >>>
 >>> # Set up options
 >>> options = OFOptions(quality_setting="balanced")
 >>>
 >>> # Register video (array-based)
->>> registered, flow = compensate_arr(video, reference, options)
+>>> registered, flow = compensate_arr(video, reference, options)  # doctest: +SKIP
 
 Main Modules
 ------------
@@ -36,7 +41,7 @@ Publication : https://doi.org/10.1002/jbio.202100330
 
 Notes
 -----
-This Python implementation maintains full algorithmic compatibility with the
+This Python implementation aims at algorithmic compatibility with the
 MATLAB version. Any differences in behavior should be reported as issues.
 """
 

@@ -87,10 +87,10 @@ def download_demo_data(
     Examples
     --------
     >>> # Download jupiter demo data
-    >>> jupiter_path = download_demo_data("jupiter.tiff")
+    >>> jupiter_path = download_demo_data("jupiter.tiff")  # doctest: +SKIP
 
     >>> # Download synthetic evaluation data
-    >>> synth_path = download_demo_data("synth_frames.h5")
+    >>> synth_path = download_demo_data("synth_frames.h5")  # doctest: +SKIP
     """
     if demo_name not in DEMO_DATA_URLS:
         available = ", ".join(DEMO_DATA_URLS.keys())

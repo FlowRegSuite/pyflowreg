@@ -19,12 +19,16 @@ class TIFFFileReader(VideoReader):
     """
     TIFF stack file reader with support for multi-page and multi-channel formats.
 
-    Supports:
+    Frames are returned in (T, H, W, C) format. Supports:
+
     - Multi-page TIFF stacks (standard format)
-    - Single-page multi-sample TIFFs (channels as samples per pixel)
-    - Deinterleaved reading for formats like Suite2p
-    - Memory-mapped reading for large files
-    - Various data types (uint8/16/32/64, int32/64, float32/64)
+    - Single-page multi-sample TIFFs (samples per pixel read as frames)
+    - Deinterleaved reading of interleaved single-channel pages
+      (e.g. Suite2p-style files, via the ``deinterleave`` option)
+    - Memory-mapped series reading for large contiguous stacks
+    - ScanImage TIFFs: metadata is parsed to derive the channel count
+      (auto-enabling deinterleaving for interleaved channel pages) and to
+      flatten Z-stacks/volumes into a sequence of 2D frames
     """
 
     def __init__(
@@ -33,12 +37,29 @@ class TIFFFileReader(VideoReader):
         """
         Initialize TIFF reader.
 
-        Args:
-            file_path: Path to TIFF file
-            buffer_size: Number of frames per batch
-            bin_size: Temporal binning factor
-            deinterleave: Channel deinterleaving factor (1=none, >1 for interleaved formats)
-            use_memmap: Use memory mapping for large files (default: True)
+        Parameters
+        ----------
+        file_path : str
+            Path to the TIFF file.
+        buffer_size : int, optional
+            Number of frames per batch (default 500).
+        bin_size : int, optional
+            Temporal binning factor (default 1).
+        **kwargs
+            Additional options. Supported keys:
+
+            - ``deinterleave`` (int): Channel deinterleaving factor; a
+              value N > 1 treats N consecutive single-channel pages as one
+              N-channel frame (default 1, no deinterleaving).
+            - ``use_memmap`` (bool): Use memory mapping when reading
+              through the tifffile series path (default True).
+
+        Raises
+        ------
+        ImportError
+            If the tifffile library is not installed.
+        FileNotFoundError
+            If ``file_path`` does not exist.
         """
         if not TIFF_SUPPORTED:
             raise ImportError("tifffile library required for TIFF support")
@@ -383,13 +404,17 @@ class TIFFFileReader(VideoReader):
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
         """
-        Read raw frames from TIFF file.
+        Read raw frames from the TIFF file.
 
-        Args:
-            frame_indices: 0-based indices (slice or list)
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            0-based raw frame indices.
 
-        Returns:
-            Array with shape (T, H, W, C)
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C).
         """
         # Ensure frame_count does not exceed available pages
         self._clamp_frame_count()
@@ -542,7 +567,18 @@ class TIFFFileReader(VideoReader):
             self._tiff_series = None
 
     def get_metadata(self) -> dict:
-        """Get comprehensive metadata from TIFF file."""
+        """
+        Get comprehensive metadata from the TIFF file.
+
+        Returns
+        -------
+        dict
+            Dictionary with file name, frame count, shapes, dtype, sample
+            mode, deinterleave factor and ScanImage flag; ScanImage
+            Z-stack information (z_stack_info, scanimage_version,
+            z_step_microns) and common TIFF tags (description, software,
+            datetime) are included when available.
+        """
         self._ensure_initialized()
 
         metadata = {
@@ -584,7 +620,8 @@ class TIFFFileWriter(VideoWriter):
     """
     TIFF stack file writer with multi-page and compression support.
 
-    Features:
+    Writes frames given in (T, H, W, C) format as multi-page TIFF. Features:
+
     - Multi-page TIFF writing
     - Suite2p format support (interleaved single-channel pages)
     - Various compression algorithms
@@ -596,14 +633,30 @@ class TIFFFileWriter(VideoWriter):
         """
         Initialize TIFF writer.
 
-        Args:
-            file_path: Output file path
-            format: 'default' or 'suite2p' (changes to interleaved single-channel pages)
-            compression: Compression type ('none', 'lzw', 'zlib', 'jpeg')
-            compression_level: Compression level for zlib (0-9)
-            bigtiff: Use BigTIFF format (default: True, matching MATLAB 'w8')
-            imagej: Write ImageJ-compatible metadata
-            metadata: Additional metadata dict to include
+        Parameters
+        ----------
+        file_path : str
+            Output file path.
+        **kwargs
+            Additional options. Supported keys:
+
+            - ``format`` (str): 'default' or 'suite2p'; 'suite2p' writes
+              channels as interleaved single-channel pages (default
+              'default').
+            - ``compression`` (str): Compression type ('none', 'lzw',
+              'zlib', 'deflate' or 'jpeg'; default 'none').
+            - ``compression_level`` (int): Compression level for zlib
+              (default 6).
+            - ``bigtiff`` (bool): Use BigTIFF format (default True,
+              matching MATLAB 'w8').
+            - ``imagej`` (bool): Write ImageJ-compatible metadata
+              (default False).
+            - ``metadata`` (dict): Additional metadata to include.
+
+        Raises
+        ------
+        ImportError
+            If the tifffile library is not installed.
         """
         if not TIFF_SUPPORTED:
             raise ImportError("tifffile library required for TIFF support")
@@ -636,10 +689,22 @@ class TIFFFileWriter(VideoWriter):
 
     def write_frames(self, frames: np.ndarray):
         """
-        Write frames to TIFF file.
+        Write frames to the TIFF file.
 
-        Args:
-            frames: Array with shape (T, H, W, C) or (T, H, W) or (H, W)
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C), (T, H, W) or (H, W). A 3D
+            input is treated as a single (H, W, C) frame only if its
+            first axis has length 1 or its first two axes match the
+            initialized frame size; otherwise it is interpreted as
+            (T, H, W).
+
+        Raises
+        ------
+        ValueError
+            If the input dimensionality is unsupported, or the frame size
+            or channel count does not match previously written frames.
         """
         # Normalize input to 4D (T, H, W, C)
         if frames.ndim == 2:  # Single frame, single channel
@@ -758,11 +823,16 @@ class TIFFFileWriter(VideoWriter):
         """
         Convert frames to Suite2p format (interleaved single-channel pages).
 
-        Args:
-            frames: (T, H, W, C) array
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C).
 
-        Returns:
-            (T*C, H, W, 1) array with interleaved channels
+        Returns
+        -------
+        ndarray
+            Array with shape (T*C, H, W, 1) with interleaved channels in
+            page order frame0_ch0, frame0_ch1, ..., frame1_ch0, ...
         """
         T, H, W, C = frames.shape
         if C == 1:
@@ -779,10 +849,12 @@ class TIFFFileWriter(VideoWriter):
 
     def _write_frames_to_file(self, frames: np.ndarray):
         """
-        Write frame data to TIFF file.
+        Write frame data to the TIFF file.
 
-        Args:
-            frames: Array with shape (T, H, W) or (T, H, W, C)
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W) or (T, C, H, W).
         """
         # Write using tifffile
         # if self._frame_count == 0:
@@ -816,7 +888,12 @@ class TIFFFileWriter(VideoWriter):
                     )
 
     def close(self):
-        """Close the TIFF file."""
+        """
+        Finalize writing and print a summary of the written file.
+
+        The underlying file handle is opened and closed per
+        ``write_frames()`` call, so no handle needs to be released here.
+        """
         if self._frame_count > 0:
             print(f"TIFF file written: {self.file_path}")
             print(f"  Frames: {self._frame_count}")

@@ -28,44 +28,97 @@ def compensate_arr(
     registration_config: Optional[RegistrationConfig] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Process arrays in memory matching MATLAB compensate_inplace functionality.
+    Register an in-memory array against a reference frame.
 
-    This function provides the same motion compensation as compensate_recording
-    but operates on in-memory arrays instead of files. It uses the same batching
-    and flow initialization logic to ensure algorithmic consistency.
+    Provides the same motion compensation as ``compensate_recording`` but
+    operates on in-memory arrays instead of files (MATLAB
+    ``compensate_inplace`` equivalent). The array is routed through the same
+    batching and flow-initialization pipeline, with results collected by an
+    in-memory writer instead of being written to disk.
 
-    Args:
-        c1: Input array to register, shape (T,H,W,C), (H,W,C), or (T,H,W)
-            For single-channel 3D arrays, assumes (T,H,W) if T > 4, else (H,W,C)
-        c_ref: Reference frame, shape (H,W,C) or (H,W)
-        options: OF_options configuration. If None, uses defaults.
-        progress_callback: Optional callback function that receives (current_frame, total_frames)
-            for progress updates. Note: For multiprocessing executor, updates are batch-wise.
-        flow_backend: Backend name override (e.g., 'diso', 'flowreg')
-        backend_params: Backend-specific parameters override
-        get_displacement: Direct displacement callable override
-        get_displacement_factory: Factory function override for creating displacement callable
-        w_callback: Optional callback for displacement field batches, receives (w_batch, start_idx, end_idx)
-        registered_callback: Optional callback for registered frame batches, receives (batch, start_idx, end_idx)
-        registration_config: Optional execution config (executor type/worker count).
+    Parameters
+    ----------
+    c1 : ndarray
+        Input array to register, shape (T, H, W, C), (T, H, W), (H, W, C),
+        or (H, W). A 3D input is treated as (T, H, W) when ``c_ref`` is 2D;
+        otherwise the array reader treats a 3D input as a single (H, W, C)
+        frame when the last dimension is at most 4, and as (T, H, W)
+        when it is larger.
+    c_ref : ndarray
+        Reference frame, shape (H, W, C) or (H, W).
+    options : OFOptions, optional
+        Optical flow configuration. If None, default ``OFOptions`` are used.
+        The function works on a copy and forces ``output_format`` to ARRAY
+        (any user-set ``output_format`` is ignored), ``save_w=True``, and
+        ``save_meta_info=False``.
+    progress_callback : callable, optional
+        Called as ``progress_callback(current_frame, total_frames)`` for
+        progress updates. For the multiprocessing executor, updates are
+        batch-wise rather than frame-wise.
+    flow_backend : str, optional
+        Flow backend name override (e.g., 'diso', 'flowreg'); sets
+        ``options.flow_backend`` on the internal copy.
+    backend_params : dict, optional
+        Backend-specific parameter overrides, merged into
+        ``options.backend_params``.
+    get_displacement : callable, optional
+        Direct displacement callable override; sets
+        ``options.get_displacement_impl``.
+    get_displacement_factory : callable, optional
+        Factory override for creating the displacement callable; sets
+        ``options.get_displacement_factory``.
+    w_callback : callable, optional
+        Called as ``w_callback(w_batch, start_idx, end_idx)`` for each
+        batch of displacement fields, where ``w_batch`` has shape
+        (T, H, W, 2).
+    registered_callback : callable, optional
+        Called as ``registered_callback(batch, start_idx, end_idx)`` for
+        each batch of registered frames, where ``batch`` has shape
+        (T, H, W, C).
+    registration_config : RegistrationConfig, optional
+        Execution configuration (parallelization mode, worker count,
+        verbosity).
 
-    Returns:
-        Tuple of:
-            - c_reg: Registered array with same shape as input
-            - w: Displacement fields, shape (T,H,W,2) with [u,v] components
+    Returns
+    -------
+    c_reg : ndarray
+        Registered frames. Inputs of shape (T, H, W, C), (T, H, W), and
+        (H, W) keep their input shape; an (H, W, C) input is returned as
+        (1, H, W, C). Cast according to ``options.output_typename``
+        (default "double", i.e. float64) when it is one of "single",
+        "double", "uint8", "uint16", "int16", "int32"; other values leave
+        the pipeline output dtype unchanged.
+    w : ndarray
+        Displacement fields, shape (T, H, W, 2) with components (u, v),
+        where ``w[..., 0]`` is the horizontal (x) and ``w[..., 1]`` the
+        vertical (y) displacement. For a single 2D (H, W) input the leading
+        time axis is removed, giving (H, W, 2). A zero-filled array is
+        returned if no displacement fields were captured.
 
-    Example:
-        >>> import numpy as np
-        >>> from pyflowreg.motion_correction import compensate_arr
-        >>>
-        >>> # Create test data
-        >>> video = np.random.rand(100, 256, 256, 2)  # 100 frames, 2 channels
-        >>> reference = np.mean(video[:10], axis=0)
-        >>>
-        >>> # Register with progress callback
-        >>> def progress(current, total):
-        ...     print(f"Progress: {current}/{total} ({100*current/total:.1f}%)")
-        >>> registered, flow = compensate_arr(video, reference, progress_callback=progress)
+    Raises
+    ------
+    ValueError
+        If ``c1`` is empty.
+
+    See Also
+    --------
+    compensate_pair : Displacement field between two single frames.
+    pyflowreg.motion_correction.compensate_recording.compensate_recording :
+        File-based motion correction pipeline.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from pyflowreg.motion_correction import compensate_arr
+    >>>
+    >>> # Create test data
+    >>> video = np.random.rand(100, 256, 256, 2)  # 100 frames, 2 channels
+    >>> reference = np.mean(video[:10], axis=0)
+    >>>
+    >>> # Register with progress callback
+    >>> def progress(current, total):
+    ...     print(f"Progress: {current}/{total} ({100*current/total:.1f}%)")
+    >>> registered, flow = compensate_arr(video, reference, progress_callback=progress)  # doctest: +SKIP
     """
     # Handle 3D squeeze for single channel (MATLAB compatibility)
     squeezed = False
@@ -182,15 +235,39 @@ def compensate_pair(
     frame1: np.ndarray, frame2: np.ndarray, options: Optional[OFOptions] = None
 ) -> np.ndarray:
     """
-    Compute optical flow between two frames.
+    Compute the displacement field between two frames.
 
-    Args:
-        frame1: Reference frame, shape (H,W,C) or (H,W)
-        frame2: Moving frame to register to frame1, shape (H,W,C) or (H,W)
-        options: OF_options configuration. If None, uses defaults.
+    Stacks ``frame1`` and ``frame2`` into a two-frame sequence, runs
+    ``compensate_arr`` with ``frame1`` as the reference, and returns only the
+    displacement field estimated for ``frame2``. Backward-warping ``frame2``
+    with the returned field aligns it to ``frame1``.
 
-    Returns:
-        w: Displacement field, shape (H,W,2) with [u,v] components
+    Parameters
+    ----------
+    frame1 : ndarray
+        Reference (fixed) frame, shape (H, W, C) or (H, W).
+    frame2 : ndarray
+        Moving frame to register to ``frame1``, shape (H, W, C) or (H, W).
+    options : OFOptions, optional
+        Optical flow configuration forwarded to ``compensate_arr``. If None,
+        defaults are used.
+
+    Returns
+    -------
+    w : ndarray
+        Displacement field, shape (H, W, 2) with components (u, v), where
+        ``w[..., 0]`` is the horizontal (x) and ``w[..., 1]`` the vertical
+        (y) displacement.
+
+    See Also
+    --------
+    compensate_arr : Register a full array against a reference frame.
+
+    Notes
+    -----
+    Only the displacement field is returned, not the registered frame. The
+    field for ``frame1`` against itself is computed as part of the two-frame
+    sequence but discarded.
     """
     if frame1.ndim == 2:
         frame1 = frame1[..., np.newaxis]

@@ -4,39 +4,7 @@ PyFlowReg supports three primary workflows for motion correction, each optimized
 
 ## Output Formats
 
-`output_format` is used by the file-based workflow (`compensate_recording`).
-`compensate_arr` is always in-memory and returns arrays.
-
-### Standard File Formats
-- `OutputFormat.HDF5` - HDF5 file storage
-- `OutputFormat.TIFF` - TIFF stack output
-- `OutputFormat.MAT` - MATLAB compatible files
-
-### Memory Formats
-- `OutputFormat.ARRAY` - Accumulate in memory, return as array
-- `OutputFormat.NULL` - Discard output (callback-only processing)
-
-### Example: Choosing Output Strategy
-
-```python
-from pyflowreg.motion_correction import compensate_arr, compensate_recording
-from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
-import numpy as np
-
-video = np.random.rand(100, 256, 256, 2)
-reference = np.mean(video[:10], axis=0)
-
-# Array-based workflow (compensate_arr) always returns arrays
-# NOTE: compensate_arr ignores options.output_format and always returns
-# (registered, w) arrays in memory.
-# For callback-only/no-storage processing, use compensate_recording with OutputFormat.NULL.
-
-# File storage
-options_file = OFOptions(
-    output_format=OutputFormat.HDF5,
-    output_path="results/"
-)
-```
+`output_format` controls where the file-based workflow (`compensate_recording`) writes its results. `compensate_arr` is always in-memory and returns arrays regardless of `options.output_format`; see the [motion correction API reference](../api/motion_correction.md). The full list of supported formats, including the memory formats `ARRAY` and `NULL`, is documented in [File Formats](file_formats.md).
 
 ## Array-Based Workflow
 
@@ -44,38 +12,27 @@ The array-based workflow is ideal for smaller datasets that fit in memory or whe
 
 ### Basic Usage
 
-```python
-import numpy as np
-from pyflowreg.motion_correction import compensate_arr, OFOptions
-
-# Load video data (T, H, W, C)
-video = np.load("my_video.npy")
-
-# Create reference from stable frames
-reference = np.mean(video[100:200], axis=0)
-
-# Configure motion correction
-options = OFOptions(quality_setting="balanced")
-
-# Run compensation
-registered, flow = compensate_arr(video, reference, options)
+```{literalinclude} ../snippets/user_guide/workflows/array_basic.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### Returns
 
 - `registered`: Motion-corrected video with same shape as input
-- `flow`: Displacement fields with shape (T, H, W, 2) containing (u, v) components
+- `flow`: Displacement fields with shape (T, H, W, 2) containing (u, v) components, where u is the horizontal (x) and v the vertical (y) displacement
 
 ### When to Use
 
-- Dataset fits comfortably in memory (typically <10GB)
+- Dataset fits comfortably in memory
 - Need immediate access to registered frames for analysis
 - Iterating on parameters and need fast feedback
 - Working in Jupyter notebooks or interactive analysis
 
 ## Real-Time Data Access via Callbacks
 
-The API provides callbacks for accessing data during processing, enabling real-time visualization, monitoring, and analysis without waiting for completion. This works with all workflows.
+The API provides callbacks for accessing data during processing, enabling visualization, monitoring, and analysis without waiting for completion. Callbacks are available in the array-based and file-based workflows; `FlowRegLive` returns its results per frame instead.
 
 ### Available Callbacks
 
@@ -87,92 +44,49 @@ The API provides callbacks for accessing data during processing, enabling real-t
 
 ### Basic Callback Usage
 
-```python
-def monitor_motion(w_batch, start_idx, end_idx):
-    """Monitor displacement fields during processing."""
-    for t in range(w_batch.shape[0]):
-        magnitude = np.sqrt(
-            w_batch[t, :, :, 0]**2 + w_batch[t, :, :, 1]**2
-        )
-        print(f"Frame {start_idx + t}: mean motion = {np.mean(magnitude):.2f}")
+```{literalinclude} ../snippets/user_guide/workflows/callbacks_basic.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
+```
 
-def display_frames(batch, start_idx, end_idx):
-    """Display corrected frames as they're computed."""
-    # Update your display/viewer with the batch
-    pass
+### Callbacks in the File-Based Workflow
 
-# Use callbacks during processing
-registered, w = compensate_arr(
-    video,
-    reference,
-    options=options,
-    w_callback=monitor_motion,
-    registered_callback=display_frames
-)
+`compensate_arr` accepts callbacks as keyword arguments. For the file-based workflow, create a `BatchMotionCorrector` and register callbacks before calling `run()`:
+
+```{literalinclude} ../snippets/user_guide/workflows/callbacks_batch_corrector.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### Using Callbacks
 
 Process data during registration without explicit storage using callbacks:
 
-```python
-class LiveProcessor:
-    def __init__(self):
-        self.statistics = []
-
-    def process_batch(self, w_batch, start_idx, end_idx):
-        # Process displacement fields during registration
-        batch_stats = {
-            'start': start_idx,
-            'end': end_idx,
-            'mean_motion': np.mean(np.sqrt(
-                w_batch[..., 0]**2 + w_batch[..., 1]**2
-            ))
-        }
-        self.statistics.append(batch_stats)
-
-processor = LiveProcessor()
-
-# compensate_arr returns arrays but also calls callbacks
-registered, w = compensate_arr(
-    video,
-    reference,
-    options=OFOptions(quality_setting="balanced"),
-    w_callback=processor.process_batch
-)
-
-# Access collected statistics
-print(f"Processed {len(processor.statistics)} batches")
+```{literalinclude} ../snippets/user_guide/workflows/callbacks_live_processor.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ## File-Based Workflow
 
-The file-based workflow is optimized for large datasets, providing efficient chunked processing with automatic I/O management.
+The file-based workflow is designed for large datasets, processing the recording batch-by-batch with automatic I/O management.
 
 ### Basic Usage
 
-```python
-from pyflowreg.motion_correction import compensate_recording, OFOptions
-
-# Configure with file paths
-options = OFOptions(
-    input_file="raw_video.h5",
-    output_path="results/",
-    output_format="HDF5",
-    quality_setting="balanced",
-    reference_frames=list(range(100, 200)),
-    save_w=True  # Save displacement fields
-)
-
-# Run compensation (auto-selects parallelization)
-compensate_recording(options)
+```{literalinclude} ../snippets/user_guide/workflows/file_basic.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### Output Files
 
 By default, the following files are created in `output_path`:
 
-- `compensated.<ext>`: Registered video (or `<input>_compensated.<ext>` with `naming_convention="batch"`)
+- `compensated.<FORMAT>` (e.g. `compensated.HDF5`): Registered video (or `<input>_compensated.<FORMAT>` with `naming_convention="batch"`; see [File Formats](file_formats.md#file-naming))
 - `w.h5`: Displacement fields (if `save_w=True`)
 - `idx.hdf`: Per-frame valid masks (if `save_valid_idx=True`)
 - `statistics.npz` and `reference_frame.npy`: Processing metadata (if `save_meta_info=True`)
@@ -192,12 +106,14 @@ options = OFOptions(
 
 # Configure parallelization
 config = RegistrationConfig(
-    n_jobs=8,  # Use 8 cores
+    n_jobs=8,  # Use 8 workers
     parallelization="multiprocessing"
 )
 
 compensate_recording(options, config=config)
 ```
+
+See [Parallelization](parallelization.md) for executor selection details, including which executors each flow backend supports.
 
 ### When to Use
 
@@ -208,25 +124,25 @@ compensate_recording(options, config=config)
 
 ## Real-Time Processing
 
-The real-time workflow enables online motion correction with adaptive reference updating, suitable for live imaging or streaming analysis.
+The real-time workflow enables online motion correction with adaptive reference updating, suitable for live imaging or streaming analysis. `FlowRegLive` always forces `quality_setting="fast"`, even when you pass your own `OFOptions`. See [Online Processing](online_processing.md) for the full `FlowRegLive` API, including reference update interval and weight.
 
 ### Basic Usage
 
+The snippet below is illustrative: `camera.grab()`, `imaging`, and `display()` stand in for your acquisition and display code.
+
 ```python
 import numpy as np
-from pyflowreg.motion_correction import FlowRegLive, OFOptions
+from pyflowreg.motion_correction import FlowRegLive
 
-# Configure for speed
-options = OFOptions(quality_setting="fast")
+# Initialize processor (quality_setting is forced to "fast")
+processor = FlowRegLive()
 
-# Initialize processor
-processor = FlowRegLive(options)
-
-# Initialize reference from first N frames
+# Initialize reference from a (T, H, W, C) stack of frames;
+# the stack is preregistered internally before averaging
 initial_frames = np.stack([camera.grab() for _ in range(10)])
 processor.set_reference(initial_frames)
 
-# Process streaming frames
+# Process streaming frames one at a time
 while imaging:
     frame = camera.grab()
     corrected, flow = processor(frame)
@@ -235,16 +151,18 @@ while imaging:
 
 ### Adaptive Reference
 
-The reference can be reset or updated during processing:
+The reference can be replaced during processing:
 
 ```python
-# Set new reference from array of frames
-reference_frames = np.stack([corrected_frames[:10]])
-processor.set_reference(reference_frames)
+# Set a new reference from a (T, H, W, C) stack;
+# frames are preregistered internally before averaging
+processor.set_reference(corrected_frames)
 
-# Or reset reference buffer
-processor.reset_reference()
+# Or replace the reference with a single frame (H, W, C)
+processor.reset_reference(new_reference_frame)
 ```
+
+Note that `set_reference()` interprets a 3D array as a single multi-channel frame `(H, W, C)`, not as a grayscale stack. Calling `set_reference()` without arguments uses the frames buffered internally before a reference existed.
 
 ### When to Use
 
@@ -255,12 +173,13 @@ processor.reset_reference()
 
 ## Integration with Visualization Tools
 
-The API is designed for seamless integration with visualization tools like napari:
+Callbacks can drive external viewers such as napari. The following example is illustrative: it requires `napari` and is not a tested snippet.
 
 ```python
 import napari
-from pyflowreg.motion_correction import compensate_arr
-from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
+import numpy as np
+from pyflowreg.motion_correction import compensate_arr, OFOptions
+from pyflowreg.util.io import get_video_file_reader
 
 class NapariLiveCorrection:
     """Live motion correction display in napari."""
@@ -309,8 +228,10 @@ class NapariLiveCorrection:
 viewer = napari.Viewer()
 corrector = NapariLiveCorrection(viewer)
 
-video = load_video()  # Your video loading
-reference = compute_reference(video)
+reader = get_video_file_reader("my_video.h5")
+video = reader[:]  # (T, H, W, C)
+reader.close()
+reference = np.mean(video[:20], axis=0)
 
 corrected, w = corrector.correct_with_display(video, reference)
 napari.run()
@@ -322,18 +243,10 @@ napari.run()
 
 Buffer size affects callback frequency and memory usage:
 
-```python
-# Real-time display - smaller buffers for responsive updates
-options_realtime = OFOptions(
-    buffer_size=10,  # Update every 10 frames
-    output_format=OutputFormat.NULL  # For compensate_recording callback-only mode
-)
-
-# Batch processing - larger buffers for efficiency
-options_batch = OFOptions(
-    buffer_size=100,  # Process 100 frames at once
-    output_format=OutputFormat.HDF5
-)
+```{literalinclude} ../snippets/user_guide/workflows/buffer_size.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ### Callback Performance Guidelines
@@ -367,13 +280,12 @@ class AsyncProcessor:
 
 | Criterion | Array-Based | File-Based | Real-Time |
 |-----------|-------------|------------|-----------|
-| Dataset size | Small (<10GB) | Large (>10GB) | Streaming |
+| Dataset size | Fits in memory | Larger than memory | Streaming |
 | Memory usage | High | Low | Low |
-| Speed | Fast | Moderate | Fastest |
-| Quality | Best | Best | Good |
-| Parallelization | No | Yes | No |
+| Quality preset | Configurable | Configurable | Forced `"fast"` |
+| Parallelization | Yes (via `registration_config`) | Yes | No (frame-by-frame) |
 | Output | In-memory | Files | In-memory |
-| Use case | Analysis | Production | Live imaging |
+| Use case | Interactive analysis | Production pipelines | Live imaging |
 
 ## API Reference Summary
 
@@ -390,7 +302,8 @@ def w_callback(w_batch: np.ndarray, start_idx: int, end_idx: int) -> None:
     """Called with batch of displacement fields.
 
     Args:
-        w_batch: Shape (T, H, W, 2) with [u, v] components
+        w_batch: Shape (T, H, W, 2) with (u, v) components;
+            u is horizontal (x), v is vertical (y)
         start_idx: Starting frame index in overall video
         end_idx: Ending frame index (exclusive)
     """
@@ -410,13 +323,8 @@ def registered_callback(batch: np.ndarray, start_idx: int, end_idx: int) -> None
 
 ### Key Configuration Options
 
-```python
-OFOptions(
-    output_format=OutputFormat.NULL,  # NULL, ARRAY, HDF5, TIFF, etc.
-    buffer_size=20,                   # Frames per batch
-    save_w=True,                       # Compute displacement fields
-    levels=5,                          # Pyramid levels
-    iterations=50,                     # Iterations per level
-    quality_setting="balanced",       # fast, balanced, quality
-)
+```{literalinclude} ../snippets/user_guide/workflows/key_options.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```

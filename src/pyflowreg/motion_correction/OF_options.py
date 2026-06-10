@@ -1,10 +1,46 @@
 """
-Optical Flow Options Configuration Module (Python) - Fixed Version
-------------------------------------------------------------------
+Optical Flow Options Configuration Module
+==========================================
 
-Python port of MATLAB `OF_options` using Pydantic v2 for validation/IO
+Python port of MATLAB ``OF_options`` using Pydantic v2 for validation/IO
 with full MATLAB compatibility including proper private attributes,
-preregistration, and edge case handling.
+reference preregistration, and edge case handling.
+
+This module provides the OFOptions class which centralizes all configuration
+for optical flow motion correction, including:
+
+- I/O settings (input file, output path/format/filename, channel selection)
+- Flow parameters (alpha, levels, eta, iterations, constancy assumption,
+  optional graduated non-convexity schedule)
+- Preprocessing options (Gaussian filtering, spatial binning)
+- Reference frame configuration (frame indices, image file, or array,
+  with optional preregistration)
+- Flow backend selection and backend-specific parameters
+
+Classes
+-------
+OFOptions
+    Main configuration class with Pydantic v2 validation.
+OutputFormat
+    Enum of supported output formats (TIFF, HDF5, MAT, multi-file
+    variants, ARRAY, NULL).
+QualitySetting
+    Enum of quality presets (quality, balanced, fast, custom).
+ChannelNormalization
+    Enum of channel normalization modes (joint, separate).
+InterpolationMethod
+    Enum of warp interpolation methods (nearest, linear, cubic).
+ConstancyAssumption
+    Enum of optical-flow data terms (gray, gc, cs).
+NamingConvention
+    Enum of output filename styles (default, batch).
+
+Examples
+--------
+>>> from pyflowreg.motion_correction import OFOptions
+>>> options = OFOptions(quality_setting="fast")
+>>> options.input_file = "data/video.h5"
+>>> options.output_format = "TIFF"
 """
 
 from __future__ import annotations
@@ -41,6 +77,41 @@ from pyflowreg.core.optical_flow import imregister_wrapper
 
 # Enums
 class OutputFormat(str, Enum):
+    """
+    Supported output formats for motion-corrected video.
+
+    The enum value is passed to
+    ``pyflowreg.util.io.factory.get_video_file_writer`` to create the
+    matching ``VideoWriter``. The memory formats ``ARRAY`` and ``NULL``
+    receive special handling and ignore ``output_path``.
+
+    Attributes
+    ----------
+    TIFF : str
+        Single TIFF file.
+    HDF5 : str
+        Single HDF5 file.
+    MAT : str
+        MATLAB MAT-file (the ``OFOptions`` default).
+    MULTIFILE_TIFF : str
+        One TIFF file per channel.
+    MULTIFILE_MAT : str
+        One MAT-file per channel.
+    MULTIFILE_HDF5 : str
+        One HDF5 file per channel.
+    CAIMAN_HDF5 : str
+        Per-channel HDF5 files written with the ``/mov`` dataset name for
+        CaImAn compatibility.
+    BEGONIA : str
+        Begonia format; not yet implemented in the writer factory.
+    SUITE2P_TIFF : str
+        TIFF writer created with ``format="suite2p"``.
+    ARRAY : str
+        In-memory accumulation via ``ArrayWriter``.
+    NULL : str
+        ``NullVideoWriter`` that discards frames without storage.
+    """
+
     # File formats
     TIFF = "TIFF"
     HDF5 = "HDF5"
@@ -58,6 +129,27 @@ class OutputFormat(str, Enum):
 
 
 class QualitySetting(str, Enum):
+    """
+    Quality presets controlling the finest pyramid level of the solver.
+
+    When ``OFOptions.min_level`` is left at ``-1``, the preset determines
+    ``OFOptions.effective_min_level``: ``QUALITY`` resolves to level 0
+    (full resolution), ``BALANCED`` to level 4, and ``FAST`` to level 6.
+    ``CUSTOM`` is selected automatically when ``min_level`` is set to a
+    non-negative value.
+
+    Attributes
+    ----------
+    QUALITY : str
+        Solve down to pyramid level 0 (the ``OFOptions`` default).
+    BALANCED : str
+        Stop at pyramid level 4.
+    FAST : str
+        Stop at pyramid level 6.
+    CUSTOM : str
+        Use the user-supplied ``min_level``.
+    """
+
     QUALITY = "quality"
     BALANCED = "balanced"
     FAST = "fast"
@@ -65,17 +157,59 @@ class QualitySetting(str, Enum):
 
 
 class ChannelNormalization(str, Enum):
+    """
+    Normalization modes for multi-channel intensity scaling.
+
+    Attributes
+    ----------
+    JOINT : str
+        Normalize all channels together using a shared min/max (the
+        ``OFOptions`` default).
+    SEPARATE : str
+        Normalize each channel independently with its own min/max.
+    """
+
     JOINT = "joint"
     SEPARATE = "separate"
 
 
 class InterpolationMethod(str, Enum):
+    """
+    Interpolation methods for warping frames with displacement fields.
+
+    Attributes
+    ----------
+    NEAREST : str
+        Nearest-neighbor interpolation.
+    LINEAR : str
+        Bilinear interpolation.
+    CUBIC : str
+        Bicubic interpolation (the ``OFOptions`` default).
+    """
+
     NEAREST = "nearest"
     LINEAR = "linear"
     CUBIC = "cubic"
 
 
 class ConstancyAssumption(str, Enum):
+    """
+    Data-term constancy assumptions for the variational optical flow solver.
+
+    The string aliases ``"gradient"``, ``"brightness"`` and ``"census"``
+    are normalized to the serialized values ``"gc"``, ``"gray"`` and
+    ``"cs"`` when validating ``OFOptions.constancy_assumption``.
+
+    Attributes
+    ----------
+    GRAY : str
+        Gray-value (brightness) constancy, value ``"gray"``.
+    GRADIENT : str
+        Gradient constancy, value ``"gc"`` (the ``OFOptions`` default).
+    CENSUS : str
+        Census constancy, value ``"cs"``.
+    """
+
     GRAY = "gray"
     GRADIENT = "gc"
     CENSUS = "cs"
@@ -97,12 +231,172 @@ def _normalize_constancy_assumption_value(v):
 
 
 class NamingConvention(str, Enum):
+    """
+    Output filename styles used by ``OFOptions.get_video_writer``.
+
+    Attributes
+    ----------
+    DEFAULT : str
+        Write to ``<output_path>/compensated.<ext>``.
+    BATCH : str
+        Write to ``<output_path>/<input_name>_compensated.<ext>``, where
+        ``<input_name>`` is derived from the input file name.
+    """
+
     DEFAULT = "default"
     BATCH = "batch"
 
 
 class OFOptions(BaseModel):
-    """Python port of MATLAB OF_options class."""
+    """
+    Configuration model for variational optical-flow motion correction.
+
+    Python port of the MATLAB ``OF_options`` class. Centralizes all I/O,
+    solver, preprocessing, reference, and runtime settings in a single
+    Pydantic v2 model with field validation and normalization (scalar
+    ``alpha`` is expanded to a 2-tuple, 1D channel ``weight`` lists are
+    normalized to sum to 1, ``sigma`` is reshaped to ``(n_channels, 3)``).
+    Options can be saved to and restored from JSON via ``save_options`` /
+    ``load_options``, and the model provides factory helpers for the video
+    reader/writer (``get_video_reader`` / ``get_video_writer``), the
+    reference frame (``get_reference_frame``), and the flow-backend
+    callable (``resolve_get_displacement``).
+
+    **Input/Output**
+
+    - ``input_file`` (str, Path, ndarray or VideoReader, default ``None``):
+      Input video as a file path, in-memory array, or open reader.
+    - ``output_path`` (Path, default ``Path("results")``): Output directory.
+    - ``output_format`` (OutputFormat, default ``OutputFormat.MAT``): Output
+      format; ``ARRAY`` and ``NULL`` are in-memory formats.
+    - ``output_file_name`` (str, default ``None``): Custom output filename
+      overriding the naming convention.
+    - ``channel_idx`` (list of int, default ``None``): Channel indices to
+      process.
+    - ``naming_convention`` (NamingConvention, default
+      ``NamingConvention.DEFAULT``): Output filename style,
+      ``compensated.<ext>`` (default) or ``<input>_compensated.<ext>``
+      (batch).
+
+    **Flow parameters**
+
+    - ``alpha`` (float or 2-tuple of float, default ``(1.5, 1.5)``):
+      Regularization strength; scalars are expanded to ``(alpha, alpha)``.
+    - ``weight`` (list of float or ndarray, default ``[0.5, 0.5]``): Channel
+      weights (1D, normalized to sum to 1) or spatial weight maps, 2D
+      ``(H, W)`` or 3D ``(H, W, C)``.
+    - ``levels`` (int, default ``100``): Maximum number of pyramid levels.
+    - ``min_level`` (int, default ``-1``): Finest pyramid level to solve;
+      ``-1`` derives the level from ``quality_setting``.
+    - ``quality_setting`` (QualitySetting, default
+      ``QualitySetting.QUALITY``): Quality preset mapped to an effective
+      ``min_level`` (quality=0, balanced=4, fast=6).
+    - ``eta`` (float, default ``0.8``): Downsampling factor per pyramid
+      level, in (0, 1].
+    - ``iterations`` (int, default ``50``): Solver iterations per level.
+    - ``update_lag`` (int, default ``5``): Update lag for the non-linear
+      diffusion weights.
+    - ``a_data`` (float, default ``0.45``): Data-term diffusion parameter,
+      in (0, 1].
+    - ``a_smooth`` (float, default ``1.0``): Smoothness diffusion parameter.
+    - ``constancy_assumption`` (ConstancyAssumption, default
+      ``ConstancyAssumption.GRADIENT``): Data term, ``"gc"`` (gradient),
+      ``"gray"`` (brightness), or ``"cs"`` (census).
+    - ``gnc_schedule`` (tuple of float, default ``None``): Optional
+      graduated non-convexity stage weights; must be 1D with at least two
+      entries, monotone nondecreasing, starting at 0.0 and ending at 1.0.
+    - ``warping_steps`` (int, default ``None``): Optional warp/relinearize
+      steps per pyramid level in GNC mode.
+
+    **Preprocessing**
+
+    - ``sigma`` (array-like, default ``[[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]]``):
+      Gaussian smoothing ``[sx, sy, st]`` per channel; a single triple is
+      applied to all channels.
+    - ``bin_size`` (int, default ``1``): Temporal binning factor; the
+      reader averages every ``bin_size`` consecutive frames.
+    - ``channel_normalization`` (ChannelNormalization, default
+      ``ChannelNormalization.JOINT``): Normalize channels jointly or
+      separately.
+    - ``preproc_funct`` (callable, default ``None``): Optional preprocessing
+      callable; excluded from serialization.
+
+    **Reference**
+
+    - ``reference_frames`` (list of int, str, Path or ndarray, default
+      ``list(range(50, 500))``): Frame indices to preregister and average,
+      an image file path, or a precomputed reference array.
+    - ``update_reference`` (bool, default ``False``): Update reference
+      during processing.
+    - ``n_references`` (int, default ``1``): Number of references;
+      multi-reference mode is not fully implemented and repeats a single
+      computed reference.
+    - ``min_frames_per_reference`` (int, default ``20``): Minimum frames per
+      reference cluster.
+
+    **Pre-alignment**
+
+    - ``cc_initialization`` (bool, default ``False``): Enable
+      cross-correlation initialization.
+    - ``cc_hw`` (int or 2-tuple of int, default ``256``): Target
+      height/width for cross-correlation projections.
+    - ``cc_up`` (int, default ``1``): Upsampling factor for subpixel
+      cross-correlation accuracy.
+
+    **Backend/runtime**
+
+    - ``flow_backend`` (str, default ``"flowreg"``): Name of the registered
+      flow backend (see ``pyflowreg.core.backend_registry``).
+    - ``backend_params`` (dict, default ``{}``): Backend-specific keyword
+      arguments passed to the backend factory.
+    - ``get_displacement_impl`` (callable, default ``None``): Direct
+      displacement callable overriding the backend; excluded from
+      serialization.
+    - ``get_displacement_factory`` (callable, default ``None``): Factory
+      producing a displacement callable from ``backend_params``; excluded
+      from serialization.
+    - ``buffer_size`` (int, default ``400``): Frame buffer size passed to
+      the video reader.
+
+    **Misc**
+
+    - ``save_w`` (bool, default ``False``): Save displacement fields.
+    - ``save_meta_info`` (bool, default ``True``): Save meta information.
+    - ``save_valid_mask`` (bool, default ``False``): Save valid masks.
+    - ``save_valid_idx`` (bool, default ``False``): Save valid frame
+      indices.
+    - ``output_typename`` (str, default ``"double"``): Output dtype tag.
+    - ``interpolation_method`` (InterpolationMethod, default
+      ``InterpolationMethod.CUBIC``): Interpolation used when warping
+      frames.
+    - ``update_initialization_w`` (bool, default ``True``): Propagate flow
+      initialization across batches.
+    - ``verbose`` (bool, default ``False``): Verbose logging.
+
+    Examples
+    --------
+    >>> from pyflowreg.motion_correction import OFOptions
+    >>> opts = OFOptions(quality_setting="balanced", alpha=2.0)
+    >>> opts.alpha
+    (2.0, 2.0)
+    >>> opts.effective_min_level
+    4
+
+    See Also
+    --------
+    pyflowreg.motion_correction.compensate_arr.compensate_arr :
+        In-memory motion compensation driven by these options.
+    pyflowreg.motion_correction.compensate_recording.compensate_recording :
+        File-based motion compensation driven by these options.
+
+    Notes
+    -----
+    Setting ``min_level`` to a non-negative value switches
+    ``quality_setting`` to ``custom``; resetting ``min_level`` to ``-1``
+    restores the previous preset. Displacement fields follow the ``(u, v)``
+    convention where ``u`` is the horizontal (x) and ``v`` the vertical (y)
+    component.
+    """
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -157,7 +451,9 @@ class OFOptions(BaseModel):
         [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]],
         description="Gaussian [sx, sy, st] per-channel",
     )
-    bin_size: StrictInt = Field(1, ge=1, description="Spatial binning factor")
+    bin_size: StrictInt = Field(
+        1, ge=1, description="Temporal binning factor (frames averaged on read)"
+    )
     buffer_size: StrictInt = Field(400, ge=1, description="Frame buffer size")
 
     # Reference
@@ -724,15 +1020,34 @@ class OFOptions(BaseModel):
 
     def resolve_get_displacement(self) -> Callable:
         """
-        Resolve the displacement computation function based on configuration.
+        Resolve the displacement computation callable from the configuration.
 
-        Priority order:
-        1. get_displacement_impl (direct callable)
-        2. get_displacement_factory with backend_params
-        3. flow_backend from registry with backend_params
+        Resolution priority:
 
-        Returns:
-            Callable for computing optical flow
+        1. ``get_displacement_impl`` -- returned directly if set.
+        2. ``get_displacement_factory`` -- called with ``**backend_params``
+           if set.
+        3. ``flow_backend`` -- the named backend factory is looked up in
+           ``pyflowreg.core.backend_registry`` and called with
+           ``**backend_params``.
+
+        Before the registry lookup, the ``'diso'`` backend is guarded: it
+        only supports the gradient-constancy data term and no graduated
+        non-convexity, so a ``ValueError`` is raised if
+        ``constancy_assumption`` normalizes to anything other than ``'gc'``
+        or if ``gnc_schedule`` or ``warping_steps`` is set.
+
+        Returns
+        -------
+        Callable
+            Function computing the optical-flow displacement field.
+
+        Raises
+        ------
+        ValueError
+            If ``flow_backend == 'diso'`` is combined with a non-``'gc'``
+            constancy assumption or with ``gnc_schedule``/``warping_steps``,
+            or if the named backend is not registered.
         """
         # Priority 1: Direct implementation override
         if self.get_displacement_impl is not None:
@@ -794,7 +1109,14 @@ class OFOptions(BaseModel):
 
 # Convenience functions
 def get_mcp_schema() -> dict:
-    """Get JSON schema for the model."""
+    """
+    Get the JSON schema for the OFOptions model.
+
+    Returns
+    -------
+    dict
+        JSON schema produced by ``OFOptions.model_json_schema()``.
+    """
     return OFOptions.model_json_schema()
 
 

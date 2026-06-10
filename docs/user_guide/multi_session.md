@@ -18,7 +18,7 @@ Use session processing when you have:
 - Multiple recordings from the same field of view
 - Longitudinal imaging sessions (days/weeks apart)
 - Different experimental conditions on same neurons
-- Need for pixel-perfect alignment across recordings
+- Need for consistent pixel alignment across recordings
 
 ## Basic Workflow
 
@@ -68,19 +68,10 @@ stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
 ### 3. Run Processing
 
 **Option A: Python Script**
-```python
-from pyflowreg.session import SessionConfig
-from pyflowreg.session.stage1_compensate import run_stage1
-from pyflowreg.session.stage2_between_avgs import run_stage2
-from pyflowreg.session.stage3_valid_mask import run_stage3
-
-# Load configuration
-config = SessionConfig.from_toml("session.toml")
-
-# Run all stages
-output_folders = run_stage1(config)
-middle_idx, center_file, displacements = run_stage2(config)
-final_mask = run_stage3(config, middle_idx, displacements)
+```{literalinclude} ../snippets/user_guide/multi_session/session_pipeline.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 **Option B: Command Line**
@@ -402,26 +393,45 @@ save_meta_info = true   # Save statistics
 
 ## Integration with Analysis
 
+The Stage 3 results bundle the final session mask (`final_valid`) and the list
+of compensated recordings (`compensated_h5_paths`) in `final_valid_idx.npz`
+(see [Loading Results](#loading-results)). Downstream tools such as CaImAn or
+Suite2p consume the compensated recordings; restrict the analysis to
+`final_valid` so segmentation works on the region that is valid across every
+recording. The snippets below are integration sketches: the CaImAn and Suite2p
+calls follow each tool's own API and version, so consult their documentation
+for the exact loader and segmentation functions.
+
 ### CaImAn Integration
 ```python
-import caiman as cm
+import numpy as np
 
-# Load using final mask
-imgs = cm.load("compensated_outputs/*/compensated.hdf5")
-imgs = imgs[:, final_mask]
+# Final session mask and the compensated recordings written by Stage 3
+results = np.load("final_results/final_valid_idx.npz")
+final_mask = results["final_valid"]
+h5_paths = [str(p) for p in results["compensated_h5_paths"]]
 
-# Run CNMF with consistent ROIs across sessions
-cnm = cm.source_extraction.cnmf.CNMF(...)
-cnm.fit(imgs)
+# Load the compensated HDF5 recordings with CaImAn's own movie loader, then run
+# CNMF, masking analysis to `final_mask` for consistent ROIs across recordings.
+# Refer to the CaImAn documentation for the loader and CNMF API.
 ```
 
 ### Suite2P Integration
 ```python
-# Export masked videos for Suite2P
-for h5_path in results['compensated_h5_paths']:
-    video = load_video(h5_path)
-    masked = video[:, final_mask]
-    save_for_suite2p(masked)
+import numpy as np
+from pyflowreg.util.io.factory import get_video_file_reader
+
+results = np.load("final_results/final_valid_idx.npz")
+final_mask = results["final_valid"]
+
+# Read each compensated recording through the PyFlowReg I/O system and restrict
+# to the shared valid region before exporting in your Suite2p input format.
+for h5_path in results["compensated_h5_paths"]:
+    reader = get_video_file_reader(str(h5_path))
+    video = reader[:]               # (T, H, W, C)
+    reader.close()
+    masked = video[:, final_mask]   # (T, n_valid_pixels, C)
+    # ... export `masked` in the format expected by Suite2p
 ```
 
 ## Performance Optimization
@@ -454,22 +464,23 @@ config.flow_options = {"buffer_size": 5000}
 
 ## MATLAB Interoperability
 
-Results are fully compatible with MATLAB Flow-Registration:
+Stage 3 writes the final mask as a MATLAB-readable `.mat` file
+(`final_valid_idx.mat`) containing the `final_valid` array, so the results can
+be loaded in MATLAB:
 
 ```matlab
 % Load Python results in MATLAB
 load('final_results/final_valid_idx.mat');
 
+% `final_valid` is now available as a logical mask
 % Use with MATLAB analysis
 masked_pixels = video(final_valid);
 ```
 
-Mix processing stages:
-```bash
-# Stage 1 in MATLAB
-matlab -batch "align_full_v3_checkpoint('session.toml')"
-
-# Stages 2-3 in Python
-pyflowreg-session run --config session.toml --stage 2
-pyflowreg-session run --config session.toml --stage 3
-```
+The session layout is modeled on the MATLAB Flow-Registration session
+workflow, so stages can in principle be mixed across tools. Doing so requires
+the MATLAB stage outputs to match the on-disk layout the Python stages expect
+(see the Stage overview table): per-recording `compensated.hdf5`, `idx.hdf`,
+and `temporal_average.npy`. Verify the file layout before relying on a mixed
+pipeline; the exact MATLAB entry points live in the
+[MATLAB Flow-Registration repository](https://github.com/FlowRegSuite/flow_registration).

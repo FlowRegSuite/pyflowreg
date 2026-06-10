@@ -14,7 +14,12 @@ from pyflowreg.util.io._ds_io import DSFileReader, DSFileWriter
 class MATFileReader(DSFileReader, VideoReader):
     """
     MAT video file reader with dataset discovery.
-    Supports both traditional MAT files (v5, v7) and v7.3 (HDF5-based).
+
+    Supports both traditional MAT files (v5, v7; read via scipy.io) and
+    v7.3 files (HDF5-based; read via h5py). Each discovered 3D variable is
+    treated as one channel and interpreted with MATLAB-style dimension
+    ordering (default [0, 1, 2], i.e. (H, W, T) storage). Frames are
+    returned in (T, H, W, C) format.
     """
 
     def __init__(
@@ -159,10 +164,17 @@ class MATFileReader(DSFileReader, VideoReader):
 
     def _read_raw_frames(self, frame_indices: Union[slice, List[int]]) -> np.ndarray:
         """
-        Read raw frames from MAT file.
+        Read raw frames from the MAT file.
 
-        Returns:
-            Array with shape (T, H, W, C)
+        Parameters
+        ----------
+        frame_indices : slice or list of int
+            0-based raw frame indices.
+
+        Returns
+        -------
+        ndarray
+            Array with shape (T, H, W, C).
         """
         # Convert list to array for indexing
         if isinstance(frame_indices, list):
@@ -272,13 +284,22 @@ class MATFileWriter(DSFileWriter, VideoWriter):
         """
         Initialize MAT writer.
 
-        Args:
-            file_path: Output file path
-            dataset_names: Optional dataset naming pattern or list
-                          Default: 'ch*' (produces ch1, ch2, etc.)
-            dimension_ordering: Storage order for MATLAB compatibility
-                               Default: [0, 1, 2] for (H, W, T) in MATLAB
-            use_v73: Force v7.3 format (HDF5-based) for large files
+        Parameters
+        ----------
+        file_path : str
+            Output file path.
+        **kwargs
+            Additional options. Supported keys:
+
+            - ``dataset_names`` (str or list of str): Dataset naming
+              pattern or explicit list of names; '*' in a pattern is
+              replaced by the 1-based channel number (default 'ch*',
+              producing ch1, ch2, ...).
+            - ``dimension_ordering`` (list of int): Axis positions of
+              (H, W, T) in each stored per-channel array (default
+              [0, 1, 2], i.e. (H, W, T) storage as in MATLAB).
+            - ``use_v73`` (bool): Force v7.3 format (HDF5-based) for
+              large files (default False).
         """
         # Initialize parent classes
         DSFileWriter.__init__(self, **kwargs)
@@ -298,10 +319,21 @@ class MATFileWriter(DSFileWriter, VideoWriter):
 
     def write_frames(self, frames: np.ndarray):
         """
-        Write frames to MAT file buffers.
+        Buffer frames in memory; the file is written on ``close()``.
 
-        Args:
-            frames: Array with shape (T, H, W, C) or (T, H, W) or (H, W)
+        Parameters
+        ----------
+        frames : ndarray
+            Array with shape (T, H, W, C), (T, H, W) or (H, W). A 3D
+            input is treated as a single (H, W, C) frame only if its
+            first two axes match the initialized frame size; otherwise it
+            is interpreted as (T, H, W).
+
+        Raises
+        ------
+        ValueError
+            If the input dimensionality is unsupported, or the frame size
+            or channel count does not match previously written frames.
         """
         # Normalize input to 4D (T, H, W, C)
         if frames.ndim == 2:  # Single frame, single channel
@@ -360,7 +392,13 @@ class MATFileWriter(DSFileWriter, VideoWriter):
         self._frame_counter += T
 
     def close(self):
-        """Close and write the MAT file."""
+        """
+        Concatenate buffered frames and write the MAT file.
+
+        Writes one 3D array per channel plus a ``__pyflowreg_metadata__``
+        entry. Uses MAT v5 (scipy.io) by default and hdf5storage (v7.3)
+        when ``use_v73`` is set or the data is too large for v5.
+        """
         if not self._data_dict:
             return
 

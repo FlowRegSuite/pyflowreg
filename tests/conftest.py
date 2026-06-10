@@ -2,6 +2,7 @@
 Pytest configuration and fixtures for PyFlowReg tests.
 """
 
+import os
 import tempfile
 import shutil
 from pathlib import Path
@@ -167,17 +168,35 @@ def available_executors():
     return list(RuntimeContext.get_available_parallelization())
 
 
-# Pytest markers
-def pytest_configure(config):
-    """Configure custom pytest markers."""
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
-    )
-    config.addinivalue_line(
-        "markers", "executor: marks tests that test specific executors"
-    )
-    config.addinivalue_line("markers", "integration: marks integration tests")
-    config.addinivalue_line("markers", "unit: marks unit tests")
+@pytest.fixture(scope="session")
+def demo_data_file():
+    """Resolve demo data files for tests marked ``demo_data``.
+
+    Returns ``get(name)`` where ``name`` is a key of
+    ``pyflowreg.util.download.DEMO_DATA_URLS`` (e.g. ``"jupiter.tiff"``).
+    Uses the file cached under ``data/`` at the project root if present,
+    downloads it only when ``PYFLOWREG_TEST_DEMO_DATA=1`` is set, and
+    skips the test otherwise (so CI without the data stays green).
+    """
+
+    def get(name):
+        from pyflowreg.util.download import download_demo_data
+
+        data_dir = Path(__file__).resolve().parent.parent / "data"
+        path = data_dir / name
+        if path.exists():
+            return path
+        if os.environ.get("PYFLOWREG_TEST_DEMO_DATA") == "1":
+            return download_demo_data(name, data_dir)
+        pytest.skip(
+            f"Demo data {name} not cached in {data_dir}; "
+            "set PYFLOWREG_TEST_DEMO_DATA=1 to download"
+        )
+
+    return get
+
+
+# Pytest markers are registered in pyproject.toml [tool.pytest.ini_options].
 
 
 def pytest_collection_modifyitems(config, items):

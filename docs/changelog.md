@@ -85,7 +85,8 @@ Fixed batch normalization to use reference values.
 
 Initial alpha release with core variational optical flow engine, multi-channel 2D motion correction, and modular I/O system.
 
-[Unreleased]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a7...HEAD
+[Unreleased]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a8...HEAD
+[0.1.0a8]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a7...v0.1.0a8
 [0.1.0a7]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a6...v0.1.0a7
 [0.1.0a6]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a5...v0.1.0a6
 [0.1.0a5]: https://github.com/FlowRegSuite/pyflowreg/compare/v0.1.0a4...v0.1.0a5

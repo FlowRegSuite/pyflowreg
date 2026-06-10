@@ -14,7 +14,7 @@ pip install pyflowreg
 
 ### With Visualization Support
 
-To install with full visualization support (matplotlib, scikit-learn):
+To install with visualization support (matplotlib, scikit-learn):
 
 ```bash
 pip install pyflowreg[vis]
@@ -22,16 +22,25 @@ pip install pyflowreg[vis]
 
 ### Session Processing Support
 
-Session processing support is included in the base install. The session CLI
-`pyflowreg-session` is installed with `pip install pyflowreg`.
+Session processing support is included in the base install. The command-line
+tools `pyflowreg-session` and `pyflowreg-z-align` are installed with
+`pip install pyflowreg`.
 
 ### Complete Installation
 
-For all optional features (visualization, cluster computing, and GPU backends):
+For all optional features (visualization, cluster computing, and GPU flow backends):
 
 ```bash
 pip install pyflowreg[vis,dask,gpu]
 ```
+
+The available pip extras are:
+
+- `vis`: matplotlib and scikit-learn for visualization utilities
+- `dask`: Dask distributed and dask-jobqueue for cluster computing
+- `gpu`: CuPy (CUDA 12; installed on Linux and Windows only) and PyTorch for the GPU flow backends (`flowreg_cuda`, `flowreg_torch`); see [Flow backends](user_guide/backends.md)
+- `test`: pytest and pytest-cov for running the test suite
+- `docs`: Sphinx and related tooling for building the documentation
 
 ### For Development
 
@@ -47,13 +56,10 @@ pip install -e .[test,vis,docs]
 
 ### Windows
 
-On Windows, MDF file support (Sutter file format) requires additional dependencies:
-
-```bash
-pip install pywin32
-```
-
-This is automatically installed when using `pip install pyflowreg` on Windows.
+MDF file support (Sutter file format) is only available on Windows and requires
+`pywin32`. On Windows, `pywin32` is a regular (platform-conditional) dependency
+of PyFlowReg and is installed automatically by `pip install pyflowreg`; no
+extra step is needed.
 
 ## Using Mamba
 
@@ -81,4 +87,7 @@ Verify command-line tools:
 ```bash
 # Check session CLI is installed
 pyflowreg-session --help
+
+# Check z-alignment CLI is installed
+pyflowreg-z-align --help
 ```

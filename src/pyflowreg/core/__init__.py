@@ -15,8 +15,13 @@ Available Backends
 ------------------
 flowreg : Default variational optical flow implementation
     Full-featured gradient constancy optical flow with pyramid scheme
-diso : Planned numba-based reimplementation
-gpu : Planned GPU-accelerated implementation
+diso : OpenCV DIS optical flow wrapper (requires cv2)
+    Supports the "gc" constancy setting only, no GNC; restricted to the
+    sequential and threading executors
+flowreg_torch : PyTorch level-solver variant of the variational backend
+    Registered when torch is importable; sequential executor only
+flowreg_cuda : CuPy/CUDA level-solver variant of the variational backend
+    Registered when cupy is importable; sequential executor only
 
 Functions
 ---------

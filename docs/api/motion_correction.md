@@ -6,7 +6,7 @@ High-level APIs for applying motion correction and motion analysis to microscopy
 
 ### Output Formats
 
-PyFlowReg supports flexible output handling through the `output_format` parameter for file-based workflows (`compensate_recording`):
+For file-based workflows (`compensate_recording`), the output destination is selected through the `output_format` parameter:
 
 - **`OutputFormat.ARRAY`** - Accumulate in memory, return as array
 - **`OutputFormat.NULL`** - Discard output, callback-only processing (no storage overhead)
@@ -16,13 +16,15 @@ PyFlowReg supports flexible output handling through the `output_format` paramete
 
 ### Callback System
 
-All motion correction functions support real-time data access through callbacks:
+Callbacks provide access to results while processing is still running. `compensate_arr` accepts them as keyword arguments; for file-based processing, register them on a `BatchMotionCorrector` instance via `register_progress_callback`, `register_w_callback`, and `register_registered_callback` (the `compensate_recording` convenience wrapper does not take callback arguments).
 
 | Callback | Signature | Description |
 |----------|-----------|-------------|
 | `progress_callback` | `(current: int, total: int) -> None` | Progress updates |
 | `w_callback` | `(w_batch: ndarray, start_idx: int, end_idx: int) -> None` | Access displacement fields during processing |
 | `registered_callback` | `(batch: ndarray, start_idx: int, end_idx: int) -> None` | Access corrected frames during processing |
+
+**Execution timing** (see `BatchMotionCorrector.run()`): the pipeline reads the input batch-by-batch. After each batch, `registered_callback` fires once with the compensated frames (after they have been written to the configured output), followed by `w_callback` with the displacement fields of that batch. `progress_callback` fires with cumulative frame counts as frames complete within a batch; with the multiprocessing executor it is updated once per batch rather than per frame. Exceptions raised inside callbacks are caught and reported as warnings, and processing continues.
 
 Callbacks enable:
 - Real-time visualization without waiting for completion
@@ -32,7 +34,7 @@ Callbacks enable:
 
 ## Array-Based Workflow
 
-The primary function for in-memory motion correction with callback support:
+The primary function for in-memory motion correction with callback support (abridged signature; see the full reference below):
 
 ```python
 compensate_arr(
@@ -47,32 +49,16 @@ compensate_arr(
 
 ### Example with Callbacks
 
-```python
-import numpy as np
-from pyflowreg.motion_correction import compensate_arr
-from pyflowreg.motion_correction.OF_options import OFOptions
-
-def track_motion(w_batch, start_idx, end_idx):
-    """Process displacement fields as they're computed."""
-    for i in range(w_batch.shape[0]):
-        magnitude = np.sqrt(w_batch[i, :, :, 0]**2 + w_batch[i, :, :, 1]**2)
-        print(f"Frame {start_idx + i}: mean motion = {np.mean(magnitude):.2f}")
-
-# Configure array workflow
-options = OFOptions(
-    quality_setting="balanced",
-    buffer_size=20                     # Process 20 frames at a time
-)
-
-# Run with callbacks
-registered, w = compensate_arr(
-    video, reference, options,
-    w_callback=track_motion
-)
+```{literalinclude} ../snippets/api/motion_correction/callback_example.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
-`compensate_arr` always returns arrays in memory and ignores `options.output_format`.
-Use `compensate_recording(..., OFOptions(output_format=OutputFormat.NULL))` for true callback-only/no-storage processing.
+`compensate_arr` always returns arrays in memory and ignores `options.output_format`:
+it works on a copy of the options and forces `output_format=OutputFormat.ARRAY`, so any
+user-set value has no effect. For callback-only processing without storing results, use
+`compensate_recording` with `OFOptions(output_format=OutputFormat.NULL)` instead.
 
 ```{eval-rst}
 .. autofunction:: pyflowreg.motion_correction.compensate_arr
@@ -82,30 +68,10 @@ Use `compensate_recording(..., OFOptions(output_format=OutputFormat.NULL))` for 
 
 File-based processing with callback support through `BatchMotionCorrector`:
 
-```python
-from pyflowreg.motion_correction.compensate_recording import BatchMotionCorrector
-from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
-
-class ProcessingMonitor:
-    def __init__(self):
-        self.batch_count = 0
-
-    def on_batch_complete(self, batch, start_idx, end_idx):
-        self.batch_count += 1
-        print(f"Batch {self.batch_count} complete: frames {start_idx}-{end_idx}")
-
-monitor = ProcessingMonitor()
-
-options = OFOptions(
-    input_file="recording.h5",
-    output_format=OutputFormat.HDF5,
-    output_path="results/",
-    save_w=True
-)
-
-compensator = BatchMotionCorrector(options)
-compensator.register_registered_callback(monitor.on_batch_complete)
-compensator.run()
+```{literalinclude} ../snippets/api/motion_correction/file_workflow_callbacks.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ```{eval-rst}
@@ -139,12 +105,7 @@ compensator.run()
    :undoc-members:
 ```
 
-Key output formats:
-- **`OutputFormat.NULL`** - Discards output, ideal for callback-only processing
-- **`OutputFormat.ARRAY`** - Returns in-memory arrays (default for `compensate_arr`)
-- **`OutputFormat.HDF5`** - Efficient storage for large datasets
-- **`OutputFormat.TIFF`** - Standard microscopy format
-- **`OutputFormat.MAT`** - MATLAB compatibility
+The individual formats are described under [Output Formats](#output-formats) above.
 
 ### OFOptions Class
 
@@ -156,7 +117,7 @@ Key output formats:
 
 ## Parallelization
 
-PyFlowReg provides multiple parallelization backends for batch processing.
+PyFlowReg provides multiple executors (sequential, threading, multiprocessing) for batch processing. See [Parallelization](../user_guide/parallelization.md) for usage guidance, including executor constraints with GPU flow backends.
 
 ```{eval-rst}
 .. automodule:: pyflowreg.motion_correction.parallelization

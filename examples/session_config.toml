@@ -23,15 +23,12 @@ n_workers = -1                        # Stage 1 workers (-1 = all CPU cores)
 
 # === Optical Flow Backend ===
 # Choose the backend for displacement computation
-flow_backend = "flowreg"              # Options: "flowreg", "torch", "jax"
-
-# Backend-specific parameters (optional)
-[backend_params]
-# device = "cuda:0"                   # For torch backend
-# precision = "float32"               # Computation precision
+flow_backend = "flowreg"              # Options: "flowreg", "diso", "flowreg_torch", "flowreg_cuda"
 
 # === Stage 2 Alignment Parameters ===
 # These control inter-sequence registration quality
+# NOTE: keep these ABOVE any [table] section — in TOML, keys following a
+# [table] header belong to that table and would never reach SessionConfig.
 
 # Phase cross-correlation initialization
 cc_upsample = 4                       # Subpixel accuracy (higher = more precise)
@@ -44,6 +41,11 @@ alpha_between = 25.0                  # Regularization strength (higher = smooth
 iterations_between = 100              # Solver iterations (higher = more accurate)
 stage2_constancy_assumption = "gc"     # Options: "gc", "gray", "cs"
 
+# Backend-specific parameters (optional)
+[backend_params]
+# device = "cuda:0"                   # For flowreg_torch backend
+# dtype = "float32"                   # Computation precision (flowreg_torch)
+
 # === Stage 1 Flow Options (Optional) ===
 # Provide inline overrides passed to OFOptions
 [flow_options]
@@ -54,5 +56,6 @@ save_valid_idx = true               # Required for Stage 3
 save_meta_info = true               # Save statistics
 # constancy_assumption = "gc"       # Options: "gc", "gray", "cs"
 
-# Alternatively reference a saved JSON file:
+# Alternatively reference a saved JSON file (top-level key, set it above
+# the [backend_params] section instead of the [flow_options] table):
 # flow_options = "./saved_options/session_stage1.json"

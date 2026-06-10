@@ -4,12 +4,16 @@ Modular I/O system supporting multiple file formats through a common VideoReader
 
 ## Factory Functions
 
+`get_video_file_reader()` and `get_video_file_writer()` select the appropriate reader or writer for a given file path or array and are the recommended entry points for video I/O.
+
 ```{eval-rst}
 .. automodule:: pyflowreg.util.io.factory
    :members:
 ```
 
 ## Base Classes
+
+`VideoReader` returns data in `(T, H, W, C)` format and supports both array-like indexing (`reader[10:20]`, with automatic temporal binning) and sequential batch reading via `read_batch()` / `has_batch()`, which is how `compensate_recording` consumes input files.
 
 ```{eval-rst}
 .. automodule:: pyflowreg.util.io._base
@@ -51,7 +55,9 @@ Modular I/O system supporting multiple file formats through a common VideoReader
    :show-inheritance:
 ```
 
-### MDF (Sutter MesaScope)
+### MDF (Sutter)
+
+Reading MDF files requires Windows, the `pywin32` package, and the `MCSX.Data` COM server. See [Supported Formats](../user_guide/file_formats.md) for details.
 
 ```{eval-rst}
 .. automodule:: pyflowreg.util.io.mdf

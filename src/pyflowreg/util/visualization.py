@@ -30,17 +30,46 @@ def color_map_numpy_2ch(
     """
     Convert a 2-channel image to a 3-channel color visualization.
 
-    Args:
-        img_in: Input 2-channel image (H, W, 2) or stacked 2-channel images
-        scaling_left: Tuple of (scale, offset) for left channel. Default (1, 0)
-        scaling_right: Tuple of (scale, offset) for right channel. Default (1, 0)
-        reference_left: Reference array for left channel normalization
-        reference_right: Reference array for right channel normalization
-        inverted: If True, swap red and blue channels
-        return_float: If True, return float array in [0,1], else uint8 in [0,255]
+    The first channel is mapped to red, the second to blue, and their mean
+    to green. Channels are min-max normalized (independently or against
+    reference arrays), linearly rescaled, and clipped to [0, 1].
 
-    Returns:
-        3-channel color image
+    Parameters
+    ----------
+    img_in : ndarray
+        Input image. Supported shapes: (H, W) (the single channel is used
+        for both color channels), (H, W, 2), or batched (H, W, 2, N) where
+        only the first frame is converted. For other shapes the first two
+        entries of the last axis are used.
+    scaling_left : tuple of float, optional
+        ``(scale, offset)`` applied to the first channel as
+        ``scale * ch - offset``. Default is ``(1.0, 0.0)``.
+    scaling_right : tuple of float, optional
+        ``(scale, offset)`` applied to the second channel as
+        ``scale * ch - offset``. Default is ``(1.0, 0.0)``.
+    reference_left : ndarray, optional
+        Reference array whose min/max are used to normalize the first
+        channel. If both reference arrays are None, each channel is
+        normalized by its own min/max.
+    reference_right : ndarray, optional
+        Reference array whose min/max are used to normalize the second
+        channel.
+    inverted : bool, optional
+        If True, swap the red and blue output channels. Default is False.
+    return_float : bool, optional
+        If True, return a float64 array in [0, 1]; otherwise return uint8
+        in [0, 255]. Default is False.
+
+    Returns
+    -------
+    ndarray
+        Color image with shape (H, W, 3) for the supported input shapes
+        listed above, dtype float64 if ``return_float`` is True, uint8
+        otherwise.
+
+    See Also
+    --------
+    get_visualization : MATLAB-compatible variant taking separate channel arrays.
     """
     # Handle different input shapes
     if img_in.ndim == 2:
@@ -136,22 +165,52 @@ def get_visualization(
     inverted: bool = False,
 ) -> np.ndarray:
     """
-    MATLAB-compatible visualization function for 2-channel images.
+    Create a MATLAB-compatible color visualization from two channels.
 
-    This function reproduces the exact behavior of the MATLAB get_visualization function,
-    including the typo in the original where reference_left min is used in ch2 normalization.
+    Reproduces the exact behavior of the MATLAB ``get_visualization``
+    function from the Flow-Registration toolbox, including the typo in the
+    original where ``reference_left.min()`` enters the denominator of the
+    second-channel normalization. The first channel is mapped to red, the
+    second to blue, and their mean to green.
 
-    Args:
-        ch1: First channel data
-        ch2: Second channel data
-        scaling_left: Tuple of (scale, offset) for left channel. Default (1, 0)
-        scaling_right: Tuple of (scale, offset) for right channel. Default (1, 0)
-        reference_left: Reference array for left channel normalization
-        reference_right: Reference array for right channel normalization
-        inverted: If True, swap red and blue channels
+    Parameters
+    ----------
+    ch1 : ndarray
+        First channel with shape (H, W), or (H, W, N) for stacks.
+    ch2 : ndarray
+        Second channel, same shape as ``ch1``.
+    scaling_left : tuple of float, optional
+        ``(scale, offset)`` applied to ``ch1`` as ``scale * ch1 - offset``.
+        Default is ``(1.0, 0.0)``.
+    scaling_right : tuple of float, optional
+        ``(scale, offset)`` applied to ``ch2`` as ``scale * ch2 - offset``.
+        Default is ``(1.0, 0.0)``.
+    reference_left : ndarray, optional
+        Reference array whose min/max define the normalization of ``ch1``.
+        If both reference arrays are None, each channel is normalized by
+        its own min/max.
+    reference_right : ndarray, optional
+        Reference array used to normalize ``ch2``.
+    inverted : bool, optional
+        If True, swap the red and blue output channels. Default is False.
 
-    Returns:
-        3-channel float image in range [0, 1]
+    Returns
+    -------
+    ndarray
+        Float64 color image clipped to [0, 1], with shape (H, W, 3) for 2D
+        input or (H, W, 3, N) for 3D input.
+
+    Notes
+    -----
+    Matching the reproduced MATLAB behavior, the second-channel
+    normalization denominator is
+    ``reference_right.max() - reference_left.min()``, so passing
+    ``reference_right`` without ``reference_left`` raises
+    ``AttributeError``.
+
+    See Also
+    --------
+    color_map_numpy_2ch : Single-array variant with uint8 output option.
     """
     ch1 = ch1.astype(np.float64)
     ch2 = ch2.astype(np.float64)
@@ -229,13 +288,29 @@ def get_visualization(
 
 def multispectral_mapping(img: np.ndarray) -> np.ndarray:
     """
-    Map multispectral image to RGB visualization.
+    Map a multispectral image to an RGB visualization.
 
-    Args:
-        img: Input image with shape (H, W, C) where C is number of channels/bands
+    Channel handling depends on the number of bands: one band is replicated
+    to a grayscale RGB image, two bands are mapped to the red (band 2) and
+    green (band 1) channels with blue set to zero, three bands are min-max
+    normalized per channel, and more than three bands are reduced to three
+    components with PCA (requires scikit-learn).
 
-    Returns:
-        RGB image with shape (H, W, 3) normalized to [0, 1]
+    Parameters
+    ----------
+    img : ndarray
+        Input image with shape (H, W, C), where C is the number of
+        channels/bands, or (H, W) for a single band.
+
+    Returns
+    -------
+    ndarray
+        RGB image with shape (H, W, 3), dtype float64, clipped to [0, 1].
+
+    Raises
+    ------
+    ImportError
+        If ``img`` has more than 3 bands and scikit-learn is not installed.
     """
     img = np.asarray(img, dtype=np.float64)
 
@@ -302,19 +377,37 @@ def _quiver_visualization_opencv(
     streamline_color: Tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
     """
-    Create quiver visualization using OpenCV backend (no matplotlib required).
+    Create a quiver visualization using the OpenCV backend.
 
-    Args:
-        img: Input image (H, W) or (H, W, C)
-        flow: Displacement field with shape (H, W, 2)
-        scale: Scale factor for quiver arrows
-        downsample: Downsampling factor for quiver display
-        show_streamlines: Whether to show streamlines
-        quiver_color: RGB color for quiver arrows (default white)
-        streamline_color: RGB color for streamlines (default black)
+    Draws displacement arrows (with black outlines for visibility) and
+    optionally traces streamlines through a lightly smoothed copy of the
+    flow field, rendering directly onto the image without requiring
+    matplotlib.
 
-    Returns:
-        Visualization image as numpy array with shape (H, W, 3)
+    Parameters
+    ----------
+    img : ndarray
+        Input image with shape (H, W) or (H, W, C).
+    flow : ndarray
+        Displacement field with shape (H, W, 2), where ``flow[..., 0]`` is
+        the horizontal (x) component u and ``flow[..., 1]`` is the vertical
+        (y) component v.
+    scale : float, optional
+        Multiplier for arrow length. Default is 1.0.
+    downsample : float, optional
+        Fraction of pixels sampled per axis for arrow placement.
+        Default is 0.03.
+    show_streamlines : bool, optional
+        If True, trace and draw streamlines. Default is True.
+    quiver_color : tuple of int, optional
+        RGB color of the arrows. Default is white ``(255, 255, 255)``.
+    streamline_color : tuple of int, optional
+        RGB color of the streamlines. Default is black ``(0, 0, 0)``.
+
+    Returns
+    -------
+    ndarray
+        Visualization image with shape (H, W, 3), dtype uint8.
     """
     # Ensure correct shapes
     if img.ndim == 2:
@@ -526,26 +619,64 @@ def quiver_visualization(
     streamline_color: Tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
     """
-    Create quiver visualization of displacement field overlaid on image.
-    Automatically detects number of channels and applies appropriate mapping.
+    Create a quiver visualization of a displacement field over an image.
 
-    Args:
-        img: Input image (H, W) or (H, W, C)
-        w: Displacement field with shape (H, W, 2)
-        scale: Scale factor for quiver arrows
-        downsample: Downsampling factor for quiver display (default 0.03)
-        show_streamlines: Whether to show streamlines
-        backend: Visualization backend - "matplotlib" or "opencv"
-        return_array: If True, return numpy array; if False, display plot
-        quiver_color: RGB color for quiver arrows (default white)
-        streamline_color: RGB color for streamlines (default black)
+    The background image is mapped to RGB based on its channel count:
+    grayscale replication for 1 channel, the red/blue mapping of
+    :func:`get_visualization` for 2 channels, direct RGB for 3 channels,
+    and :func:`multispectral_mapping` for more than 3 channels. The
+    displacement field is rendered as arrows with optional streamlines.
 
-    Returns:
-        Visualization image as numpy array if return_array=True
+    Parameters
+    ----------
+    img : ndarray
+        Input image with shape (H, W) or (H, W, C).
+    w : ndarray
+        Displacement field with shape (H, W, 2), where ``w[..., 0]`` is the
+        horizontal (x) component u and ``w[..., 1]`` is the vertical (y)
+        component v.
+    scale : float, optional
+        Scale factor for arrow length. Default is 1.0.
+    downsample : float, optional
+        Fraction of pixels per axis at which arrows are drawn.
+        Default is 0.03.
+    show_streamlines : bool, optional
+        If True, additionally draw streamlines. Default is True.
+    backend : {'matplotlib', 'opencv'}, optional
+        Rendering backend. Default is 'matplotlib'.
+    return_array : bool, optional
+        If True, return the rendering as an array. If False (matplotlib
+        backend only), display the figure with ``plt.show()`` and return
+        None. Default is True.
+    quiver_color : tuple of int, optional
+        RGB color of the arrows. Default is white ``(255, 255, 255)``.
+    streamline_color : tuple of int, optional
+        RGB color of the streamlines. Default is black ``(0, 0, 0)``.
 
-    Raises:
-        ImportError: If matplotlib is not available when using matplotlib backend
-        ValueError: If invalid backend is specified
+    Returns
+    -------
+    ndarray or None
+        RGB visualization with shape (H, W, 3) if ``return_array`` is True
+        (the OpenCV backend always returns an array); None if
+        ``return_array`` is False with the matplotlib backend.
+
+    Raises
+    ------
+    ValueError
+        If ``backend`` is not 'matplotlib' or 'opencv', or if ``w`` does
+        not have shape (H, W, 2).
+    ImportError
+        If ``backend='matplotlib'`` and matplotlib is not installed. The
+        'opencv' backend does not require matplotlib.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> img = np.zeros((64, 64))
+    >>> w = np.zeros((64, 64, 2))
+    >>> vis = quiver_visualization(img, w, backend="opencv")
+    >>> vis.shape
+    (64, 64, 3)
     """
     if backend not in ["matplotlib", "opencv"]:
         raise ValueError(f"Backend must be 'matplotlib' or 'opencv', got '{backend}'")
@@ -711,6 +842,32 @@ def quiver_visualization(
 
 
 def flow_to_color(flow, max_flow=None):
+    """
+    Convert a displacement field to an RGB color image.
+
+    Flow orientation is encoded with a 55-entry color wheel spanning
+    red-yellow-green-cyan-blue-magenta transitions, and flow magnitude as
+    color saturation, with zero motion rendered white. Magnitudes are
+    normalized by ``max_flow`` if given, otherwise by the maximum magnitude
+    in the field. Pixels whose normalized magnitude exceeds 1 are darkened
+    by a factor of 0.75; flow components with absolute value above 1e9 are
+    treated as unknown and rendered black.
+
+    Parameters
+    ----------
+    flow : ndarray
+        Displacement field with shape (..., 2), where ``flow[..., 0]`` is
+        the horizontal (x) component u and ``flow[..., 1]`` is the vertical
+        (y) component v.
+    max_flow : float, optional
+        Magnitude used for normalization. If None or not positive, the
+        maximum magnitude of ``flow`` is used instead.
+
+    Returns
+    -------
+    ndarray
+        Color image with shape ``flow.shape[:-1] + (3,)``, dtype uint8.
+    """
     UNKNOWN_FLOW_THRESH = 1e9
 
     u = np.array(flow[..., 0], dtype=np.float64).copy()

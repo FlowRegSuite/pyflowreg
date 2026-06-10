@@ -7,6 +7,7 @@ repos:
     rev: v1.0.1
     hooks:
       - id: fr-ruff
+        args: ["--fix", "--exit-non-zero-on-fix", "--no-cache"]
       - id: fr-ruff-format
       - id: fr-numpydoc-validation
       - id: fr-validate-pyproject

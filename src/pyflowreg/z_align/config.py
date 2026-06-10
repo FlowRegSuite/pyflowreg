@@ -35,7 +35,168 @@ _RECORDING_PREALIGN_PROTECTED_OF_FIELDS = {
 
 
 class ZAlignConfig(BaseModel):
-    """Configuration for z-shift alignment and correction."""
+    """
+    Configuration for z-shift alignment and correction.
+
+    Drives the three-stage z-align pipeline in
+    ``pyflowreg.z_align.pipeline``: Stage 1 builds or loads a compensated
+    reference volume, Stage 2 estimates per-pixel z-shifts patch-wise and
+    optionally writes a z-corrected recording, and Stage 3 optionally
+    simulates a z-shift-only recording from volume and z-shifts. Fields are
+    grouped below as core paths, reference building, output locations,
+    control flags, Stage 1 (volume build), and Stage 2 (patch-based z
+    estimation).
+
+    Parameters
+    ----------
+    root : Path
+        Base directory; must exist and be a directory. Relative input paths
+        are resolved against it.
+    input_file : Path
+        Recording to estimate z-shifts for (Stage 2 input), relative to
+        ``root`` unless absolute.
+    volume_input_file : Path, optional, default=None
+        Raw reference stack compensated in Stage 1 to build the reference
+        volume. Required when ``reference_volume`` is not provided.
+    reference_volume : Path, optional, default=None
+        Existing compensated reference volume. When set, Stage 1 skips the
+        volume build and uses this file directly.
+    reference_source_file : Path, optional, default=None
+        Recording whose leading frames are averaged into the reference image
+        passed to Stage 1 compensation. For recording prealignment, falls
+        back to ``input_file`` when None.
+    reference_source_frames : int, default=2000
+        Maximum number of (binned) frames averaged into the reference image.
+    reference_source_buffer_size : int, default=10
+        Reader batch size when reading the reference source.
+    reference_source_bin_size : int, default=20
+        Temporal binning applied when reading the reference source.
+    output_root : Path, default="z_align_outputs"
+        Directory for all z-align outputs and ``status.json``; resolved
+        relative to ``root`` unless absolute.
+    volume_output_dir : Path, default="aligned_stack"
+        Directory (under ``output_root``) where Stage 1 writes the
+        compensated reference volume.
+    recording_prealigned_output_dir : Path, default="prealigned_recording"
+        Directory (under ``output_root``) for the optional prealigned
+        recording (``compensated.HDF5``).
+    z_shift_file : Path, default="z_shift.HDF5"
+        Stage 2 per-pixel z-shift output (under ``output_root``); stored as
+        1-based slice coordinates for MATLAB parity. Must have an HDF5
+        extension (validated).
+    corrected_output_file : Path, default="compensated_shift_corrected.tif"
+        Stage 2 z-corrected recording (under ``output_root``).
+    simulated_output_file : Path, default="simulated_from_z.tif"
+        Stage 3 simulated recording (under ``output_root``).
+    resume : bool, default=True
+        Reuse completed stage outputs recorded in ``status.json`` instead of
+        recomputing them.
+    prealign_stack : bool, default=True
+        Motion-compensate the raw reference stack in Stage 1. If False, the
+        raw ``volume_input_file`` is used as the volume directly.
+    prealign_recording : bool, default=False
+        Motion-compensate the input recording before Stage 2 z estimation.
+    write_corrected : bool, default=True
+        Write the z-corrected recording during Stage 2.
+    write_simulated : bool, default=True
+        Run Stage 3 and write the simulated z-shift-only recording.
+    stage1_alpha : float, default=5.0
+        OFOptions ``alpha`` for Stage 1 compensation (also used for
+        recording prealignment).
+    stage1_quality_setting : str, default="quality"
+        OFOptions ``quality_setting`` for Stage 1 (also used for recording
+        prealignment).
+    stage1_buffer_size : int, default=500
+        Reader buffer size for Stage 1 compensation (superseded by
+        ``stack_scans_per_slice`` when set).
+    stage1_bin_size : int, default=1
+        Temporal bin size for Stage 1 compensation.
+    stage1_update_reference : bool, default=True
+        OFOptions ``update_reference`` for Stage 1; forced True when
+        ``stack_scans_per_slice`` is set.
+    stack_scans_per_slice : int, optional, default=None
+        Number of repeated scans per z slice. When set, used as the Stage 1
+        buffer size and as the bin size for reading the reference stack as z
+        slices.
+    flow_backend : str, default="flowreg"
+        Optical-flow backend passed to OFOptions for Stage 1 and
+        prealignment.
+    backend_params : dict, default={}
+        Backend-specific parameters passed to OFOptions.
+    stage1_flow_options : dict or Path, optional, default=None
+        Extra OFOptions overrides for Stage 1, either inline as a mapping or
+        as a path (relative to ``root``) to a saved OF_options JSON file.
+        Workflow-owned I/O routing fields and ``reference_frames`` are
+        stripped.
+    recording_prealign_flow_options : dict or Path, optional, default=None
+        Same as ``stage1_flow_options`` but for the optional recording
+        prealignment; workflow-owned I/O routing fields are stripped
+        (``reference_frames`` may be overridden).
+    input_buffer_size : int, default=50
+        Reader batch size for the Stage 2 input recording (also used when
+        reading z-shifts in Stage 3).
+    input_bin_size : int, default=1
+        Temporal binning for the input recording. When prealignment is
+        enabled, binning happens during prealignment and Stage 2 reads the
+        prealigned recording unbinned.
+    volume_buffer_size : int, default=500
+        Reader batch size when loading the reference volume.
+    volume_bin_size : int, default=1
+        Temporal binning when reading the reference volume as z slices
+        (superseded by ``stack_scans_per_slice``).
+    win_half : int, default=10
+        Half-width of the z search window around the anchor slice; Stage 2
+        scores candidates in ``[anchor_z - win_half, anchor_z + win_half]``
+        clipped to the volume.
+    patch_size : int, default=128
+        Side length of the square spatial patches scored against z
+        candidates.
+    overlap : float, default=0.75
+        Fractional overlap between neighboring patches; the patch stride is
+        ``round(patch_size * (1 - overlap))``. Must satisfy
+        ``0 <= overlap < 1`` (validated).
+    spatial_sigma : float, default=1.5
+        Gaussian sigma for spatial smoothing before gradient computation
+        (applied to volume slices and input frames).
+    temporal_sigma : float, default=1.5
+        Temporal Gaussian sigma applied to input frames before gradient
+        computation.
+    z_smooth_sigma_spatial : float, default=5.0
+        Spatial Gaussian sigma for smoothing the estimated z-shift maps.
+    z_smooth_sigma_temporal : float, default=1.5
+        Temporal Gaussian sigma for smoothing the estimated z-shift maps.
+    parabolic_tau_scale : float, default=1e-3
+        Scale of the curvature threshold for sub-voxel parabolic refinement;
+        near-flat score parabolas keep the integer z estimate.
+    output_dtype : str, default="uint16"
+        NumPy dtype name for corrected and simulated outputs; integer
+        outputs are clipped and rounded before casting.
+    n_jobs : int, default=-1
+        Worker count for Stage 2 patch scoring; -1 uses all CPU cores.
+    parallelization : str, default="sequential"
+        Patch-scoring execution mode, "sequential" or "threading".
+
+    Notes
+    -----
+    Instances can be loaded from configuration files via the ``from_toml``,
+    ``from_yaml``, and ``from_file`` (extension auto-detection) classmethods.
+
+    Validation as implemented by the field validators: string paths are
+    coerced to ``Path``; ``root`` must exist and be a directory; the listed
+    integer fields must be >= 1; ``stage1_alpha``, the sigma fields, and
+    ``parabolic_tau_scale`` must be > 0; ``overlap`` must lie in [0, 1);
+    ``z_shift_file`` must have a .h5/.hdf5/.hdf extension; ``output_dtype``
+    must be a valid NumPy dtype name; ``n_jobs`` must be -1 or >= 1;
+    ``parallelization`` is lower-cased and must be "sequential" or
+    "threading"; the flow-options fields are normalized to a mapping or
+    ``Path`` (blank strings become None). Unknown keys are rejected
+    (``extra="forbid"``).
+
+    See Also
+    --------
+    pyflowreg.session.config.SessionConfig : Analogous configuration for
+        multi-recording session processing.
+    """
 
     model_config = ConfigDict(extra="forbid")
 

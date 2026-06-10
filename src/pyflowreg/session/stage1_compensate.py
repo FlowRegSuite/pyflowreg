@@ -476,11 +476,11 @@ def run_stage1(
 
     Examples
     --------
-    >>> config = SessionConfig.from_toml("session.toml")
+    >>> config = SessionConfig.from_toml("session.toml")  # doctest: +SKIP
     >>> # Process all recordings
-    >>> folders = run_stage1(config)
+    >>> folders = run_stage1(config)  # doctest: +SKIP
     >>> # Process only recording at index 2 (for array job)
-    >>> folder = run_stage1(config, task_index=2)
+    >>> folder = run_stage1(config, task_index=2)  # doctest: +SKIP
     """
     complete_script_timer = time()
 

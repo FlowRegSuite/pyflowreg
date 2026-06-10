@@ -38,10 +38,25 @@ The sublinear value follows best practices from {cite}`sun2010secrets` for handl
 - **Edge preservation**: Sublinear diffusion allows the model to handle brightness discontinuities at cell boundaries more gracefully
 - **Empirical validation**: This value has been validated across diverse 2-photon imaging datasets {cite}`flotho2022flow`
 
-Optional GNC staging can be enabled with `gnc_schedule`, for example
-`(0.0, 0.5, 1.0)`. This reruns the pyramid from quadratic to robust stages
-while keeping the final `a_data` and `a_smooth` values unchanged. Leaving
-`gnc_schedule=None` preserves the legacy solver path.
+### Graduated Non-Convexity: `gnc_schedule`
+
+**Default value**: `None` (disabled)
+
+Optional graduated non-convexity (GNC) staging can be enabled with
+`gnc_schedule`, for example `(0.0, 0.5, 1.0)`. The schedule is a sequence of
+stage weights that must be nondecreasing, start at `0.0`, and end at `1.0`.
+Each stage reruns the full pyramid, initialized with the flow from the
+previous stage, and blends the quadratic and robust penalty weights with the
+fixed stage weight `beta`: the data-term non-linearity becomes
+`(1 - beta) + beta * robust` whenever `a_data < 1` (and analogously for the
+smoothness term when `0 < a_smooth < 1`). The first stage (`beta = 0.0`) thus
+solves a quadratic problem, the final stage (`beta = 1.0`) the fully robust
+one; the configured `a_data` and `a_smooth` values themselves are unchanged.
+In GNC mode each pyramid level additionally performs repeated
+warp/relinearize steps, controlled by `warping_steps` (10 per level if not
+set). Leaving `gnc_schedule=None` preserves the single-pass solver path.
+See [Data Terms](data_terms.md) for the full treatment of the penalty
+functions.
 
 ## Spatial-Temporal Filtering: `sigma`
 
@@ -84,18 +99,24 @@ The `sigma` parameter controls Gaussian filtering applied to the video data befo
 ### Recommended Settings
 
 For typical 2-photon calcium imaging:
-```python
-sigma = [[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]]  # Gentle temporal smoothing
+```{literalinclude} ../snippets/theory/parameters/sigma_calcium.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 For high frame rate imaging with low SNR:
-```python
-sigma = [[1.5, 1.5, 0.3], [1.5, 1.5, 0.3]]  # Stronger filtering
+```{literalinclude} ../snippets/theory/parameters/sigma_low_snr.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 For volumetric imaging (z-stacks):
-```python
-sigma = [[1.0, 1.0, 0.5], [1.0, 1.0, 0.5]]  # Stronger temporal filtering between z-planes
+```{literalinclude} ../snippets/theory/parameters/sigma_volumetric.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ## References

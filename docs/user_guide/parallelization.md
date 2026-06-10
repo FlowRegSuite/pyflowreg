@@ -1,19 +1,17 @@
 # Parallelization
 
-PyFlowReg provides multiple parallelization backends for efficient batch processing implemented through a runtime registry system.
+PyFlowReg provides multiple parallelization executors for batch processing, implemented through a runtime registry system. An *executor* is the mechanism that runs per-frame flow computation across the frames of a batch (sequential, threading, or multiprocessing). It is distinct from the *flow backend*, which is the optical flow computation implementation (`flowreg`, `diso`, `flowreg_torch`, `flowreg_cuda`). The two interact: each flow backend declares which executors it supports (see [Flow backends and executors](#flow-backends-and-executors)).
 
-## Parallelization Backends
+## Executors
 
 ### Sequential
 
 **Single-threaded processing, most memory-efficient**
 
-```python
-from pyflowreg.motion_correction import compensate_recording, OFOptions
-from pyflowreg.motion_correction.compensate_recording import RegistrationConfig
-
-config = RegistrationConfig(parallelization="sequential")
-compensate_recording(options, config=config)
+```{literalinclude} ../snippets/user_guide/parallelization/sequential_run.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 **When to use:**
@@ -34,11 +32,10 @@ compensate_recording(options, config=config)
 
 **Parallel processing using Python threads**
 
-```python
-config = RegistrationConfig(
-    parallelization="threading",
-    n_jobs=8  # Number of worker threads
-)
+```{literalinclude} ../snippets/user_guide/parallelization/threading_config.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 **When to use:**
@@ -59,11 +56,10 @@ config = RegistrationConfig(
 
 **Parallel processing using processes with shared memory (default)**
 
-```python
-config = RegistrationConfig(
-    parallelization="multiprocessing",
-    n_jobs=-1  # Use all available CPUs
-)
+```{literalinclude} ../snippets/user_guide/parallelization/multiprocessing_config.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 **When to use:**
@@ -80,13 +76,13 @@ config = RegistrationConfig(
 - Higher memory overhead
 - Slightly more complex error handling
 
-## Choosing a Backend
+## Choosing an Executor
 
-PyFlowReg auto-selects the best available backend by default:
+With `parallelization=None` (the default), PyFlowReg intersects the executors supported by the configured flow backend with those available on the system and selects the first of multiprocessing, threading, sequential that remains:
 
 ```python
-# Auto-selection order: multiprocessing → threading → sequential
-compensate_recording(options)  # Uses multiprocessing if available
+# Auto-selection preference: multiprocessing -> threading -> sequential
+compensate_recording(options)  # Uses multiprocessing for the flowreg backend
 ```
 
 Manual selection overrides auto-detection:
@@ -95,13 +91,22 @@ Manual selection overrides auto-detection:
 config = RegistrationConfig(parallelization="threading")  # Force threading
 ```
 
-## Backend Compatibility
+## Flow backends and executors
 
-Different optical flow backends support different parallelization modes due to their architecture and Python package compatibility.
+Each flow backend declares which executors it supports, and PyFlowReg restricts execution to that set. This table is the single reference for backend/executor compatibility; other pages link here rather than restating it.
 
-### CPU Backend (`flowreg`)
+| Flow backend | Supported executors | Notes |
+| --- | --- | --- |
+| `flowreg` (default) | sequential, threading, multiprocessing | Built-in NumPy/Numba variational solver |
+| `diso` | sequential, threading | OpenCV DIS wrapper; requires `cv2`; `gc` data term only, no GNC |
+| `flowreg_torch` | sequential | PyTorch level-solver variant; requires `torch` |
+| `flowreg_cuda` | sequential | CuPy/CUDA level-solver variant; requires `cupy` |
 
-The default NumPy/Numba backend supports all parallelization modes:
+The `diso`, `flowreg_torch`, and `flowreg_cuda` backends are registered only when their optional package (`cv2`, `torch`, `cupy` respectively) is importable.
+
+### flowreg (default)
+
+The built-in NumPy/Numba backend supports all three executors:
 
 ```python
 options = OFOptions(flow_backend="flowreg")
@@ -112,9 +117,18 @@ config = RegistrationConfig(parallelization="threading")
 config = RegistrationConfig(parallelization="multiprocessing")
 ```
 
-### GPU Backends (`flowreg_torch`, `flowreg_cuda`)
+### diso
 
-GPU backends only support sequential execution due to package compatibility constraints:
+The OpenCV DIS backend supports the sequential and threading executors only:
+
+```python
+options = OFOptions(flow_backend="diso")
+config = RegistrationConfig(parallelization="threading")
+```
+
+### GPU backends (`flowreg_torch`, `flowreg_cuda`)
+
+The GPU backends support the sequential executor only:
 
 ```python
 from pyflowreg.motion_correction import OFOptions
@@ -125,16 +139,15 @@ options = OFOptions(
     backend_params={"device": "cuda"}
 )
 
-# GPU backends require sequential
 config = RegistrationConfig(parallelization="sequential")
 ```
 
-**Automatic fallback:** If you request multiprocessing or threading with a GPU backend, PyFlowReg automatically falls back to sequential execution with a warning:
+**Automatic fallback:** If you request an executor a backend does not support, PyFlowReg emits a warning and falls back, preferring multiprocessing, then threading, then sequential among the usable executors:
 
 ```python
 options = OFOptions(flow_backend="flowreg_cuda")
 
-# Requesting multiprocessing with GPU backend
+# Requesting multiprocessing with a backend that supports sequential only
 config = RegistrationConfig(parallelization="multiprocessing")
 
 # Warning: Backend 'flowreg_cuda' does not support 'multiprocessing' executor.
@@ -176,13 +189,10 @@ config = RegistrationConfig(
 
 The buffer size controls how many frames are read and processed per batch. This is configured in `OFOptions`, not `RegistrationConfig`:
 
-```python
-from pyflowreg.motion_correction import OFOptions
-
-options = OFOptions(
-    buffer_size=400,  # Frames per batch (default: 400)
-    # ... other options
-)
+```{literalinclude} ../snippets/user_guide/parallelization/buffer_size.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 **Buffer size tradeoffs:**
@@ -209,7 +219,7 @@ options = OFOptions(
 )
 
 config = RegistrationConfig(
-    parallelization="multiprocessing",  # Backend selection
+    parallelization="multiprocessing",  # Executor selection
     n_jobs=-1  # All CPU cores
 )
 
@@ -343,16 +353,14 @@ config = RegistrationConfig(
 compensate_recording(options, config=config)
 ```
 
-## Backend Registration
+## Executor Registration
 
-PyFlowReg uses a runtime registry for parallelization backends. Backends auto-register on import:
+PyFlowReg uses a runtime registry for parallelization executors. Executors auto-register on import:
 
-```python
-from pyflowreg._runtime import RuntimeContext
-
-# Check available backends
-available = RuntimeContext.get("available_parallelization", set())
-print(f"Available backends: {sorted(available)}")
+```{literalinclude} ../snippets/user_guide/parallelization/executor_registry.py
+:language: python
+:start-after: "[docs:start]"
+:end-before: "[docs:end]"
 ```
 
 ## Troubleshooting

@@ -14,18 +14,68 @@ def get_video_file_reader(
     **kwargs,
 ) -> VideoReader:
     """
-    Factory function to create appropriate reader based on input type.
-    Mirrors MATLAB get_video_file_reader functionality.
+    Create the appropriate video reader for the given input source.
 
-    Args:
-        input_source: Path to video file, numpy array, VideoReader instance,
-                     list of paths for multichannel, or folder for images
-        buffer_size: Buffer size for reading
-        bin_size: Temporal binning factor
-        **kwargs: Additional reader-specific arguments
+    Mirrors the MATLAB ``get_video_file_reader`` functionality from the
+    Flow-Registration toolbox. Dispatch rules:
 
-    Returns:
-        Appropriate VideoReader subclass instance
+    - ``numpy.ndarray`` inputs return an ``ArrayReader`` wrapping the array.
+    - ``VideoReader`` instances are returned unchanged (passthrough).
+    - Lists of file paths return a ``MULTICHANNELFileReader`` combining one
+      file per channel.
+    - File paths are dispatched on the lowercased extension: ``.tif`` and
+      ``.tiff`` to ``TIFFFileReader``; ``.h5``, ``.hdf5`` and ``.hdf`` to
+      ``HDF5FileReader``; ``.mat`` to ``MATFileReader``; ``.mdf`` to
+      ``MDFFileReader``.
+    - Files with any other extension are probed with ``h5py``; if they open
+      as HDF5, an ``HDF5FileReader`` is returned, otherwise a warning is
+      emitted and ``ValueError`` is raised.
+
+    Parameters
+    ----------
+    input_source : str or Path or ndarray or VideoReader or list of str
+        Path to a video file, an in-memory array, an already constructed
+        reader, or a list of per-channel file paths.
+    buffer_size : int, optional
+        Number of frames per read buffer. Default is 500.
+    bin_size : int, optional
+        Temporal binning factor. Default is 1.
+    **kwargs
+        Additional keyword arguments forwarded to the reader constructor
+        (not used for ``ndarray`` and ``VideoReader`` inputs).
+
+    Returns
+    -------
+    VideoReader
+        Reader instance appropriate for the input source.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a file path is given and the file does not exist.
+    NotImplementedError
+        If a folder containing images is given (image-folder reading is not
+        yet implemented), or for ``.mdf`` files when pywin32 is unavailable.
+    ValueError
+        If a folder without images is given, or if the file format is not
+        supported.
+
+    Notes
+    -----
+    MDF reading is Windows-only: ``MDFFileReader`` requires the pywin32
+    package and the ``MCSX.Data`` COM server, and raises
+    ``NotImplementedError`` when pywin32 is not installed.
+
+    Examples
+    --------
+    >>> from pyflowreg.util.io.factory import get_video_file_reader
+    >>> reader = get_video_file_reader("video.tif")  # doctest: +SKIP
+    >>> video = reader[:]  # (T, H, W, C)  # doctest: +SKIP
+    >>> reader.close()  # doctest: +SKIP
+
+    See Also
+    --------
+    get_video_file_writer : Factory for video writers.
     """
     from pathlib import Path
 
@@ -106,19 +156,49 @@ def get_video_file_reader(
 
 def get_video_file_writer(file_path: str, output_format: str, **kwargs) -> VideoWriter:
     """
-    Factory function to create appropriate writer based on output format.
-    Mirrors MATLAB get_video_file_writer functionality.
+    Create the appropriate video writer for the given output format.
 
-    Args:
-        file_path: Output file path
-        output_format: Output format string (e.g., 'TIFF', 'HDF5', 'MAT', 'MULTIFILE_TIFF', 'ARRAY', 'NULL', etc.)
-                       Special formats:
-                       - 'ARRAY': Returns ArrayWriter for in-memory accumulation
-                       - 'NULL': Returns NullVideoWriter that discards all frames (useful for callbacks only)
-        **kwargs: Additional writer-specific arguments
+    Mirrors the MATLAB ``get_video_file_writer`` functionality from the
+    Flow-Registration toolbox. Supported ``output_format`` values:
 
-    Returns:
-        Appropriate VideoWriter subclass instance
+    - ``'TIFF'``: ``TIFFFileWriter``.
+    - ``'SUITE2P_TIFF'``: ``TIFFFileWriter`` with ``format='suite2p'``.
+    - ``'MAT'``: ``MATFileWriter``.
+    - ``'HDF5'``: ``HDF5FileWriter``.
+    - ``'MULTIFILE_TIFF'``, ``'MULTIFILE_MAT'``, ``'MULTIFILE_HDF5'``:
+      ``MULTIFILEFileWriter`` writing one file per channel in the
+      corresponding format.
+    - ``'CAIMAN_HDF5'``: ``MULTIFILEFileWriter`` in HDF5 format with the
+      dataset name ``/mov`` for CaImAn compatibility.
+    - ``'ARRAY'``: ``ArrayWriter`` accumulating frames in memory.
+    - ``'NULL'``: ``NullVideoWriter`` that discards all frames (useful when
+      only callbacks are needed).
+
+    Parameters
+    ----------
+    file_path : str
+        Output file path. Ignored for the ``'ARRAY'`` and ``'NULL'``
+        formats.
+    output_format : str
+        One of the format strings listed above.
+    **kwargs
+        Additional keyword arguments forwarded to the writer constructor.
+
+    Returns
+    -------
+    VideoWriter
+        Writer instance for the requested format.
+
+    Raises
+    ------
+    NotImplementedError
+        If ``output_format`` is ``'BEGONIA'`` (not yet implemented).
+    ValueError
+        If ``output_format`` is not one of the supported strings.
+
+    See Also
+    --------
+    get_video_file_reader : Factory for video readers.
     """
 
     # Import writers here to avoid circular imports
