@@ -138,8 +138,10 @@ def get_motion_tensor_gc(f1, f2, hy, hx):
         fyy[1:-1, 1:-1] = (f[0:-2, 1:-1] - 2 * f[1:-1, 1:-1] + f[2:, 1:-1]) / (hy_**2)
         return fxx, fyy
 
-    fxx1, fyy1 = gradient2(f1p, hy, hx)
-    fxx2, fyy2 = gradient2(f2p, hy, hx)
+    # gradient2's first spacing scales column (x) second differences and the
+    # second scales row (y) second differences.
+    fxx1, fyy1 = gradient2(f1p, hx, hy)
+    fxx2, fyy2 = gradient2(f2p, hx, hy)
     fxx = 0.5 * (fxx1 + fxx2)
     fyy = 0.5 * (fyy1 + fyy2)
     reg_x = 1.0 / ((np.sqrt(fxx**2 + fxy**2) ** 2) + 1e-6)
@@ -519,8 +521,12 @@ def _solve_displacement_stage(
         if f1_level.ndim == 2:
             f1_level = f1_level[:, :, np.newaxis]
             f2_level = f2_level[:, :, np.newaxis]
-        current_hx = float(m) / f1_level.shape[0]
-        current_hy = float(n) / f1_level.shape[1]
+        # Grid spacings of this pyramid level in full-resolution pixel units:
+        # h_row scales row (y) differences, h_col scales column (x)
+        # differences. u is the horizontal (column) and v the vertical (row)
+        # displacement, both in full-resolution pixel units.
+        h_row = float(m) / f1_level.shape[0]
+        h_col = float(n) / f1_level.shape[1]
         if i == max(max_level_x, max_level_y):
             u = add_boundary(resize(u_init, level_size))
             v = add_boundary(resize(v_init, level_size))
@@ -530,8 +536,8 @@ def _solve_displacement_stage(
             v = add_boundary(resize(v[1:-1, 1:-1], level_size))
             tmp = imregister_wrapper(
                 f2_level,
-                u[1:-1, 1:-1] / current_hy,
-                v[1:-1, 1:-1] / current_hx,
+                u[1:-1, 1:-1] / h_col,
+                v[1:-1, 1:-1] / h_row,
                 f1_level,
             )
         if tmp.ndim == 2:
@@ -547,7 +553,7 @@ def _solve_displacement_stage(
         J23 = np.zeros(J_size, dtype=np.float64)
         for ch in range(n_channels):
             J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = motion_tensor_func(
-                f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
+                f1_level[:, :, ch], tmp[:, :, ch], h_row, h_col
             )
             J11[:, :, ch] = J11_ch
             J22[:, :, ch] = J22_ch
@@ -591,8 +597,11 @@ def _solve_displacement_stage(
             0,
             a_data_arr,
             a_smooth,
-            current_hx,
-            current_hy,
+            # The solver's hx scales column (x) differences and hy scales row
+            # (y) differences; passing (h_row, h_col) here would swap the
+            # smoothness metric relative to the data term and warping above.
+            h_col,
+            h_row,
             gnc_beta,
         )
         if min(level_size) > 5:
@@ -661,8 +670,12 @@ def _solve_displacement_stage_gnc(
         if f1_level.ndim == 2:
             f1_level = f1_level[:, :, np.newaxis]
             f2_level = f2_level[:, :, np.newaxis]
-        current_hx = float(m) / f1_level.shape[0]
-        current_hy = float(n) / f1_level.shape[1]
+        # Grid spacings of this pyramid level in full-resolution pixel units:
+        # h_row scales row (y) differences, h_col scales column (x)
+        # differences. u is the horizontal (column) and v the vertical (row)
+        # displacement, both in full-resolution pixel units.
+        h_row = float(m) / f1_level.shape[0]
+        h_col = float(n) / f1_level.shape[1]
 
         if i == max(max_level_x, max_level_y):
             u = add_boundary(resize(u_init, level_size))
@@ -691,8 +704,8 @@ def _solve_displacement_stage_gnc(
         for _ in range(warping_steps):
             tmp = imregister_wrapper(
                 f2_level,
-                u[1:-1, 1:-1] / current_hy,
-                v[1:-1, 1:-1] / current_hx,
+                u[1:-1, 1:-1] / h_col,
+                v[1:-1, 1:-1] / h_row,
                 f1_level,
             )
             if tmp.ndim == 2:
@@ -707,7 +720,7 @@ def _solve_displacement_stage_gnc(
             J23 = np.zeros(J_size, dtype=np.float64)
             for ch in range(n_channels):
                 J11_ch, J22_ch, J33_ch, J12_ch, J13_ch, J23_ch = motion_tensor_func(
-                    f1_level[:, :, ch], tmp[:, :, ch], current_hx, current_hy
+                    f1_level[:, :, ch], tmp[:, :, ch], h_row, h_col
                 )
                 J11[:, :, ch] = J11_ch
                 J22[:, :, ch] = J22_ch
@@ -732,8 +745,11 @@ def _solve_displacement_stage_gnc(
                 0,
                 a_data_arr,
                 a_smooth,
-                current_hx,
-                current_hy,
+                # The solver's hx scales column (x) differences and hy scales
+                # row (y) differences; passing (h_row, h_col) here would swap
+                # the smoothness metric relative to the data term and warping.
+                h_col,
+                h_row,
                 gnc_beta,
             )
             u = u + du

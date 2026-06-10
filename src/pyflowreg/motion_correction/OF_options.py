@@ -793,52 +793,6 @@ class OFOptions(BaseModel):
 
 
 # Convenience functions
-def compensate_inplace(
-    frames: np.ndarray,
-    reference: np.ndarray,
-    options: Optional[OFOptions] = None,
-    **kwargs,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compensate frames against reference.
-
-    Returns:
-        Tuple of (compensated_frames, displacement_fields)
-    """
-    if options is None:
-        options = OFOptions(**kwargs)
-    else:
-        # Copy and update
-        options = options.model_copy(update=kwargs)
-
-    # Ensure 4D frames and 3D reference
-    if frames.ndim == 3:
-        frames = frames[:, :, np.newaxis, :]
-    if reference.ndim == 2:
-        reference = reference[:, :, np.newaxis]
-
-    params = options.to_dict()
-
-    try:
-        from pyflowreg import get_displacement, compensate_sequence_uv
-    except ImportError as e:
-        raise RuntimeError("pyflowreg core functions not available") from e
-
-    # Compute displacements
-    T = frames.shape[3]
-    displacements = np.zeros((frames.shape[0], frames.shape[1], 2, T), dtype=np.float32)
-
-    for t in range(T):
-        displacements[:, :, :, t] = get_displacement(
-            reference, frames[:, :, :, t], **params
-        )
-
-    # Apply compensation
-    compensated = compensate_sequence_uv(frames, reference, displacements)
-
-    return compensated, displacements
-
-
 def get_mcp_schema() -> dict:
     """Get JSON schema for the model."""
     return OFOptions.model_json_schema()

@@ -705,3 +705,61 @@ class TestComprehensiveIntegration:
         pipeline = BatchMotionCorrector(basic_of_options, config)
         assert pipeline.executor.name == "sequential"
         assert pipeline.options.buffer_size == 20
+
+
+class TestFlowParamsWiring:
+    """Test that OFOptions fields reach the executors via flow_params."""
+
+    @pytest.mark.parametrize(
+        "cc_options, expected",
+        [
+            ({}, {"cc_initialization": False, "cc_hw": 256, "cc_up": 1}),
+            (
+                {"cc_initialization": True, "cc_hw": 128, "cc_up": 2},
+                {"cc_initialization": True, "cc_hw": 128, "cc_up": 2},
+            ),
+        ],
+    )
+    def test_process_batch_receives_cc_parameters(
+        self, monkeypatch, cc_options, expected
+    ):
+        """The CC pre-alignment settings must be forwarded to the executors;
+        they were previously omitted, leaving the executors' CC branch dead."""
+        from pyflowreg.motion_correction import OFOptions
+        from pyflowreg.motion_correction.parallelization.sequential import (
+            SequentialExecutor,
+        )
+
+        rng = np.random.default_rng(seed=3)
+        frames = rng.random((4, 32, 32)).astype(np.float32)
+        reference = frames.mean(axis=0)
+
+        captured = {}
+
+        def fake_process_batch(
+            self, batch, batch_proc, reference_raw, reference_proc, w_init, **kwargs
+        ):
+            captured.update(kwargs.get("flow_params", {}))
+            T, H, W = batch.shape[:3]
+            return (
+                np.ascontiguousarray(batch),
+                np.zeros((T, H, W, 2), dtype=np.float32),
+            )
+
+        monkeypatch.setattr(SequentialExecutor, "process_batch", fake_process_batch)
+
+        options = OFOptions(
+            input_file=frames,
+            reference_frames=reference,
+            output_format=OutputFormat.ARRAY,
+            quality_setting="fast",
+            **cc_options,
+        )
+        config = RegistrationConfig(parallelization="sequential", verbose=False)
+        BatchMotionCorrector(options, config).run()
+
+        for key, value in expected.items():
+            assert captured[key] == value, (
+                f"flow_params[{key!r}] should be {value!r}, "
+                f"got {captured.get(key)!r}"
+            )

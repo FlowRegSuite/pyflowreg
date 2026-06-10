@@ -82,7 +82,12 @@ except ImportError:
 if CV2_AVAILABLE:
     from .diso_optical_flow import _diso_factory
 
-    register_backend("diso", _diso_factory)
+    # The multiprocessing workers import the flowreg solver directly and do
+    # not reconstruct registry backends, so diso would silently fall back to
+    # the variational solver there.
+    register_backend(
+        "diso", _diso_factory, supported_executors={"sequential", "threading"}
+    )
 
 
 # PyTorch backend (works on CPU or GPU)

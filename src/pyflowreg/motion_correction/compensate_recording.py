@@ -239,6 +239,14 @@ class BatchMotionCorrector:
                 )
 
         flow_params["weight"] = self.weight
+        # Cross-correlation pre-alignment settings; the executors pop these
+        # before calling the displacement function, so they must not be part
+        # of to_dict() (which is also fed directly into get_displacement).
+        flow_params["cc_initialization"] = getattr(
+            self.options, "cc_initialization", False
+        )
+        flow_params["cc_hw"] = getattr(self.options, "cc_hw", 256)
+        flow_params["cc_up"] = getattr(self.options, "cc_up", 1)
         return flow_params
 
     def register_progress_callback(self, callback: Callable[[int, int], None]) -> None:

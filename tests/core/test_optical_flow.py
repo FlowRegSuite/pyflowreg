@@ -1,11 +1,13 @@
 """Tests for optical flow stage dispatch, GNC plumbing, and tensor helpers."""
 
-import inspect
-
 import numpy as np
 
 import pyflowreg.core.optical_flow as optical_flow
-from pyflowreg.core.optical_flow import get_displacement, get_motion_tensor_cs
+from pyflowreg.core.optical_flow import (
+    get_displacement,
+    get_motion_tensor_cs,
+    get_motion_tensor_gc,
+)
 
 
 def _compress_runs(values):
@@ -79,11 +81,20 @@ def test_get_displacement_without_gnc_uses_baseline_stage():
 
 
 def test_get_displacement_without_gnc_ignores_warping_steps():
-    """Test warping_steps alone does not change the default path."""
+    """Test warping_steps alone does not repeat the per-level solver calls."""
     fixed = np.zeros((12, 12), dtype=np.float64)
     moving = np.zeros((12, 12), dtype=np.float64)
+    base_seen_betas = []
     seen_betas = []
 
+    get_displacement(
+        fixed,
+        moving,
+        levels=1,
+        iterations=2,
+        update_lag=1,
+        level_solver_backend=_make_zero_level_solver(base_seen_betas),
+    )
     flow = get_displacement(
         fixed,
         moving,
@@ -96,6 +107,8 @@ def test_get_displacement_without_gnc_ignores_warping_steps():
 
     assert flow.shape == (12, 12, 2)
     assert _compress_runs(seen_betas) == [None]
+    # warping_steps must not multiply the solver calls outside GNC mode.
+    assert len(seen_betas) == len(base_seen_betas)
 
 
 def test_get_displacement_with_gnc_repeats_pyramid_per_stage():
@@ -402,11 +415,23 @@ def test_get_motion_tensor_cs_default_eps_matches_normalized_convention():
         np.testing.assert_allclose(default_tensor, explicit_tensor)
 
 
-def test_get_motion_tensor_cs_does_not_use_np_roll():
-    """Neighbor access should not use cyclic shifts."""
-    source = inspect.getsource(get_motion_tensor_cs)
+def test_get_motion_tensor_cs_no_wraparound_between_opposite_borders():
+    """Tensor values near one border must not depend on the opposite border."""
+    f1, f2 = _sample_images(shape=(9, 11))
+    f1_mod = f1.copy()
+    f2_mod = f2.copy()
+    f1_mod[-1, :] += 0.5
+    f2_mod[-1, :] += 0.3
+    f1_mod[:, -1] += 0.2
+    f2_mod[:, -1] += 0.4
 
-    assert "np.roll" not in source
+    base = get_motion_tensor_cs(f1, f2, hy=1.0, hx=1.0)
+    modified = get_motion_tensor_cs(f1_mod, f2_mod, hy=1.0, hx=1.0)
+
+    # A cyclic-shift implementation couples the first interior rows/columns
+    # to the opposite image border; slicing on padded inputs must not.
+    for base_tensor, mod_tensor in zip(base, modified):
+        np.testing.assert_array_equal(base_tensor[1:4, 1:4], mod_tensor[1:4, 1:4])
 
 
 def test_get_motion_tensor_cs_anisotropic_spacing():
@@ -419,3 +444,108 @@ def test_get_motion_tensor_cs_anisotropic_spacing():
         assert tensor.shape == (f1.shape[0] + 2, f1.shape[1] + 2)
         assert np.all(np.isfinite(tensor))
     _assert_zero_border(tensors)
+
+
+def _make_recording_zero_solver(records):
+    """Level solver stub that records grid spacings and returns zero flow.
+
+    Matches the positional level_solver signature: args 7/8 are u/v
+    (with boundary padding) and args 15/16 are hx/hy.
+    """
+
+    def solver(*args):
+        u, v = args[7], args[8]
+        records.append(
+            {
+                "rows": u.shape[0] - 2,
+                "cols": u.shape[1] - 2,
+                "hx": args[15],
+                "hy": args[16],
+            }
+        )
+        return np.zeros_like(u), np.zeros_like(v)
+
+    return solver
+
+
+class TestPyramidGridSpacing:
+    """Test the geometric binding of per-level grid spacings."""
+
+    def test_get_displacement_passes_geometric_spacings_to_solver(self):
+        """The solver's hx scales column (x) differences, so it must receive
+        the column spacing n/cols, and hy the row spacing m/rows. A swapped
+        binding diverges from this on non-square images where the per-axis
+        pyramid depths and rounding differ."""
+        rng = np.random.default_rng(seed=7)
+        m, n = 32, 96
+        fixed = rng.random((m, n))
+        moving = rng.random((m, n))
+
+        records = []
+        flow = get_displacement(
+            fixed,
+            moving,
+            iterations=1,
+            update_lag=1,
+            level_solver_backend=_make_recording_zero_solver(records),
+        )
+
+        assert flow.shape == (m, n, 2)
+        assert len(records) > 1
+        for rec in records:
+            np.testing.assert_allclose(rec["hx"], n / rec["cols"], rtol=1e-12)
+            np.testing.assert_allclose(rec["hy"], m / rec["rows"], rtol=1e-12)
+        # Sanity: the elongated input makes row and column spacings genuinely
+        # differ at coarse levels, so the assertions above are discriminative.
+        assert any(not np.isclose(r["hx"], r["hy"]) for r in records)
+
+    def test_get_displacement_gnc_passes_geometric_spacings_to_solver(self):
+        """The GNC stage function duplicates the pyramid loop and must bind
+        the same geometric spacings as the baseline stage."""
+        rng = np.random.default_rng(seed=11)
+        m, n = 32, 96
+        fixed = rng.random((m, n))
+        moving = rng.random((m, n))
+
+        records = []
+        flow = get_displacement(
+            fixed,
+            moving,
+            iterations=1,
+            update_lag=1,
+            level_solver_backend=_make_recording_zero_solver(records),
+            gnc_schedule=(0.0, 1.0),
+            warping_steps=1,
+        )
+
+        assert flow.shape == (m, n, 2)
+        assert len(records) > 1
+        for rec in records:
+            np.testing.assert_allclose(rec["hx"], n / rec["cols"], rtol=1e-12)
+            np.testing.assert_allclose(rec["hy"], m / rec["rows"], rtol=1e-12)
+        assert any(not np.isclose(r["hx"], r["hy"]) for r in records)
+
+
+class TestMotionTensorGC:
+    """Test the gradient-constancy motion tensor on anisotropic grids."""
+
+    def test_get_motion_tensor_gc_second_derivative_axis_binding(self):
+        """fxx must be divided by the column spacing hx, not the row spacing.
+
+        For f = 1e-3 * x^2 on a grid with hx=2: fxx = 2e-3 and
+        fxy = fyy = ft = 0, so J11 = fxx^2 / (fxx^2 + 1e-6) = 0.8 at interior
+        pixels. A swapped binding (fxx divided by hy^2 = 1) yields fxx = 8e-3
+        and J11 close to 0.985 instead.
+        """
+        hy, hx = 1.0, 2.0
+        H, W = 17, 23
+        x = np.arange(W, dtype=np.float64) * hx
+        f = np.tile(1e-3 * x**2, (H, 1))
+
+        J11, J22, J33, J12, J13, J23 = get_motion_tensor_gc(f, f, hy, hx)
+
+        center = (H // 2, W // 2)
+        np.testing.assert_allclose(J11[center], 0.8, atol=0.01)
+        # Identical frames: temporal terms vanish.
+        np.testing.assert_allclose(J33[center], 0.0, atol=1e-12)
+        np.testing.assert_allclose(J13[center], 0.0, atol=1e-12)
