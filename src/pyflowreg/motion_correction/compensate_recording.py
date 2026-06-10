@@ -66,9 +66,12 @@ class BatchMotionCorrector:
 
         # Get number of workers
         if self.config.n_jobs == -1:
-            import os
+            runtime_workers = RuntimeContext.get("max_workers", None)
+            if runtime_workers is None:
+                import os
 
-            self.n_workers = os.cpu_count() or 4
+                runtime_workers = os.cpu_count() or 4
+            self.n_workers = int(runtime_workers)
         else:
             self.n_workers = self.config.n_jobs
 
@@ -208,6 +211,44 @@ class BatchMotionCorrector:
         """Resolve the displacement function to use based on options."""
         self._get_disp = self.options.resolve_get_displacement()
 
+    def _get_flow_params(self) -> Dict[str, Any]:
+        """Build optical-flow parameters for the configured displacement backend."""
+        if hasattr(self.options, "to_dict"):
+            flow_params = dict(self.options.to_dict())
+        else:
+            flow_params = {
+                "alpha": self.options.alpha,
+                "levels": self.options.levels,
+                "min_level": getattr(
+                    self.options,
+                    "effective_min_level",
+                    getattr(self.options, "min_level", 0),
+                ),
+                "eta": self.options.eta,
+                "update_lag": self.options.update_lag,
+                "iterations": self.options.iterations,
+                "a_smooth": self.options.a_smooth,
+                "a_data": self.options.a_data,
+                "gnc_schedule": getattr(self.options, "gnc_schedule", None),
+                "warping_steps": getattr(self.options, "warping_steps", None),
+            }
+            const_assumption = getattr(self.options, "constancy_assumption", None)
+            if const_assumption is not None:
+                flow_params["const_assumption"] = getattr(
+                    const_assumption, "value", const_assumption
+                )
+
+        flow_params["weight"] = self.weight
+        # Cross-correlation pre-alignment settings; the executors pop these
+        # before calling the displacement function, so they must not be part
+        # of to_dict() (which is also fed directly into get_displacement).
+        flow_params["cc_initialization"] = getattr(
+            self.options, "cc_initialization", False
+        )
+        flow_params["cc_hw"] = getattr(self.options, "cc_hw", 256)
+        flow_params["cc_up"] = getattr(self.options, "cc_up", 1)
+        return flow_params
+
     def register_progress_callback(self, callback: Callable[[int, int], None]) -> None:
         """
         Register a progress callback function.
@@ -327,7 +368,7 @@ class BatchMotionCorrector:
         """Setup reference frame and weights."""
         if reference_frame is None:
             self.reference_raw = self.options.get_reference_frame(
-                self.video_reader
+                self.video_reader, registration_config=self.config
             ).astype(np.float64)
         else:
             self.reference_raw = reference_frame.astype(np.float64)
@@ -393,21 +434,7 @@ class BatchMotionCorrector:
         w_init: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Compute flow for a single frame."""
-        flow_params = {
-            "alpha": self.options.alpha,
-            "weight": self.weight,
-            "levels": self.options.levels,
-            "min_level": getattr(
-                self.options,
-                "effective_min_level",
-                getattr(self.options, "min_level", 0),
-            ),
-            "eta": self.options.eta,
-            "update_lag": self.options.update_lag,
-            "iterations": self.options.iterations,
-            "a_smooth": self.options.a_smooth,
-            "a_data": self.options.a_data,
-        }
+        flow_params = self._get_flow_params()
 
         if w_init is not None:
             flow_params["uv"] = w_init
@@ -430,22 +457,7 @@ class BatchMotionCorrector:
             w_init: Initial displacement field
             task_id: Task identifier for progress tracking (default: "main")
         """
-        # Build flow parameters dictionary
-        flow_params = {
-            "alpha": self.options.alpha,
-            "weight": self.weight,
-            "levels": self.options.levels,
-            "min_level": getattr(
-                self.options,
-                "effective_min_level",
-                getattr(self.options, "min_level", 0),
-            ),
-            "eta": self.options.eta,
-            "update_lag": self.options.update_lag,
-            "iterations": self.options.iterations,
-            "a_smooth": self.options.a_smooth,
-            "a_data": self.options.a_data,
-        }
+        flow_params = self._get_flow_params()
 
         # Get interpolation method
         interp_method = getattr(self.options, "interpolation_method", "cubic")

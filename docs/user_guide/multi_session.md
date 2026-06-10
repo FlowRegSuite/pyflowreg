@@ -52,6 +52,7 @@ final_results = "final_results"
 # Processing options
 resume = true
 scheduler = "local"
+n_workers = -1        # Stage 1 workers (-1 = all CPU cores)
 
 # Optical flow backend
 flow_backend = "flowreg"
@@ -61,6 +62,7 @@ cc_upsample = 4        # Subpixel accuracy
 sigma_smooth = 6.0     # Gaussian smoothing
 alpha_between = 25.0   # Regularization
 iterations_between = 100
+stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
 ```
 
 ### 3. Run Processing
@@ -84,12 +86,12 @@ final_mask = run_stage3(config, middle_idx, displacements)
 **Option B: Command Line**
 ```bash
 # Run complete pipeline
-pyflowreg-session session.toml
+pyflowreg-session run --config session.toml
 
 # Or run stages individually
-pyflowreg-session session.toml --stage 1
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 1
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 ```
 
 ## Deep Dive: Session Pipeline
@@ -117,6 +119,9 @@ The `pyflowreg.session` pipeline always runs the same three deterministic stages
 
 - Temporal averages are reloaded from disk and the reference recording (center) is selected automatically or from `SessionConfig.center`.
 - `compute_between_displacement()` smooths both averages, applies phase cross-correlation for a rigid guess, then refines with the configured flow backend (`src/pyflowreg/session/stage2_between_avgs.py`).
+- `stage2_constancy_assumption` controls the Stage 2 data term. The default
+  `"gc"` preserves MATLAB Flow-Registration behavior; `"cs"` enables the
+  census term for the native `flowreg` backend.
 - Results are written to `w_to_reference.npz` (separate `u`/`v` arrays) so MATLAB users can load them directly.
 
 **Outputs:** `w_to_reference.npz`, per-recording `status.json` updates, and `middle_idx` (0-based) pointing to the reference average.
@@ -169,6 +174,7 @@ quality_setting = "fast"     # Options: fast, balanced, quality
 buffer_size = 1000           # Frames per batch
 save_w = false               # Don't save displacement fields
 save_valid_idx = true        # Required for Stage 3
+# constancy_assumption = "cs"  # Optional Stage 1 data term override
 ```
 
 Alternatively, point to a saved MATLAB/Python options file:
@@ -181,7 +187,7 @@ flow_options = "./saved_options/session_stage1.json"
 
 Use PyTorch backend with CUDA:
 ```toml
-flow_backend = "torch"
+flow_backend = "flowreg_torch"
 [backend_params]
 device = "cuda:0"
 ```
@@ -297,7 +303,8 @@ print(f"Reference recording: {results['middle_idx']}")
 from pyflowreg.util.io.factory import get_video_file_reader
 
 reader = get_video_file_reader("compensated_outputs/baseline_001/compensated.hdf5")
-video = reader.read_frames(list(range(reader.frame_count)))
+video = reader[:]
+reader.close()
 
 # Apply mask to analysis
 masked_video = video[:, final_mask]  # Shape: (T, n_valid_pixels)
@@ -463,6 +470,6 @@ Mix processing stages:
 matlab -batch "align_full_v3_checkpoint('session.toml')"
 
 # Stages 2-3 in Python
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 ```

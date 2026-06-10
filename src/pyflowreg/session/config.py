@@ -47,6 +47,8 @@ class SessionConfig(BaseModel):
     stage1_quality_setting : Optional[str], default=None
         Quality preset for Stage 1 motion correction ("quality", "balanced", or "fast").
         If None, uses OFOptions default (usually "quality").
+    n_workers : int, default=-1
+        Number of workers for Stage 1 compensation (`-1` uses all available CPU cores).
     cc_upsample : int, default=4
         Cross-correlation upsampling factor for rigid initialization
     sigma_smooth : float, default=6.0
@@ -55,6 +57,9 @@ class SessionConfig(BaseModel):
         Regularization for inter-sequence optical flow
     iterations_between : int, default=100
         Iterations for inter-sequence optical flow
+    stage2_constancy_assumption : str, default="gc"
+        Constancy assumption for Stage 2 optical flow. The default "gc"
+        preserves the MATLAB Flow-Registration behavior.
     align_chunk_size : int, default=64
         Number of frames to process per batch during Stage 3 video alignment
     align_output_format : str, default="TIFF"
@@ -79,12 +84,14 @@ class SessionConfig(BaseModel):
 
     # Stage 1 parameters
     stage1_quality_setting: Optional[str] = None  # Pass through to OF_options
+    n_workers: int = -1
 
     # Stage 2 parameters
     cc_upsample: int = 4
     sigma_smooth: float = 6.0
     alpha_between: float = 25.0
     iterations_between: int = 100
+    stage2_constancy_assumption: str = "gc"
 
     # Stage 3 parameters
     align_chunk_size: int = 64

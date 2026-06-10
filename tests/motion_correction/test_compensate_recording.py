@@ -13,7 +13,7 @@ from pyflowreg.motion_correction.compensate_recording import (
     RegistrationConfig,
     compensate_recording,
 )
-from pyflowreg.motion_correction.OF_options import OutputFormat
+from pyflowreg.motion_correction.OF_options import OFOptions, OutputFormat
 from pyflowreg._runtime import RuntimeContext
 from pyflowreg.util.io.factory import get_video_file_reader
 
@@ -110,6 +110,26 @@ class TestCompensateRecording:
         assert pipeline.executor is not None
         assert len(pipeline.mean_disp) == 0
         assert len(pipeline.max_disp) == 0
+
+    def test_flow_params_include_constancy_assumption(self, tmp_path):
+        """Batch flow calls should receive the configured data term."""
+        options = OFOptions(
+            output_path=tmp_path,
+            quality_setting="fast",
+            constancy_assumption="census",
+            levels=1,
+            iterations=2,
+        )
+        config = RegistrationConfig(
+            n_jobs=1, verbose=True, parallelization="sequential"
+        )
+        pipeline = BatchMotionCorrector(options, config)
+        pipeline.weight = np.ones((8, 8, 1), dtype=np.float64)
+
+        flow_params = pipeline._get_flow_params()
+
+        assert flow_params["const_assumption"] == "cs"
+        assert flow_params["weight"] is pipeline.weight
 
 
 class TestExecutorTypes:
@@ -377,6 +397,53 @@ class TestReferenceFramePreregistration:
         assert reference is not None
         assert reference.shape == (h, w, c)
 
+    def test_preregistration_receives_registration_config(self, tmp_path):
+        """Reference preregistration should receive parent RegistrationConfig."""
+        from pyflowreg.util.io.factory import get_video_file_writer
+        from pyflowreg.motion_correction import OFOptions
+
+        video_path = tmp_path / "test_prereg_config.h5"
+        n_frames, h, w, c = 3, 8, 8, 1
+        test_data = np.zeros((n_frames, h, w, c), dtype=np.float32)
+        test_data[:, 2:6, 2:6, 0] = 1.0
+
+        writer = get_video_file_writer(str(video_path), "HDF5")
+        try:
+            writer.write_frames(test_data)
+        finally:
+            writer.close()
+
+        options = OFOptions(
+            input_file=str(video_path),
+            reference_frames=[0, 1, 2],
+            quality_setting="fast",
+            buffer_size=3,
+            output_path=str(tmp_path / "output"),
+        )
+        config = RegistrationConfig(parallelization="sequential", n_jobs=7)
+        captured = {}
+
+        def fake_compensate_arr(frames, reference, options=None, **kwargs):
+            captured["registration_config"] = kwargs.get("registration_config")
+            T, H, W, _ = frames.shape
+            return frames, np.zeros((T, H, W, 2), dtype=np.float32)
+
+        import importlib
+
+        compensate_arr_module = importlib.import_module(
+            "pyflowreg.motion_correction.compensate_arr"
+        )
+        with patch.object(
+            compensate_arr_module,
+            "compensate_arr",
+            side_effect=fake_compensate_arr,
+        ):
+            pipeline = BatchMotionCorrector(options, config)
+            pipeline.video_reader = options.get_video_reader()
+            pipeline._setup_reference()
+
+        assert captured["registration_config"] is config
+
     def test_weight_as_list(self, tmp_path):
         """Test that weight can be specified as a list [1, 2] for backwards compatibility."""
         from pyflowreg.motion_correction import OFOptions
@@ -638,3 +705,61 @@ class TestComprehensiveIntegration:
         pipeline = BatchMotionCorrector(basic_of_options, config)
         assert pipeline.executor.name == "sequential"
         assert pipeline.options.buffer_size == 20
+
+
+class TestFlowParamsWiring:
+    """Test that OFOptions fields reach the executors via flow_params."""
+
+    @pytest.mark.parametrize(
+        "cc_options, expected",
+        [
+            ({}, {"cc_initialization": False, "cc_hw": 256, "cc_up": 1}),
+            (
+                {"cc_initialization": True, "cc_hw": 128, "cc_up": 2},
+                {"cc_initialization": True, "cc_hw": 128, "cc_up": 2},
+            ),
+        ],
+    )
+    def test_process_batch_receives_cc_parameters(
+        self, monkeypatch, cc_options, expected
+    ):
+        """The CC pre-alignment settings must be forwarded to the executors;
+        they were previously omitted, leaving the executors' CC branch dead."""
+        from pyflowreg.motion_correction import OFOptions
+        from pyflowreg.motion_correction.parallelization.sequential import (
+            SequentialExecutor,
+        )
+
+        rng = np.random.default_rng(seed=3)
+        frames = rng.random((4, 32, 32)).astype(np.float32)
+        reference = frames.mean(axis=0)
+
+        captured = {}
+
+        def fake_process_batch(
+            self, batch, batch_proc, reference_raw, reference_proc, w_init, **kwargs
+        ):
+            captured.update(kwargs.get("flow_params", {}))
+            T, H, W = batch.shape[:3]
+            return (
+                np.ascontiguousarray(batch),
+                np.zeros((T, H, W, 2), dtype=np.float32),
+            )
+
+        monkeypatch.setattr(SequentialExecutor, "process_batch", fake_process_batch)
+
+        options = OFOptions(
+            input_file=frames,
+            reference_frames=reference,
+            output_format=OutputFormat.ARRAY,
+            quality_setting="fast",
+            **cc_options,
+        )
+        config = RegistrationConfig(parallelization="sequential", verbose=False)
+        BatchMotionCorrector(options, config).run()
+
+        for key, value in expected.items():
+            assert captured[key] == value, (
+                f"flow_params[{key!r}] should be {value!r}, "
+                f"got {captured.get(key)!r}"
+            )

@@ -348,12 +348,11 @@ compensate_recording(options, config=config)
 PyFlowReg uses a runtime registry for parallelization backends. Backends auto-register on import:
 
 ```python
-from pyflowreg._runtime import get_runtime
+from pyflowreg._runtime import RuntimeContext
 
 # Check available backends
-runtime = get_runtime()
-available = runtime.list_parallelization_executors()
-print(f"Available backends: {available}")
+available = RuntimeContext.get("available_parallelization", set())
+print(f"Available backends: {sorted(available)}")
 ```
 
 ## Troubleshooting

@@ -138,7 +138,7 @@ class ThreadingExecutor(BaseExecutor):
         else:
             # Compute optical flow without prealignment
             flow = get_displacement_func(
-                reference_proc, frame_proc, uv=w_init.copy(), **flow_params
+                reference_proc, frame_proc, uv=w_init.copy(), **flow_params_clean
             ).astype(np.float32, copy=False)
 
         # Apply flow field to register the frame

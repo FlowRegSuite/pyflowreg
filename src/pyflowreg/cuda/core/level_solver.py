@@ -30,6 +30,7 @@ def level_solver_rbgs_cuda(
     omega=1.95,
     eps=1e-6,
     update_lag_semantics="torch",
+    gnc_beta=None,
 ):
     """
     Solve for flow increments using Red-Black Gauss-Seidel relaxation on GPU.
@@ -148,6 +149,10 @@ def level_solver_rbgs_cuda(
 
     ax = float(alpha[0]) / (hx * hx)
     ay = float(alpha[1]) / (hy * hy)
+    use_gnc = gnc_beta is not None
+    beta = float(gnc_beta) if use_gnc else 1.0
+    mix_quadratic = 1.0 - beta
+    data_mask = (a_vec > 0.0) & (a_vec < 1.0) if use_gnc else None
 
     mod = cp.RawModule(
         code=r"""
@@ -374,6 +379,12 @@ def level_solver_rbgs_cuda(
                     np.int32(K),
                 ),
             )
+            if use_gnc:
+                psi_data = cp.where(
+                    data_mask.reshape(1, 1, K),
+                    mix_quadratic + beta * psi_data,
+                    psi_data,
+                )
             k_denoms(
                 g2,
                 b2,
@@ -411,6 +422,8 @@ def level_solver_rbgs_cuda(
                 )
                 k_brow(g1_rows, b1, (psi_smooth, np.int32(m), np.int32(n)))
                 k_bcol(g1_cols, b1, (psi_smooth, np.int32(m), np.int32(n)))
+                if use_gnc and 0.0 < float(a_smooth) < 1.0:
+                    psi_smooth = mix_quadratic + beta * psi_smooth
             else:
                 psi_smooth.fill(1.0)
 

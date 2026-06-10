@@ -30,12 +30,14 @@ from pyflowreg.session.config import SessionConfig
             - final_results
             - resume
             - scheduler
+            - n_workers
             - flow_backend
             - backend_params
             - cc_upsample
             - sigma_smooth
             - alpha_between
             - iterations_between
+            - stage2_constancy_assumption
 
 **Configuration File Support**
 
@@ -65,17 +67,19 @@ output_root = "compensated_outputs"
 final_results = "final_results"
 resume = true
 scheduler = "local"  # or "array" for HPC
+n_workers = -1       # Stage 1 workers (-1 = all CPU cores)
 
 # Flow backend configuration
-flow_backend = "flowreg"  # or "torch", "jax", etc.
+flow_backend = "flowreg"  # or "flowreg_torch", "flowreg_cuda", "diso"
 [backend_params]
-device = "cuda:0"  # For torch backend
+device = "cuda:0"  # For flowreg_torch backend
 
 # Stage 2 parameters
 cc_upsample = 4
 sigma_smooth = 6.0
 alpha_between = 25.0
 iterations_between = 100
+stage2_constancy_assumption = "gc"  # Options: "gc", "gray", "cs"
 ```
 
 ## Stage 1: Per-Recording Compensation
@@ -103,6 +107,7 @@ from pyflowreg.session import SessionConfig
 from pyflowreg.session.stage1_compensate import run_stage1
 
 config = SessionConfig.from_toml("session.toml")
+config.n_workers = -1
 
 # Override OFOptions directly on the config (or set via TOML/YAML)
 config.flow_options = {
@@ -173,7 +178,7 @@ Stage 2 respects the `flow_backend` setting in configuration:
 ```python
 config = SessionConfig(
     root="/data/",
-    flow_backend="torch",  # Use PyTorch backend
+    flow_backend="flowreg_torch",  # Use PyTorch backend
     backend_params={"device": "cuda:0"}
 )
 middle_idx, center_file, displacements = run_stage2(config)
@@ -226,18 +231,18 @@ The session module provides a comprehensive CLI:
 
 ```bash
 # Run complete pipeline
-pyflowreg-session session.toml
+pyflowreg-session run --config session.toml
 
 # Run specific stages
-pyflowreg-session session.toml --stage 1
-pyflowreg-session session.toml --stage 2
-pyflowreg-session session.toml --stage 3
+pyflowreg-session run --config session.toml --stage 1
+pyflowreg-session run --config session.toml --stage 2
+pyflowreg-session run --config session.toml --stage 3
 
 # Array job mode (auto-detects task ID)
-pyflowreg-session session.toml --stage 1 --array-job
+pyflowreg-session run --config session.toml --stage 1 --array
 
-# Override parameters
-pyflowreg-session session.toml --no-resume --stage 1
+# Override OFOptions parameters for Stage 1
+pyflowreg-session run --config session.toml --stage 1 --of-params quality_setting=fast
 ```
 
 **Help:**
@@ -313,17 +318,20 @@ config = SessionConfig(
     output_root="compensated",
     final_results="results",
     resume=True,
+    n_workers=-1,
     flow_backend="flowreg",
     cc_upsample=4,
     sigma_smooth=6.0,
     alpha_between=25.0,
-    iterations_between=100
+    iterations_between=100,
+    stage2_constancy_assumption="gc",
 )
 
 # Stage 1: Motion correct each recording
 print("Running Stage 1...")
 config.flow_options = {
     "quality_setting": "balanced",
+    "constancy_assumption": "gc",
     "save_valid_idx": True,
     "save_w": False,
 }

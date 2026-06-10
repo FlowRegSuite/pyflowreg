@@ -19,6 +19,7 @@ final_results = "final_results"      # Stage 2-3 outputs (session-wide)
 # === Processing Options ===
 resume = true                         # Skip completed steps on rerun
 scheduler = "local"                   # Options: "local", "array", "dask"
+n_workers = -1                        # Stage 1 workers (-1 = all CPU cores)
 
 # === Optical Flow Backend ===
 # Choose the backend for displacement computation
@@ -41,6 +42,7 @@ sigma_smooth = 6.0                    # Sigma for Gaussian filter
 # Optical flow refinement
 alpha_between = 25.0                  # Regularization strength (higher = smoother)
 iterations_between = 100              # Solver iterations (higher = more accurate)
+stage2_constancy_assumption = "gc"     # Options: "gc", "gray", "cs"
 
 # === Stage 1 Flow Options (Optional) ===
 # Provide inline overrides passed to OFOptions
@@ -50,6 +52,7 @@ buffer_size = 1000                  # Frames per batch
 save_w = false                      # Save displacement fields
 save_valid_idx = true               # Required for Stage 3
 save_meta_info = true               # Save statistics
+# constancy_assumption = "gc"       # Options: "gc", "gray", "cs"
 
 # Alternatively reference a saved JSON file:
 # flow_options = "./saved_options/session_stage1.json"

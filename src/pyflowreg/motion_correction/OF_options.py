@@ -78,6 +78,22 @@ class InterpolationMethod(str, Enum):
 class ConstancyAssumption(str, Enum):
     GRAY = "gray"
     GRADIENT = "gc"
+    CENSUS = "cs"
+
+
+def _normalize_constancy_assumption_value(v):
+    """Normalize constancy assumption aliases to serialized option values."""
+    if hasattr(v, "value"):
+        v = v.value
+    if isinstance(v, str):
+        aliases = {
+            "gradient": ConstancyAssumption.GRADIENT.value,
+            "brightness": ConstancyAssumption.GRAY.value,
+            "census": ConstancyAssumption.CENSUS.value,
+        }
+        key = v.strip().lower()
+        return aliases.get(key, key)
+    return v
 
 
 class NamingConvention(str, Enum):
@@ -126,6 +142,15 @@ class OFOptions(BaseModel):
     iterations: StrictInt = Field(50, ge=1, description="Iterations per level")
     a_smooth: float = Field(1.0, ge=0, description="Smoothness diffusion parameter")
     a_data: float = Field(0.45, gt=0, le=1, description="Data-term diffusion parameter")
+    gnc_schedule: Optional[Tuple[float, ...]] = Field(
+        None,
+        description="Optional graduated non-convexity stage weights from 0.0 to 1.0",
+    )
+    warping_steps: Optional[StrictInt] = Field(
+        None,
+        ge=1,
+        description="Optional warp/relinearize steps per pyramid level in GNC mode",
+    )
 
     # Preprocessing
     sigma: Any = Field(
@@ -176,7 +201,8 @@ class OFOptions(BaseModel):
         NamingConvention.DEFAULT, description="Output filename style"
     )
     constancy_assumption: ConstancyAssumption = Field(
-        ConstancyAssumption.GRADIENT, description="Constancy assumption"
+        ConstancyAssumption.GRADIENT,
+        description="Optical-flow data term: 'gc', 'gray', or 'cs'",
     )
 
     # Backend configuration
@@ -278,6 +304,34 @@ class OFOptions(BaseModel):
             raise ValueError("Sigma must be [sx,sy,st] or (n_channels, 3)")
         return v
 
+    @field_validator("gnc_schedule", mode="before")
+    @classmethod
+    def normalize_gnc_schedule(cls, v):
+        """Normalize and validate an optional GNC stage schedule."""
+        if v is None:
+            return None
+
+        schedule = np.asarray(v, dtype=float)
+        if schedule.ndim != 1:
+            raise ValueError("gnc_schedule must be a 1D sequence")
+        if schedule.size < 2:
+            raise ValueError("gnc_schedule must contain at least two stages")
+        if np.any(schedule < 0.0) or np.any(schedule > 1.0):
+            raise ValueError("gnc_schedule entries must lie in [0, 1]")
+        if not np.all(np.diff(schedule) >= 0.0):
+            raise ValueError("gnc_schedule must be monotone nondecreasing")
+        if not np.isclose(schedule[0], 0.0):
+            raise ValueError("gnc_schedule must start at 0.0")
+        if not np.isclose(schedule[-1], 1.0):
+            raise ValueError("gnc_schedule must end at 1.0")
+        return tuple(float(x) for x in schedule.tolist())
+
+    @field_validator("constancy_assumption", mode="before")
+    @classmethod
+    def normalize_constancy_assumption(cls, v):
+        """Normalize constancy assumption aliases to serialized option values."""
+        return _normalize_constancy_assumption_value(v)
+
     @model_validator(mode="after")
     def validate_and_normalize(self) -> "OFOptions":
         """Normalize fields and maintain MATLAB parity."""
@@ -333,7 +387,7 @@ class OFOptions(BaseModel):
         # Handle scalar or 1D weights
         if w.ndim <= 1:
             if w.size == 1:
-                return float(w)
+                return float(w.item())
 
             # Truncate if too many weights
             if w.size > n_channels:
@@ -436,7 +490,9 @@ class OFOptions(BaseModel):
         return self._video_writer
 
     def get_reference_frame(
-        self, video_reader: Optional[VideoReader] = None
+        self,
+        video_reader: Optional[VideoReader] = None,
+        registration_config: Optional[Any] = None,
     ) -> Union[np.ndarray, List[np.ndarray]]:
         """Get reference frame(s), with optional preregistration."""
         if self.n_references > 1:
@@ -445,7 +501,9 @@ class OFOptions(BaseModel):
             )
             # Create a copy with n_references=1 to avoid recursion
             single_ref_opts = self.model_copy(update={"n_references": 1})
-            ref = single_ref_opts.get_reference_frame(video_reader)
+            ref = single_ref_opts.get_reference_frame(
+                video_reader, registration_config=registration_config
+            )
             return [ref] * self.n_references
 
         # Direct ndarray
@@ -558,6 +616,7 @@ class OFOptions(BaseModel):
                 a_data=self.a_data,
                 constancy_assumption=self.constancy_assumption,
                 weight=weight_2d,
+                buffer_size=self.buffer_size,
             )
 
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr
@@ -565,7 +624,10 @@ class OFOptions(BaseModel):
 
             # Compensate: compute displacement fields using normalized frames
             _, w_fields = compensate_arr(
-                frames_for_compensation, ref_mean, options=prereg_options
+                frames_for_compensation,
+                ref_mean,
+                options=prereg_options,
+                registration_config=registration_config,
             )
 
             # Warp the RAW frames using the computed displacement fields
@@ -683,6 +745,24 @@ class OFOptions(BaseModel):
         # Priority 3: Registry backend
         from pyflowreg.core.backend_registry import get_backend
 
+        constancy_assumption = _normalize_constancy_assumption_value(
+            self.constancy_assumption
+        )
+        if self.flow_backend == "diso" and constancy_assumption != "gc":
+            raise ValueError(
+                "The 'diso' backend does not support variational constancy "
+                f"assumption '{constancy_assumption}'. Use "
+                "flow_backend='flowreg' for 'gray' or 'cs'."
+            )
+        if self.flow_backend == "diso" and (
+            self.gnc_schedule is not None or self.warping_steps is not None
+        ):
+            raise ValueError(
+                "The 'diso' backend does not support graduated non-convexity. "
+                "Use flow_backend='flowreg' for 'gnc_schedule' or "
+                "'warping_steps'."
+            )
+
         factory = get_backend(self.flow_backend)
         return factory(**self.backend_params)
 
@@ -698,7 +778,11 @@ class OFOptions(BaseModel):
             "update_lag": self.update_lag,
             "a_data": self.a_data,
             "a_smooth": self.a_smooth,
-            "const_assumption": self.constancy_assumption.value,  # Fixed: use const_assumption for API compatibility
+            "gnc_schedule": self.gnc_schedule,
+            "warping_steps": self.warping_steps,
+            "const_assumption": _normalize_constancy_assumption_value(
+                self.constancy_assumption
+            ),
         }
 
     def __repr__(self) -> str:
@@ -709,52 +793,6 @@ class OFOptions(BaseModel):
 
 
 # Convenience functions
-def compensate_inplace(
-    frames: np.ndarray,
-    reference: np.ndarray,
-    options: Optional[OFOptions] = None,
-    **kwargs,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compensate frames against reference.
-
-    Returns:
-        Tuple of (compensated_frames, displacement_fields)
-    """
-    if options is None:
-        options = OFOptions(**kwargs)
-    else:
-        # Copy and update
-        options = options.model_copy(update=kwargs)
-
-    # Ensure 4D frames and 3D reference
-    if frames.ndim == 3:
-        frames = frames[:, :, np.newaxis, :]
-    if reference.ndim == 2:
-        reference = reference[:, :, np.newaxis]
-
-    params = options.to_dict()
-
-    try:
-        from pyflowreg import get_displacement, compensate_sequence_uv
-    except ImportError as e:
-        raise RuntimeError("pyflowreg core functions not available") from e
-
-    # Compute displacements
-    T = frames.shape[3]
-    displacements = np.zeros((frames.shape[0], frames.shape[1], 2, T), dtype=np.float32)
-
-    for t in range(T):
-        displacements[:, :, :, t] = get_displacement(
-            reference, frames[:, :, :, t], **params
-        )
-
-    # Apply compensation
-    compensated = compensate_sequence_uv(frames, reference, displacements)
-
-    return compensated, displacements
-
-
 def get_mcp_schema() -> dict:
     """Get JSON schema for the model."""
     return OFOptions.model_json_schema()

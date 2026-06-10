@@ -25,6 +25,12 @@ class TestSessionConfigBasics:
         assert config.pattern == "*.tif"
         assert config.resume is True
         assert config.scheduler == "local"
+        assert config.n_workers == -1
+
+    def test_n_workers_config(self, tmp_path):
+        """Test configuring explicit Stage 1 worker count."""
+        config = SessionConfig(root=tmp_path, n_workers=4)
+        assert config.n_workers == 4
 
     def test_root_must_exist(self, tmp_path):
         """Test that root directory must exist."""
@@ -314,6 +320,7 @@ class TestSessionConfigStage2Parameters:
         assert config.sigma_smooth == 6.0
         assert config.alpha_between == 25.0
         assert config.iterations_between == 100
+        assert config.stage2_constancy_assumption == "gc"
 
     def test_custom_stage2_parameters(self, tmp_path):
         """Test setting custom Stage 2 parameters."""
@@ -323,12 +330,14 @@ class TestSessionConfigStage2Parameters:
             sigma_smooth=4.5,
             alpha_between=20.0,
             iterations_between=150,
+            stage2_constancy_assumption="census",
         )
 
         assert config.cc_upsample == 8
         assert config.sigma_smooth == 4.5
         assert config.alpha_between == 20.0
         assert config.iterations_between == 150
+        assert config.stage2_constancy_assumption == "census"
 
 
 class TestSessionConfigBackendParameters:
