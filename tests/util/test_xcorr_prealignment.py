@@ -282,6 +282,64 @@ class TestCCPrealignmentIntegration:
         error_after = np.mean(np.abs(registered_for_comparison - reference))
         assert error_after < error_before * 0.5  # Should reduce error by at least 50%
 
+    @pytest.mark.parametrize("executor_name", ["sequential", "threading"])
+    @pytest.mark.parametrize("cc_enabled", [True, False])
+    def test_cc_initialization_invokes_xcorr_prealignment(
+        self, synthetic_rigid_data, executor_name, cc_enabled, monkeypatch
+    ):
+        """cc_initialization=True must actually run CC pre-alignment.
+
+        The executors import estimate_rigid_xcorr_2d inside the per-frame
+        function, so patching the module attribute takes effect at call time.
+        The cc_enabled=False case also guards the threading executor against
+        forwarding unfiltered cc keys into get_displacement (TypeError).
+        Multiprocessing is excluded: a spy cannot cross process boundaries.
+        """
+        from pyflowreg.motion_correction.compensate_recording import (
+            BatchMotionCorrector,
+            RegistrationConfig,
+        )
+        from pyflowreg.motion_correction.OF_options import OutputFormat
+        import pyflowreg.util.xcorr_prealignment as xcorr_module
+
+        reference, frames, _ = synthetic_rigid_data
+        reference = np.ascontiguousarray(reference, dtype=np.float32)
+        frames = np.ascontiguousarray(frames, dtype=np.float32)
+
+        calls = {"count": 0}
+        real_estimate = xcorr_module.estimate_rigid_xcorr_2d
+
+        def counting_estimate(*args, **kwargs):
+            calls["count"] += 1
+            return real_estimate(*args, **kwargs)
+
+        monkeypatch.setattr(xcorr_module, "estimate_rigid_xcorr_2d", counting_estimate)
+
+        options = OFOptions(
+            alpha=1.0,
+            levels=5,
+            eta=0.8,
+            iterations=5,
+            cc_initialization=cc_enabled,
+            cc_hw=64,
+            cc_up=1,
+            quality_setting="fast",
+            input_file=frames,
+            reference_frames=reference,
+            output_format=OutputFormat.ARRAY,
+        )
+        config = RegistrationConfig(
+            parallelization=executor_name,
+            n_jobs=2 if executor_name != "sequential" else 1,
+            verbose=False,
+        )
+        BatchMotionCorrector(options, config).run()
+
+        if cc_enabled:
+            assert calls["count"] > 0, "CC pre-alignment was never invoked"
+        else:
+            assert calls["count"] == 0
+
     def test_cc_parameter_validation(self):
         """Test validation of CC-related parameters."""
         # cc_hw as integer

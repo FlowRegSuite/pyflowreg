@@ -448,6 +448,11 @@ class BatchMotionCorrector:
             "iterations": self.options.iterations,
             "a_smooth": self.options.a_smooth,
             "a_data": self.options.a_data,
+            # Cross-correlation pre-alignment settings; the executors pop
+            # these before calling the displacement function.
+            "cc_initialization": getattr(self.options, "cc_initialization", False),
+            "cc_hw": getattr(self.options, "cc_hw", 256),
+            "cc_up": getattr(self.options, "cc_up", 1),
         }
 
         # Get interpolation method
