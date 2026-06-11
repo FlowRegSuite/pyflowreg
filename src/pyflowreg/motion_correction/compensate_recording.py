@@ -69,10 +69,12 @@ class RegistrationConfig:
         back to 4 if the core count cannot be determined). Any other
         value is used directly as the worker count.
     verbose : bool, optional
-        Verbosity flag, default ``False``. Note that in the current
-        implementation most pipeline progress messages (executor
-        selection, batch timings, final statistics) are printed when
-        this is ``False``.
+        Verbosity flag, default ``False``. When ``True``, pipeline
+        progress messages (executor selection, batch timings, final
+        statistics) are printed; warnings are always emitted regardless
+        of this flag. Note: the MATLAB reference gates the same messages
+        on ``~options.verbose`` (chatty by default); PyFlowReg
+        deliberately uses the natural polarity and is quiet by default.
     parallelization : str or None, optional
         Name of the parallelization executor: ``'sequential'``,
         ``'threading'``, or ``'multiprocessing'``. ``None`` (default)
@@ -290,10 +292,9 @@ class BatchMotionCorrector:
         executor_class = RuntimeContext.get_parallelization_executor(executor_name)
         if executor_class is None:
             # Fallback to sequential if requested executor not available
-            if not self.config.verbose:
-                print(
-                    f"Warning: {executor_name} executor not available, falling back to sequential"
-                )
+            warnings.warn(
+                f"{executor_name} executor not available, falling back to sequential"
+            )
             executor_class = RuntimeContext.get_parallelization_executor("sequential")
 
             # If sequential is also not available, import and register it
@@ -316,7 +317,7 @@ class BatchMotionCorrector:
         # Create executor instance
         self.executor = executor_class(n_workers=self.n_workers)
 
-        if not self.config.verbose:
+        if self.config.verbose:
             # Use actual executor name and worker count
             actual_workers = self.executor.n_workers
             worker_str = "worker" if actual_workers == 1 else "workers"
@@ -648,7 +649,7 @@ class BatchMotionCorrector:
         """Compute initial displacement field from first frames."""
         n_init = min(22, first_batch.shape[0])  # T is first dimension
 
-        if not self.config.verbose:
+        if self.config.verbose:
             print("Computing initial displacement field...")
 
         # Process first n_init frames - use "initial_w" task to avoid counting toward main progress
@@ -672,7 +673,7 @@ class BatchMotionCorrector:
         # Average flows
         w_init = np.mean(w, axis=0)
 
-        if not self.config.verbose:
+        if self.config.verbose:
             print("Done pre-registration to get w_init.")
 
         return w_init
@@ -757,7 +758,7 @@ class BatchMotionCorrector:
         # Initialize total frames for progress tracking
         self._total_frames = len(self.video_reader) if self.video_reader else None
 
-        if not self.config.verbose:
+        if self.config.verbose:
             quality = getattr(self.options, "quality_setting", "balanced")
             print(f"\nStarting compensation with quality={quality}")
             print(
@@ -870,7 +871,7 @@ class BatchMotionCorrector:
                 total_frames += registered.shape[0]
                 batch_time = time() - batch_start
 
-                if not self.config.verbose:
+                if self.config.verbose:
                     fps = registered.shape[0] / batch_time
                     print(
                         f"Batch {batch_idx}: {registered.shape[0]} frames in {batch_time:.2f}s ({fps:.1f} fps)"
@@ -883,7 +884,7 @@ class BatchMotionCorrector:
 
         # Final stats
         total_time = time() - start_time
-        if not self.config.verbose:
+        if self.config.verbose:
             avg_fps = total_frames / max(1e-6, total_time)
             print(
                 f"\nProcessed {total_frames} frames in {total_time:.2f}s (avg {avg_fps:.1f} fps)"
@@ -919,7 +920,8 @@ class BatchMotionCorrector:
             ref_path = output_path / "reference_frame.npy"
             np.save(str(ref_path), self.reference_raw)
 
-        print(f"Saved metadata to {output_path}")
+        if self.config.verbose:
+            print(f"Saved metadata to {output_path}")
 
     def _cleanup(self):
         """Close file handlers."""

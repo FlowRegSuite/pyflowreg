@@ -28,6 +28,10 @@ Notes:
   resolved from `OFOptions`.
 - `diso` excludes multiprocessing because the multiprocessing workers import
   the variational solver directly and do not reconstruct registry backends.
+- `diso` honors the flow initialization (`uv`) the pipelines pass between
+  batches and frames, forwarding it to OpenCV DIS as the initial flow; the
+  other variational solver keywords (`alpha`, `iterations`, ...) are accepted
+  but ignored.
 
 You can inspect what is registered in the current environment:
 

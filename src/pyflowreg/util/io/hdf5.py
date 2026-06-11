@@ -15,7 +15,8 @@ class HDF5FileReader(DSFileReader, VideoReader):
     Reads one or more HDF5 datasets as video channels. If no
     ``dataset_names`` are given, suitable datasets are discovered with the
     DSFileReader heuristic. 3D datasets are interpreted as (T, H, W) with
-    one dataset per channel; a 4D dataset is interpreted as (T, H, W, C).
+    one dataset per channel by default (configurable via
+    ``dimension_ordering``); a 4D dataset is interpreted as (T, H, W, C).
     Frames are returned in (T, H, W, C) format.
     """
 
@@ -39,6 +40,13 @@ class HDF5FileReader(DSFileReader, VideoReader):
             - ``dataset_names`` (list of str): Datasets to read, one per
               channel. If not given, datasets are discovered
               automatically.
+            - ``dimension_ordering`` (tuple of int): Axis positions of
+              (height, width, time) in each stored 3D dataset, matching
+              ``HDF5FileWriter`` and ``MATFileReader``. Default ``(1, 2, 0)``
+              means the dataset is stored as (T, H, W). Ignored for 4D
+              datasets, which are always read as (T, H, W, C). Note that
+              indexing a non-leading time axis reads across HDF5 chunks
+              and is slower than the default layout.
         """
         # Initialize parent classes
         DSFileReader.__init__(self)
@@ -51,7 +59,12 @@ class HDF5FileReader(DSFileReader, VideoReader):
 
         # Dataset-specific options
         self.dataset_names = kwargs.get("dataset_names")
-        self.dimension_ordering = kwargs.get("dimension_ordering")
+        self.dimension_ordering = tuple(kwargs.get("dimension_ordering", (1, 2, 0)))
+        if sorted(self.dimension_ordering) != [0, 1, 2]:
+            raise ValueError(
+                "dimension_ordering must be a permutation of (0, 1, 2) giving "
+                f"the axis positions of (H, W, T), got {self.dimension_ordering}"
+            )
 
     def _initialize(self):
         """Open file and set up properties."""
@@ -78,12 +91,16 @@ class HDF5FileReader(DSFileReader, VideoReader):
         first_ds = self.h5file[self.dataset_names[0]]
         shape = first_ds.shape
 
-        # Detect dimension ordering (implementation specific)
-        # For now assume it's already (T, H, W) or needs transposing
+        # Interpret the stored layout via dimension_ordering: positions of
+        # (H, W, T) in the dataset shape; default (1, 2, 0) = (T, H, W).
         if len(shape) == 3:
-            self.frame_count, self.height, self.width = shape
+            self.height = shape[self.dimension_ordering[0]]
+            self.width = shape[self.dimension_ordering[1]]
+            self.frame_count = shape[self.dimension_ordering[2]]
             self.n_channels = len(self.dataset_names)
         elif len(shape) == 4:
+            # 4D datasets are always (T, H, W, C); dimension_ordering only
+            # applies to per-channel 3D datasets.
             self.frame_count, self.height, self.width, self.n_channels = shape
 
         self.dtype = first_ds.dtype
@@ -127,16 +144,33 @@ class HDF5FileReader(DSFileReader, VideoReader):
             (n_frames, self.height, self.width, self.n_channels), dtype=self.dtype
         )
 
-        # Read from each dataset/channel
+        # Read from each dataset/channel, indexing the configured time axis
+        # and permuting the stored (H, W, T) positions to (T, H, W) —
+        # mirrors MATFileReader.
+        do = self.dimension_ordering
+        t_axis = do[2]
         for ch_idx, ds_name in enumerate(self.dataset_names):
             dataset = self.h5file[ds_name]
 
-            if isinstance(frame_indices, slice):
-                # Efficient slicing for contiguous frames
-                data = dataset[frame_indices, :, :]
+            if dataset.ndim == 3:
+                idx = [slice(None), slice(None), slice(None)]
+                if isinstance(frame_indices, slice):
+                    # Efficient slicing for contiguous frames
+                    idx[t_axis] = frame_indices
+                else:
+                    # Fancy indexing for non-contiguous
+                    idx[t_axis] = list(indices)
+                data = dataset[tuple(idx)]
+
+                if do != (1, 2, 0):
+                    data = np.transpose(data, (do[2], do[0], do[1]))
             else:
-                # Fancy indexing for non-contiguous
-                data = dataset[indices, :, :]
+                # 4D dataset stored as (T, H, W, C); single-dataset case
+                if isinstance(frame_indices, slice):
+                    data = dataset[frame_indices]
+                else:
+                    data = dataset[list(indices)]
+                return np.asarray(data)
 
             output[:, :, :, ch_idx] = data
 

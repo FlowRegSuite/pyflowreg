@@ -417,7 +417,9 @@ def compensate_single_recording(
     compensated_h5 = next((p for p in candidates if p.exists()), candidates[0])
 
     if not compensated_h5.exists():
-        reg_config = RegistrationConfig(n_jobs=config.n_workers)
+        # verbose=True keeps the per-batch console progress for long
+        # session runs (the pipeline is quiet by default).
+        reg_config = RegistrationConfig(n_jobs=config.n_workers, verbose=True)
         compensate_recording(options, config=reg_config)
         # Re-check both candidates after compensation
         compensated_h5 = next((p for p in candidates if p.exists()), candidates[0])

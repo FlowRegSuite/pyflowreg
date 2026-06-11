@@ -162,7 +162,7 @@ processor.set_reference(corrected_frames)
 processor.reset_reference(new_reference_frame)
 ```
 
-Note that `set_reference()` interprets a 3D array as a single multi-channel frame `(H, W, C)`, not as a grayscale stack. Calling `set_reference()` without arguments uses the frames buffered internally before a reference existed.
+Note that `set_reference()` interprets a 3D array as a single multi-channel frame `(H, W, C)` when its last dimension is at most 4 (the `ArrayReader` convention), and as a grayscale `(T, H, W)` stack otherwise. Calling `set_reference()` without arguments uses the frames buffered internally before a reference existed.
 
 ### When to Use
 

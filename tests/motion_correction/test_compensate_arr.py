@@ -89,6 +89,18 @@ class TestCompensateArrBasics:
         assert registered.shape == (T, H, W, C)
         assert flow.shape == (T, H, W, 2)
 
+    def test_single_frame_multichannel_input(self):
+        """A single (H,W,C) frame with a 3D reference mirrors its rank."""
+        H, W, C = 24, 24, 2
+        frame = np.random.rand(H, W, C).astype(np.float32)
+        reference = np.random.rand(H, W, C).astype(np.float32)
+
+        registered, flow = compensate_arr(frame, reference)
+
+        # Output rank mirrors the input rank: no leading time axis.
+        assert registered.shape == (H, W, C)
+        assert flow.shape == (H, W, 2)
+
 
 class TestCompensateArrWithOptions:
     """Test compensate_arr with various OFOptions configurations."""
@@ -678,3 +690,20 @@ class TestCompensateArrIntegration:
         assert (
             original_options.output_format == original_format
         )  # Should not be changed to ARRAY
+
+    def test_backend_params_not_aliased_or_mutated(self):
+        """Neither the user's options nor the kwarg dict leak mutations."""
+        T, H, W, C = 3, 16, 16, 1
+        video = np.random.rand(T, H, W, C).astype(np.float32)
+        reference = np.mean(video, axis=0)
+
+        original_options = OFOptions(quality_setting="fast")
+        assert original_options.backend_params == {}
+
+        # The flowreg factory accepts and ignores extra keyword arguments.
+        kwarg_params = {"unused_param": 1}
+        compensate_arr(video, reference, original_options, backend_params=kwarg_params)
+
+        # The caller's options and kwarg dict stay untouched.
+        assert original_options.backend_params == {}
+        assert kwarg_params == {"unused_param": 1}

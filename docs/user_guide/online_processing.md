@@ -41,11 +41,11 @@ flow_reg.set_reference()
 
 Behavior by input shape:
 
-- **4D stack `(T, H, W, C)`** -- the frames are preregistered with `compensate_arr` against their temporal mean, using a copy of the options with `quality_setting="balanced"`. The mean of the registered frames becomes the reference.
-- **3D `(H, W, C)` or 2D `(H, W)`** -- used directly as a single-frame reference, without preregistration. A 3D input is always interpreted as one multi-channel frame, so a grayscale stack `(T, H, W)` must be given an explicit channel axis first (e.g. `frames[..., None]`).
+- **Stack `(T, H, W, C)` or `(T, H, W)`** -- the frames are preregistered with `compensate_arr` against their temporal mean, using a copy of the options with `quality_setting="balanced"`. The mean of the registered frames becomes the reference.
+- **Single frame `(H, W, C)` or `(H, W)`** -- used directly as the reference, without preregistration. A 3D input is interpreted as one multi-channel frame when its last dimension is at most 4 (the `ArrayReader` convention), and as a grayscale `(T, H, W)` stack otherwise.
 - **No argument** -- the frames accumulated in the internal reference buffer are stacked and processed as above. Raises `ValueError` if the buffer is empty.
 
-After the reference is established, it is normalized and spatially Gaussian-filtered; the min/max of this filtered reference is stored and used to normalize every incoming frame (per channel when `channel_normalization="separate"`, jointly otherwise). Setting a reference also resets the stored flow initialization and clears the temporal filter buffer.
+After the reference is established, it is normalized and spatially Gaussian-filtered; the min/max of the raw reference is stored and used to normalize every incoming frame (per channel when `channel_normalization="separate"`, jointly otherwise) -- the same convention as the batch pipeline, so frames can arrive at the recording's native scale (e.g. uint16). Setting a reference also resets the stored flow initialization and clears the temporal filter buffer.
 
 `reset_reference(new_reference)` is an alias that calls `set_reference()` with the given array.
 
@@ -65,14 +65,12 @@ If no reference has been set yet, the call instead appends the frame to the refe
 
 Once a reference exists, each call:
 
-1. Normalizes the frame using the stored reference min/max values.
+1. Normalizes the frame using the raw reference's min/max values.
 2. Applies the 2D spatial Gaussian filter and pushes the result into the temporal buffer.
 3. Applies the causal temporal half-kernel filter (see below).
 4. Computes the displacement field against the filtered reference, initialized with the previous frame's flow.
 5. Warps the original (unfiltered) input frame with the resulting field, using `options.interpolation_method` (default cubic).
-6. Every `reference_update_interval`-th frame, blends the warped frame into the reference with weight `reference_update_weight` and refreshes the normalization min/max from the updated reference.
-
-The `normalize` keyword of `__call__` is currently unused; normalization is always applied.
+6. Every `reference_update_interval`-th frame, blends the warped frame into the reference with weight `reference_update_weight` and refreshes the normalization min/max from the updated raw reference.
 
 Convenience methods:
 
@@ -88,7 +86,7 @@ Batch processing filters each batch with a 3D Gaussian over `(y, x, t)`. In a st
 2. The 2D-filtered frames are kept in a circular buffer of size `max(1, int(truncate * sigma_t + 0.5) + 1)`, where `sigma_t` is the temporal sigma.
 3. The frame used for flow estimation is a weighted average of the current and past buffered frames with normalized half-Gaussian weights (`pyflowreg.util.image_processing.gaussian_filter_1d_half_kernel`). Only the current and past frames contribute, so the filter is causal and adds no latency, but it is not identical to the symmetric temporal filtering used in batch mode.
 
-With the `OFOptions` default `sigma` of `[[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]]`, the temporal sigma of 0.1 yields a buffer of size 1 and no effective temporal filtering; increase the third sigma component to enable it. When per-channel sigmas are configured, `FlowRegLive` currently uses the first channel's spatial sigmas for all channels and the maximum temporal sigma across channels.
+With the `OFOptions` default `sigma` of `[[1.0, 1.0, 0.1], [1.0, 1.0, 0.1]]`, the temporal sigma of 0.1 yields a buffer of size 1 and no effective temporal filtering; increase the third sigma component to enable it. When per-channel sigmas are configured, each channel is spatially filtered with its own sigmas; the temporal half-kernel uses the maximum temporal sigma across channels.
 
 ## Complete Example
 

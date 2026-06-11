@@ -308,7 +308,7 @@ class TestDisoFactory:
         assert flow.dtype == np.float32
 
     def test_diso_factory_with_initial_flow(self):
-        """Test factory with initial flow."""
+        """Test factory with initial flow passed as the pipeline keyword uv."""
         diso_fn = _diso_factory()
 
         H, W = 64, 64
@@ -322,6 +322,83 @@ class TestDisoFactory:
 
         assert flow.shape == (H, W, 2)
         assert flow.dtype == np.float32
+        # The warm start must not be mutated in place (cv2 writes the
+        # result into the init buffer unless the wrapper copies it).
+        assert np.array_equal(w_init, np.ones((H, W, 2), dtype=np.float32))
+
+
+class _FakeDIS:
+    """Stands in for cv2.DISOpticalFlow to capture the init flow argument."""
+
+    def __init__(self):
+        self.received_inits = []
+
+    def calc(self, A, B, init):
+        self.received_inits.append(init)
+        if init is not None:
+            return init
+        return np.zeros(A.shape[:2] + (2,), dtype=np.float32)
+
+
+class TestDisoOFWarmStart:
+    """DisoOF must honor the pipeline flow initialization keyword uv."""
+
+    def _diso_with_fake(self):
+        diso = DisoOF()
+        fake = _FakeDIS()
+        diso._dis = fake  # _ensure() keeps an existing object
+        return diso, fake
+
+    def test_call_uv_reaches_cv2_as_init(self):
+        """uv= is forwarded to cv2 DIS as the initial flow, as a copy."""
+        diso, fake = self._diso_with_fake()
+        H, W = 32, 48
+        fixed = np.random.rand(H, W).astype(np.float32)
+        moving = np.random.rand(H, W).astype(np.float32)
+        uv = np.full((H, W, 2), 1.5, dtype=np.float32)
+
+        diso(fixed, moving, uv=uv)
+
+        init = fake.received_inits[0]
+        assert init is not None
+        assert np.array_equal(init, uv)
+        assert init is not uv, "init must be a copy, not the caller's buffer"
+
+    def test_call_w_takes_precedence_over_uv(self):
+        """Explicit w= wins when both w and uv are supplied."""
+        diso, fake = self._diso_with_fake()
+        H, W = 32, 48
+        fixed = np.random.rand(H, W).astype(np.float32)
+        moving = np.random.rand(H, W).astype(np.float32)
+        w = np.full((H, W, 2), 2.0, dtype=np.float32)
+        uv = np.full((H, W, 2), -3.0, dtype=np.float32)
+
+        diso(fixed, moving, w=w, uv=uv)
+
+        assert np.array_equal(fake.received_inits[0], w)
+
+    def test_call_mismatched_uv_is_skipped(self):
+        """A warm start with the wrong spatial size is silently dropped."""
+        diso, fake = self._diso_with_fake()
+        H, W = 32, 48
+        fixed = np.random.rand(H, W).astype(np.float32)
+        moving = np.random.rand(H, W).astype(np.float32)
+        uv = np.ones((H + 2, W, 2), dtype=np.float32)
+
+        diso(fixed, moving, uv=uv)
+
+        assert fake.received_inits[0] is None
+
+    def test_call_without_init_passes_none(self):
+        """No w/uv (e.g. FlowRegLive's first frame) runs a cold start."""
+        diso, fake = self._diso_with_fake()
+        H, W = 32, 48
+        fixed = np.random.rand(H, W).astype(np.float32)
+        moving = np.random.rand(H, W).astype(np.float32)
+
+        diso(fixed, moving, uv=None)
+
+        assert fake.received_inits[0] is None
 
     def test_diso_factory_with_weights(self):
         """Test factory with channel weights."""

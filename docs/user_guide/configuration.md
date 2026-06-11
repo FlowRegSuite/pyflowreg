@@ -194,7 +194,7 @@ The `flowreg_torch` backend additionally accepts `dtype` (`"float32"` or `"float
 :end-before: "[docs:end]"
 ```
 
-When a list of indices is given, the corresponding frames are read from the input, motion-compensated against their mean using increased regularization, and averaged to form the reference.
+When a list of indices is given, the corresponding frames are read from the input, motion-compensated against their mean using increased regularization, and averaged to form the reference. Indices beyond the recording length are clipped to the last frame and the resulting duplicate indices are removed with a printed warning, so a short recording preregisters each available frame exactly once. When [cross-correlation pre-alignment](prealignment.md) is enabled, it also applies during this preregistration.
 
 ### Updating the Reference Frame
 

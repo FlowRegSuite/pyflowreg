@@ -77,13 +77,25 @@ class FlowRegLive:
         # Get sigma values and determine temporal buffer size
         self.sigma = np.asarray(self.options.sigma)
         if self.sigma.ndim == 1:
-            self.sigma_2d = self.sigma[:2]  # [sy, sx]
+            self.sigma_2d = self.sigma[:2]  # [sx, sy]
             self.sigma_t = self.sigma[2] if len(self.sigma) > 2 else 0.0
         else:
-            # Per-channel, find max temporal sigma
-            self.sigma_2d = self.sigma[0, :2]  # Use first channel for 2D
-            # Get max temporal sigma across all channels
+            # Per-channel spatial sigmas (C, 2) — apply_gaussian_filter
+            # consumes per-channel rows natively, so every channel keeps
+            # its own [sx, sy].
+            self.sigma_2d = self.sigma[:, :2]
+            # The temporal half-kernel filter takes a scalar sigma; use the
+            # max across channels (also sizes the temporal buffer).
             self.sigma_t = np.max(self.sigma[:, 2]) if self.sigma.shape[1] > 2 else 0.0
+
+        # channel_normalization mode for util.image_processing.normalize,
+        # which expects "together"/"separate" (OFOptions uses "joint" for
+        # the joint mode).
+        self._norm_mode = (
+            "separate"
+            if self.options.channel_normalization.value == "separate"
+            else "together"
+        )
 
         # Calculate temporal buffer size from sigma_t
         # Buffer size = kernel radius + 1, where radius = truncate * sigma_t
@@ -104,7 +116,8 @@ class FlowRegLive:
         # Flow initialization
         self.last_flow = None
 
-        # Normalization parameters from filtered reference
+        # Normalization parameters from the RAW reference (same bounds the
+        # batch pipeline uses to normalize incoming raw frames)
         self.norm_min = None
         self.norm_max = None
 
@@ -113,18 +126,25 @@ class FlowRegLive:
         Initialize reference from frames or buffer.
 
         Args:
-            frames: Optional array of frames (T,H,W,C). If None, uses buffer.
+            frames: Optional reference input. A (T,H,W,C) or (T,H,W) stack
+                is compensated with compensate_arr and averaged; a single
+                (H,W,C) or (H,W) frame is used directly. A 3D array is
+                interpreted as a single (H,W,C) frame when its last
+                dimension is at most 4 (the ArrayReader convention),
+                otherwise as a (T,H,W) stack. If None, uses the buffer.
         """
         if frames is not None:
             # Use provided frames
             if frames.ndim == 2:
                 # Single 2D frame (H,W) - convert to 3D
                 self.reference_raw = frames[..., np.newaxis].copy()
-            elif frames.ndim == 3:
-                # Single frame (H,W,C)
+            elif frames.ndim == 3 and frames.shape[-1] <= 4:
+                # Single frame (H,W,C) — ArrayReader convention: a 3D array
+                # with last dimension <= 4 is one multi-channel frame, a
+                # larger last dimension means a grayscale (T,H,W) stack.
                 self.reference_raw = frames.copy()
             else:
-                # Multiple frames - compensate and average
+                # Stack (T,H,W,C) or (T,H,W) - compensate and average
                 print(f"Preregistering {frames.shape[0]} frames for reference...")
 
                 # Use balanced quality for reference
@@ -159,16 +179,8 @@ class FlowRegLive:
         # Preprocess reference (normalize and filter)
         self._preprocess_reference()
 
-        # Store normalization parameters from FILTERED reference
-        if self.options.channel_normalization.value == "separate":
-            self.norm_min = []
-            self.norm_max = []
-            for c in range(self.reference_proc.shape[2]):
-                self.norm_min.append(self.reference_proc[..., c].min())
-                self.norm_max.append(self.reference_proc[..., c].max())
-        else:
-            self.norm_min = self.reference_proc.min()
-            self.norm_max = self.reference_proc.max()
+        # Store normalization parameters from the RAW reference
+        self._update_norm_bounds()
 
         # Reset flow initialization
         self.last_flow = None
@@ -176,12 +188,31 @@ class FlowRegLive:
         # Clear temporal buffer
         self.temporal_buffer.clear()
 
+    def _update_norm_bounds(self):
+        """Store normalization bounds from the RAW reference.
+
+        The batch pipeline normalizes raw incoming frames with the raw
+        reference's range (``normalization_ref=reference_raw`` in
+        ``compensate_recording``); these are the same bounds the reference
+        itself is normalized with in ``_preprocess_reference``, so frames
+        and reference reach the flow solver on the same scale.
+        """
+        if self._norm_mode == "separate":
+            self.norm_min = []
+            self.norm_max = []
+            for c in range(self.reference_raw.shape[2]):
+                self.norm_min.append(self.reference_raw[..., c].min())
+                self.norm_max.append(self.reference_raw[..., c].max())
+        else:
+            self.norm_min = self.reference_raw.min()
+            self.norm_max = self.reference_raw.max()
+
     def _preprocess_reference(self):
         """Preprocess reference frame (normalize and filter)."""
         # First normalize
         ref_norm = normalize(
             self.reference_raw,
-            channel_normalization=self.options.channel_normalization.value,
+            channel_normalization=self._norm_mode,
         )
 
         # Apply 2D Gaussian filter
@@ -190,15 +221,13 @@ class FlowRegLive:
         )
 
     def _normalize_with_reference(self, frame: np.ndarray) -> np.ndarray:
-        """Normalize frame using filtered reference min/max values."""
+        """Normalize frame using the raw reference min/max values."""
         if self.norm_min is None or self.norm_max is None:
             # Fallback to frame's own normalization
-            return normalize(
-                frame, channel_normalization=self.options.channel_normalization.value
-            )
+            return normalize(frame, channel_normalization=self._norm_mode)
 
         eps = 1e-8
-        if self.options.channel_normalization.value == "separate":
+        if self._norm_mode == "separate":
             result = np.zeros_like(frame, dtype=np.float64)
             for c in range(frame.shape[-1]):
                 if c < len(self.norm_min):
@@ -213,15 +242,16 @@ class FlowRegLive:
         else:
             return (frame - self.norm_min) / (self.norm_max - self.norm_min + eps)
 
-    def __call__(
-        self, frame: np.ndarray, normalize: bool = True
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def __call__(self, frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Process single frame with motion compensation.
 
+        The frame is normalized against the raw reference's intensity
+        range, so it can arrive at the recording's native scale (e.g.
+        uint16).
+
         Args:
             frame: Input frame (H,W,C) or (H,W)
-            normalize: Whether to normalize (unused, always normalizes)
 
         Returns:
             Tuple of (registered_frame, flow_field) with shapes (H,W,C) and (H,W,2)
@@ -237,7 +267,7 @@ class FlowRegLive:
 
         self.frame_count += 1
 
-        # Normalize using filtered reference parameters
+        # Normalize using the raw reference's range
         frame_norm = self._normalize_with_reference(frame)
 
         # Apply 2D Gaussian filter
@@ -309,16 +339,8 @@ class FlowRegLive:
                 1 - self.reference_update_weight
             ) * self.reference_raw + self.reference_update_weight * registered
 
-            # Update normalization parameters from new filtered reference
-            if self.options.channel_normalization.value == "separate":
-                self.norm_min = []
-                self.norm_max = []
-                for c in range(self.reference_proc.shape[2]):
-                    self.norm_min.append(self.reference_proc[..., c].min())
-                    self.norm_max.append(self.reference_proc[..., c].max())
-            else:
-                self.norm_min = self.reference_proc.min()
-                self.norm_max = self.reference_proc.max()
+            # Update normalization parameters from the new raw reference
+            self._update_norm_bounds()
 
         return registered, flow
 
@@ -336,7 +358,7 @@ class FlowRegLive:
         flows = np.empty(frames.shape[:3] + (2,), dtype=np.float32)
 
         for i in range(frames.shape[0]):
-            registered[i], flows[i] = self(frames[i], False)
+            registered[i], flows[i] = self(frames[i])
 
         return registered, flows
 
