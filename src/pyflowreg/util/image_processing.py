@@ -114,9 +114,13 @@ def apply_gaussian_filter(
         Input array, shape (H, W, C) or (T, H, W, C).
     sigma : np.ndarray
         Standard deviations of the Gaussian kernel ordered as
-        ``[sy, sx, st]``. Shape (3,) applies the same sigmas to all
-        channels; shape (n_channels, 3) gives per-channel sigmas. For
-        (H, W, C) input only the spatial components ``[sy, sx]`` are used.
+        ``[sx, sy, st]`` — ``sx`` smooths along the width/columns (W),
+        ``sy`` along the height/rows (H), ``st`` along frames (T) —
+        matching MATLAB's ``imgaussfilt``/``imgaussfilt3`` convention and
+        the ``OFOptions.sigma`` field. Shape (3,) applies the same sigmas
+        to all channels; shape (n_channels, 3) gives per-channel sigmas.
+        For (H, W, C) input only the spatial components ``[sx, sy]`` are
+        used.
     mode : str, optional
         Boundary handling mode passed to ``scipy.ndimage.gaussian_filter``.
         Default is "reflect".
@@ -139,8 +143,9 @@ def apply_gaussian_filter(
                 s = sigma[min(c, len(sigma) - 1), :2]  # Use only spatial components
             else:
                 s = sigma[:2]  # Use first two components
+            # Reorder from (sx, sy) to scipy's axis order (sy, sx) for (H, W)
             result[..., c] = gaussian_filter(
-                arr[..., c], sigma=s, mode=mode, truncate=truncate
+                arr[..., c], sigma=(s[1], s[0]), mode=mode, truncate=truncate
             )
         return result
 
@@ -149,10 +154,11 @@ def apply_gaussian_filter(
         for c in range(arr.shape[3]):  # C is last dimension
             if sigma.ndim == 2:  # Per-channel sigmas
                 s = sigma[min(c, len(sigma) - 1)]
-                # Reorder from (sy, sx, st) to (st, sy, sx) for scipy
-                s_3d = (s[2], s[0], s[1])
             else:
-                s_3d = (sigma[2], sigma[0], sigma[1])
+                s = sigma
+            # Reorder from (sx, sy, st) to scipy's axis order (st, sy, sx)
+            # for the (T, H, W) per-channel volume
+            s_3d = (s[2], s[1], s[0])
 
             # Apply 3D Gaussian filter
             result[..., c] = gaussian_filter(

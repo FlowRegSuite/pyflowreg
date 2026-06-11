@@ -28,7 +28,7 @@ Readers are selected by file extension: `.tif`/`.tiff` (TIFF), `.h5`/`.hdf5`/`.h
 - Dataset names: `ch1`, `ch2`, ..., `chN` (pattern configurable via `dataset_names`)
 - File-level attributes: `frame_count`, `height`, `width`, `n_channels`, `dimension_ordering`, `format`, `dataset_names`
 
-The reader interprets 3D datasets as `(T, H, W)` with one dataset per channel, and a 4D dataset as `(T, H, W, C)`.
+The reader interprets 3D datasets as `(T, H, W)` with one dataset per channel by default, and a 4D dataset as `(T, H, W, C)`. For files stored in a different axis order, pass the same `dimension_ordering` option the writer uses (axis positions of height, width, time — e.g. `dimension_ordering=(0, 1, 2)` for `(H, W, T)` datasets) to `get_video_file_reader`; reads are permuted back to `(T, H, W, C)`.
 
 ### TIFF (.tif, .tiff)
 

@@ -41,9 +41,9 @@ def compensate_arr(
     c1 : ndarray
         Input array to register, shape (T, H, W, C), (T, H, W), (H, W, C),
         or (H, W). A 3D input is treated as (T, H, W) when ``c_ref`` is 2D;
-        otherwise the array reader treats a 3D input as a single (H, W, C)
-        frame when the last dimension is at most 4, and as (T, H, W)
-        when it is larger.
+        otherwise it is treated as a single (H, W, C) frame when the last
+        dimension is at most 4 (the ArrayReader convention), and as
+        (T, H, W) when it is larger.
     c_ref : ndarray
         Reference frame, shape (H, W, C) or (H, W).
     options : OFOptions, optional
@@ -82,18 +82,18 @@ def compensate_arr(
     Returns
     -------
     c_reg : ndarray
-        Registered frames. Inputs of shape (T, H, W, C), (T, H, W), and
-        (H, W) keep their input shape; an (H, W, C) input is returned as
-        (1, H, W, C). Cast according to ``options.output_typename``
-        (default "double", i.e. float64) when it is one of "single",
-        "double", "uint8", "uint16", "int16", "int32"; other values leave
-        the pipeline output dtype unchanged.
+        Registered frames, with the same shape (rank) as the input:
+        (T, H, W, C), (T, H, W), (H, W, C), or (H, W). Cast according to
+        ``options.output_typename`` (default "double", i.e. float64) when
+        it is one of "single", "double", "uint8", "uint16", "int16",
+        "int32"; other values leave the pipeline output dtype unchanged.
     w : ndarray
         Displacement fields, shape (T, H, W, 2) with components (u, v),
         where ``w[..., 0]`` is the horizontal (x) and ``w[..., 1]`` the
-        vertical (y) displacement. For a single 2D (H, W) input the leading
-        time axis is removed, giving (H, W, 2). A zero-filled array is
-        returned if no displacement fields were captured.
+        vertical (y) displacement. For single-frame inputs ((H, W) or
+        (H, W, C)) the leading time axis is removed, giving (H, W, 2). A
+        zero-filled array is returned if no displacement fields were
+        captured.
 
     Raises
     ------
@@ -121,7 +121,8 @@ def compensate_arr(
     >>> registered, flow = compensate_arr(video, reference, progress_callback=progress)  # doctest: +SKIP
     """
     # Handle 3D squeeze for single channel (MATLAB compatibility)
-    squeezed = False
+    squeezed = False  # channel axis was added
+    single_frame = False  # time axis was added (input had no T axis)
     original_shape = c1.shape
 
     # Validate input is not empty
@@ -133,12 +134,20 @@ def compensate_arr(
         c1 = c1[..., np.newaxis]
         c_ref = c_ref[..., np.newaxis]
         squeezed = True
+    elif c1.ndim == 3 and c1.shape[-1] <= 4:
+        # Single (H, W, C) frame with a multi-channel reference - add the
+        # time axis here (mirrors the ArrayReader heuristic: a 3D array
+        # with last dimension <= 4 is one multi-channel frame) so the
+        # output rank can mirror the input rank.
+        c1 = c1[np.newaxis, ...]
+        single_frame = True
     elif c1.ndim == 2:
         # Single frame, single channel
         c1 = c1[np.newaxis, :, :, np.newaxis]
         if c_ref.ndim == 2:
             c_ref = c_ref[..., np.newaxis]
         squeezed = True
+        single_frame = True
 
     # Configure options for array processing
     if options is None:
@@ -154,7 +163,9 @@ def compensate_arr(
         if options.backend_params:
             options.backend_params.update(backend_params)
         else:
-            options.backend_params = backend_params
+            # Defensive copy so the internal options never alias the
+            # caller's kwarg dict.
+            options.backend_params = dict(backend_params)
     if get_displacement is not None:
         options.get_displacement_impl = get_displacement
     if get_displacement_factory is not None:
@@ -208,25 +219,32 @@ def compensate_arr(
         if options.output_typename in dtype_map:
             c_reg = c_reg.astype(dtype_map[options.output_typename])
 
-    # Squeeze back if needed to match input shape
+    # Squeeze back so the output rank mirrors the input rank
     if squeezed:
         if len(original_shape) == 2:
-            # Was single frame (H,W)
-            c_reg = np.squeeze(c_reg)
-            if w is not None:
-                w = np.squeeze(w, axis=0)  # Remove time dimension
+            # Was single frame (H,W): drop time and channel axes
+            c_reg = np.squeeze(c_reg, axis=(0, -1))
         elif len(original_shape) == 3:
-            # Was (T,H,W) or (H,W,C)
-            c_reg = np.squeeze(c_reg, axis=-1)  # Remove channel dimension
+            # Was (T,H,W) with a 2D reference: drop the channel axis
+            c_reg = np.squeeze(c_reg, axis=-1)
+    elif single_frame:
+        # Was a single (H,W,C) frame: drop the time axis
+        c_reg = np.squeeze(c_reg, axis=0)
 
-    # If no flow fields were captured, create empty array
+    if w is not None and single_frame:
+        w = np.squeeze(w, axis=0)  # Remove time dimension
+
+    # If no flow fields were captured, create a zero-filled array matching
+    # the documented shape: (H, W, 2) for single-frame inputs, (T, H, W, 2)
+    # otherwise
     if w is None:
-        if c_reg.ndim >= 3:
-            T = c_reg.shape[0] if c_reg.ndim == 4 else 1
-            H, W = c_reg.shape[-3:-1] if c_reg.ndim == 4 else c_reg.shape[:2]
+        if single_frame:
+            H, W = original_shape[:2]
+            w = np.zeros((H, W, 2), dtype=np.float32)
         else:
-            T, H, W = 1, c_reg.shape[0], c_reg.shape[1]
-        w = np.zeros((T, H, W, 2), dtype=np.float32)
+            # (T, H, W, C) or (T, H, W): spatial size at axes 1-2
+            H, W = original_shape[1:3]
+            w = np.zeros((original_shape[0], H, W, 2), dtype=np.float32)
 
     return c_reg, w
 

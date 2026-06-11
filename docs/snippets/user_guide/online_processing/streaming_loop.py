@@ -13,10 +13,10 @@ reader = get_video_file_reader("recording.tif")
 video = reader[:]
 reader.close()
 
-# Scale to [0, 1]: incoming frames are normalized against the stored
-# reference range, so they should arrive in a comparable intensity range
+# Frames are normalized against the raw reference's intensity range
+# internally, so they can stay at the recording's native scale (uint16
+# here); cast to float32 only to keep the demo arithmetic simple
 video = video.astype(np.float32)
-video = (video - video.min()) / (video.max() - video.min())
 
 # Configure optical flow; quality_setting is forced to "fast" internally
 options = OFOptions(

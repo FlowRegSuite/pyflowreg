@@ -112,6 +112,121 @@ class TestGetReferenceFrameWithSpatialWeights:
         assert reference.shape == (H, W, C)
 
 
+class TestGetReferenceFrameIndexHandling:
+    """Clipping/deduplication of reference indices and cc forwarding."""
+
+    @staticmethod
+    def _write_video(tmp_path, T=6, H=16, W=24, C=1):
+        import tifffile
+
+        frames = (np.random.rand(T, H, W, C) * 1000).astype(np.uint16)
+        video_path = tmp_path / "test_video.tif"
+        tifffile.imwrite(str(video_path), frames)
+        return video_path, frames
+
+    @staticmethod
+    def _patch_compensate_arr(captured):
+        import importlib
+        from unittest.mock import patch
+
+        # The pyflowreg.motion_correction package re-exports the
+        # compensate_arr *function*, shadowing the submodule attribute, so
+        # ``import ... as`` would bind the function. import_module returns
+        # the real submodule, which get_reference_frame imports from at
+        # call time.
+        compensate_arr_module = importlib.import_module(
+            "pyflowreg.motion_correction.compensate_arr"
+        )
+
+        def fake_compensate_arr(frames, reference, options=None, **kwargs):
+            captured["frames_shape"] = frames.shape
+            captured["options"] = options
+            T, H, W, _ = frames.shape
+            return frames, np.zeros((T, H, W, 2), dtype=np.float32)
+
+        return patch.object(
+            compensate_arr_module, "compensate_arr", side_effect=fake_compensate_arr
+        )
+
+    def test_get_reference_frame_clips_and_dedupes_out_of_range_indices(
+        self, tmp_path, capsys
+    ):
+        """Clipped duplicate indices collapse to unique frames before prereg."""
+        video_path, _ = self._write_video(tmp_path, T=6)
+        opts = OFOptions(
+            input_file=str(video_path),
+            reference_frames=list(range(2, 20)),  # 2..5 valid, 6..19 clip to 5
+            quality_setting=QualitySetting.FAST,
+        )
+        reader = opts.get_video_reader()
+
+        captured = {}
+        with self._patch_compensate_arr(captured):
+            opts.get_reference_frame(reader)
+
+        # Unique frames 2, 3, 4, 5 — not 18 frames with 14 copies of frame 5.
+        assert captured["frames_shape"][0] == 4
+        warning = capsys.readouterr().out
+        assert "exceed video length" in warning
+        assert "removing 14 duplicate indices" in warning
+
+    def test_get_reference_frame_all_clipped_returns_single_frame(self, tmp_path):
+        """Default-style fully out-of-range lists skip preregistration."""
+        video_path, frames = self._write_video(tmp_path, T=6)
+        opts = OFOptions(
+            input_file=str(video_path),
+            reference_frames=list(range(50, 500)),  # all clip to frame 5
+            quality_setting=QualitySetting.FAST,
+        )
+        reader = opts.get_video_reader()
+
+        captured = {}
+        with self._patch_compensate_arr(captured):
+            reference = opts.get_reference_frame(reader)
+
+        assert "frames_shape" not in captured, "prereg must be skipped"
+        assert reference.shape == frames.shape[1:]
+        assert np.array_equal(reference, frames[5])
+
+    def test_get_reference_frame_preserves_in_range_duplicates(self, tmp_path):
+        """Intentional duplicates in fully in-range lists are kept."""
+        video_path, _ = self._write_video(tmp_path, T=6)
+        opts = OFOptions(
+            input_file=str(video_path),
+            reference_frames=[1, 1, 2],
+            quality_setting=QualitySetting.FAST,
+        )
+        reader = opts.get_video_reader()
+
+        captured = {}
+        with self._patch_compensate_arr(captured):
+            opts.get_reference_frame(reader)
+
+        assert captured["frames_shape"][0] == 3
+
+    def test_get_reference_frame_forwards_cc_settings(self, tmp_path):
+        """Preregistration options carry cc_initialization/cc_hw/cc_up."""
+        video_path, _ = self._write_video(tmp_path, T=6)
+        opts = OFOptions(
+            input_file=str(video_path),
+            reference_frames=[0, 1, 2],
+            quality_setting=QualitySetting.FAST,
+            cc_initialization=True,
+            cc_hw=64,
+            cc_up=2,
+        )
+        reader = opts.get_video_reader()
+
+        captured = {}
+        with self._patch_compensate_arr(captured):
+            opts.get_reference_frame(reader)
+
+        prereg_options = captured["options"]
+        assert prereg_options.cc_initialization is True
+        assert prereg_options.cc_hw == 64
+        assert prereg_options.cc_up == 2
+
+
 class TestAlphaValidation:
     """Test alpha parameter validation."""
 

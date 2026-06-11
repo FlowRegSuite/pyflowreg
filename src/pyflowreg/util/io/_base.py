@@ -316,6 +316,10 @@ class VideoReader(ABC):
         """
         Check whether more frames are available for sequential reading.
 
+        Initializes the reader on first use, so a freshly constructed
+        reader can be consumed directly with ``while reader.has_batch():``
+        or ``for batch in reader:``.
+
         Returns
         -------
         bool
@@ -323,6 +327,7 @@ class VideoReader(ABC):
             frames have been consumed by ``read_batch()``; False once the
             end of the file is reached.
         """
+        self._ensure_initialized()
         return self.current_frame < self.frame_count
 
     def reset(self):

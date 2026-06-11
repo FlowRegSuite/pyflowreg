@@ -24,9 +24,9 @@ Source file -> mirror class:
 Speed adjustments versus the published examples (intent is unchanged):
 tiny synthetic inputs, ``quality_setting="fast"`` where the example used
 defaults, explicit small ``reference_frames`` (the default ``50:500``
-exceeds the tiny clips), and the sequential executor to avoid Windows
-process-spawn overhead. Examples that explicitly teach
-``quality_setting="balanced"`` keep it.
+exceeds the tiny clips and would clamp to the last frame), and the
+sequential executor to avoid Windows process-spawn overhead. Examples
+that explicitly teach ``quality_setting="balanced"`` keep it.
 """
 
 from pathlib import Path

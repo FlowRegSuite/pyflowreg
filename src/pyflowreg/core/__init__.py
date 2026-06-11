@@ -35,6 +35,8 @@ list_backends
     List all available backends
 is_backend_available
     Check if a specific backend is available
+get_backend_executors
+    Get the parallelization executors supported by a backend
 
 See Also
 --------
@@ -54,6 +56,7 @@ from .backend_registry import (
     get_backend,
     list_backends,
     is_backend_available,
+    get_backend_executors,
 )
 
 __all__ = [
@@ -62,6 +65,7 @@ __all__ = [
     "get_backend",
     "list_backends",
     "is_backend_available",
+    "get_backend_executors",
 ]
 
 # Register built-in backends

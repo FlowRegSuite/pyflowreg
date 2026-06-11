@@ -8,3 +8,6 @@ numba
 pywin32
 pydantic
 hdf5storage
+pyyaml
+Pillow
+tomli

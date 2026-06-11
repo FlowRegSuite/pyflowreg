@@ -35,6 +35,20 @@ class TestRegistrationConfig:
         assert config.verbose is True
         assert config.parallelization == "threading"
 
+    @pytest.mark.parametrize("verbose", [False, True])
+    def test_verbose_gates_progress_output(self, fast_of_options, verbose, capsys):
+        """Progress messages print only when verbose=True (natural polarity)."""
+        config = RegistrationConfig(
+            n_jobs=1, verbose=verbose, parallelization="sequential"
+        )
+        BatchMotionCorrector(fast_of_options, config)
+
+        out = capsys.readouterr().out
+        if verbose:
+            assert "Using sequential executor" in out
+        else:
+            assert "Using sequential executor" not in out
+
 
 class TestCompensateRecording:
     """Test the CompensateRecording class and executor system."""
@@ -121,7 +135,7 @@ class TestCompensateRecording:
             iterations=2,
         )
         config = RegistrationConfig(
-            n_jobs=1, verbose=True, parallelization="sequential"
+            n_jobs=1, verbose=False, parallelization="sequential"
         )
         pipeline = BatchMotionCorrector(options, config)
         pipeline.weight = np.ones((8, 8, 1), dtype=np.float64)
@@ -209,7 +223,7 @@ class TestCompensateRecordingIntegration:
         fast_of_options.buffer_size = 5
 
         config = RegistrationConfig(
-            n_jobs=1, verbose=True, parallelization="sequential"
+            n_jobs=1, verbose=False, parallelization="sequential"
         )
 
         # Test that pipeline can be created and configured correctly
@@ -229,7 +243,7 @@ class TestCompensateRecordingIntegration:
         fast_of_options.buffer_size = 3
 
         config = RegistrationConfig(
-            n_jobs=2, verbose=True, parallelization=executor_name
+            n_jobs=2, verbose=False, parallelization=executor_name
         )
 
         # Test executor selection by creating pipeline and checking executor type

@@ -71,12 +71,14 @@ the result.
   `compensate_recording` and `compensate_arr`. All three executors
   (sequential, threading, multiprocessing) implement it; see
   [Parallelization](parallelization.md) for executor selection.
+- Reference preregistration in `OFOptions.get_reference_frame` forwards the
+  `cc_*` settings, so an enabled pre-alignment also applies while building
+  the reference. (The MATLAB reference does not pre-align its
+  preregistration; this is a deliberate improvement.)
 - It is **not** applied by:
   - Direct `get_displacement` calls — the flow backends do not accept the
     `cc_*` parameters; the executors consume them before invoking the solver.
   - `FlowRegLive` online processing, which has no pre-alignment handling.
-  - Reference preregistration in `OFOptions.get_reference_frame`, which builds
-    its own internal options without `cc_initialization`.
 - Each pre-aligned frame requires two additional warps and one FFT-based
   correlation, so leave it disabled when frame-to-frame motion is small.
 

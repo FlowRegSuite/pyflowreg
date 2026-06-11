@@ -17,6 +17,28 @@ def _write_interleaved_pages_tiff(path, data):
                 tw.write(data[t_idx, :, :, c_idx])
 
 
+def test_fresh_reader_has_batch_initializes(tmp_path):
+    """
+    Regression test: has_batch() on a freshly constructed (lazy) reader
+    must initialize it, so `for batch in reader:` yields all frames
+    instead of terminating immediately with frame_count == 0.
+    """
+    t_count, height, width = 6, 8, 6
+    data = (np.random.rand(t_count, height, width) * 1000).astype(np.uint16)
+    tif_path = tmp_path / "stack.tif"
+    tifffile.imwrite(tif_path, data)
+
+    reader = TIFFFileReader(str(tif_path), buffer_size=4)
+    try:
+        assert reader.has_batch()
+        batches = [batch for batch in reader]
+        frames = np.concatenate(batches, axis=0)
+        assert frames.shape == (t_count, height, width, 1)
+        np.testing.assert_array_equal(frames[..., 0], data)
+    finally:
+        reader.close()
+
+
 def test_read_batch_overreported_frame_count(tmp_path):
     """
     Guard existing behavior:

@@ -325,7 +325,10 @@ class OFOptions(BaseModel):
 
     - ``reference_frames`` (list of int, str, Path or ndarray, default
       ``list(range(50, 500))``): Frame indices to preregister and average,
-      an image file path, or a precomputed reference array.
+      an image file path, or a precomputed reference array. Indices beyond
+      the recording length are clipped to the last frame and the resulting
+      duplicates are removed with a printed warning, so short recordings
+      preregister each available frame exactly once.
     - ``update_reference`` (bool, default ``False``): Update reference
       during processing.
     - ``n_references`` (int, default ``1``): Number of references;
@@ -337,7 +340,9 @@ class OFOptions(BaseModel):
     **Pre-alignment**
 
     - ``cc_initialization`` (bool, default ``False``): Enable
-      cross-correlation initialization.
+      cross-correlation initialization. Also applied during reference
+      preregistration in ``get_reference_frame`` (an improvement over the
+      MATLAB reference, whose preregistration is not pre-aligned).
     - ``cc_hw`` (int or 2-tuple of int, default ``256``): Target
       height/width for cross-correlation projections.
     - ``cc_up`` (int, default ``1``): Upsampling factor for subpixel
@@ -790,7 +795,12 @@ class OFOptions(BaseModel):
         video_reader: Optional[VideoReader] = None,
         registration_config: Optional[Any] = None,
     ) -> Union[np.ndarray, List[np.ndarray]]:
-        """Get reference frame(s), with optional preregistration."""
+        """Get reference frame(s), with optional preregistration.
+
+        Index lists are clipped to the recording length (duplicates from
+        clipping are removed with a printed warning); the preregistration
+        honors ``cc_initialization``/``cc_hw``/``cc_up``.
+        """
         if self.n_references > 1:
             warnings.warn(
                 "Multi-reference mode not fully implemented; repeating a single computed reference"
@@ -833,10 +843,20 @@ class OFOptions(BaseModel):
                     valid_indices.append(idx)
 
             if clipped:
+                # Deduplicate (order-preserving): clipping maps every
+                # out-of-range index to the last frame, which would
+                # otherwise be read, flow-solved, and averaged hundreds of
+                # times, massively over-weighting it in the reference.
+                # Intentional duplicates in fully in-range user lists are
+                # preserved (no dedup when nothing was clipped).
+                n_requested = len(valid_indices)
+                valid_indices = list(dict.fromkeys(valid_indices))
+                n_removed = n_requested - len(valid_indices)
                 print(
                     f"Warning: Reference frames exceed video length ({frame_count} frames). "
                     f"Clipping indices from {self.reference_frames[0]}-{self.reference_frames[-1]} "
-                    f"to {valid_indices[0]}-{valid_indices[-1]}"
+                    f"to {valid_indices[0]}-{valid_indices[-1]} and removing "
+                    f"{n_removed} duplicate indices."
                 )
 
             frames = video_reader[valid_indices]  # (T,H,W,C) using array-like indexing
@@ -867,9 +887,13 @@ class OFOptions(BaseModel):
             if gaussian_filter is not None:
                 frames_smooth = np.zeros_like(frames)
                 for c in range(n_channels):
+                    # sig is (sx, sy, st); the per-channel slice is
+                    # (H, W, T), so reorder to scipy's axis order (sy, sx, st).
                     sig = self.get_sigma_at(c) + np.array([1, 1, 0.5])
                     frames_smooth[:, :, c, :] = gaussian_filter(
-                        frames[:, :, c, :], sigma=tuple(sig), mode="reflect"
+                        frames[:, :, c, :],
+                        sigma=(sig[1], sig[0], sig[2]),
+                        mode="reflect",
                     )
             else:
                 frames_smooth = frames
@@ -900,7 +924,11 @@ class OFOptions(BaseModel):
                 else self.alpha + 2.0
             )
 
-            # Create a temporary OFOptions for preregistration
+            # Create a temporary OFOptions for preregistration. The
+            # cross-correlation pre-alignment settings are forwarded so an
+            # enabled cc_initialization also applies during reference
+            # preregistration (the MATLAB reference does not pre-align its
+            # preregistration; this is a deliberate improvement).
             prereg_options = OFOptions(
                 alpha=alpha_prereg,
                 levels=self.levels,
@@ -913,6 +941,9 @@ class OFOptions(BaseModel):
                 constancy_assumption=self.constancy_assumption,
                 weight=weight_2d,
                 buffer_size=self.buffer_size,
+                cc_initialization=self.cc_initialization,
+                cc_hw=self.cc_hw,
+                cc_up=self.cc_up,
             )
 
             # Reshape frames_norm from (H,W,C,T) to (T,H,W,C) for compensate_arr

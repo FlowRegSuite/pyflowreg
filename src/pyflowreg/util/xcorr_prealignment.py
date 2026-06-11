@@ -31,7 +31,11 @@ def estimate_rigid_xcorr_2d(
     disambiguate : bool
         Whether to disambiguate sign of shift
     weight : np.ndarray or None
-        Channel weights for multi-channel images
+        Weights used to collapse multi-channel images to a single plane
+        before correlation. Either per-channel weights of shape (C,) or
+        spatial weights of shape (H, W, C) (a per-pixel weighted channel
+        mean is used; spatially constant weights are equivalent to the
+        per-channel form)
 
     Returns
     -------
@@ -41,10 +45,20 @@ def estimate_rigid_xcorr_2d(
     # Handle multi-channel images
     if ref_img.ndim == 3 and ref_img.shape[2] > 1:
         if weight is not None:
-            w = weight.reshape(-1).astype(np.float32)
-            w /= w.sum()
-            ref_img = np.tensordot(ref_img, w, axes=([2], [0]))
-            mov_img = np.tensordot(mov_img, w, axes=([2], [0]))
+            w = np.asarray(weight, dtype=np.float32)
+            if w.ndim >= 2:
+                # Spatial (H, W, C) weights (e.g. from reference
+                # preregistration): per-pixel weighted channel mean.
+                # Identical to the per-channel path when the weights are
+                # spatially constant.
+                wsum = w.sum(axis=-1) + 1e-12
+                ref_img = (ref_img * w).sum(axis=-1) / wsum
+                mov_img = (mov_img * w).sum(axis=-1) / wsum
+            else:
+                w = w.reshape(-1)
+                w /= w.sum()
+                ref_img = np.tensordot(ref_img, w, axes=([2], [0]))
+                mov_img = np.tensordot(mov_img, w, axes=([2], [0]))
         else:
             ref_img = ref_img.mean(axis=2)
             mov_img = mov_img.mean(axis=2)

@@ -30,9 +30,11 @@ Registration and constraints as implemented:
   ``gradient_descent_iterations``, ``patch_size``, ``patch_stride``,
   ``use_mean_normalization``, ``use_spatial_propagation``).
 - Variational solver keywords forwarded by the pipelines (``alpha``,
-  ``iterations``, ``uv``, ``const_assumption``, ``gnc_schedule``, ...) are
+  ``iterations``, ``const_assumption``, ``gnc_schedule``, ...) are
   accepted by :meth:`DisoOF.__call__` for signature compatibility but
-  ignored.
+  ignored. The flow initialization keyword ``uv`` is the exception: it is
+  honored as the DIS warm start (``w`` takes precedence when both are
+  given).
 
 References
 ----------
@@ -339,16 +341,21 @@ class DisoOF:
             conventions as ``fixed``.
         w : ndarray, optional
             Initial displacement field of shape (H, W, 2) used as warm
-            start. Used only if it is an ndarray with exactly this layout;
-            it is cast to float32.
+            start. Takes precedence over ``uv`` when both are given. Used
+            only if it is an ndarray with exactly this layout and the same
+            spatial size as the images; it is converted to contiguous
+            float32.
         weight : ndarray, optional
             Channel weights for multi-channel inputs; see ``_to_gray`` for
             the accepted formats.
         **kwargs : dict
             Accepted for signature compatibility with the variational
-            :func:`pyflowreg.core.optical_flow.get_displacement` (e.g.
-            ``alpha``, ``iterations``, ``uv``, ``const_assumption``,
-            ``gnc_schedule``); all extra keyword arguments are ignored.
+            :func:`pyflowreg.core.optical_flow.get_displacement`. The
+            ``uv`` keyword (the flow initialization passed by the batch
+            pipelines) is honored as warm start when ``w`` is not given;
+            all other extra keyword arguments (e.g. ``alpha``,
+            ``iterations``, ``const_assumption``, ``gnc_schedule``) are
+            ignored.
 
         Returns
         -------
@@ -362,8 +369,9 @@ class DisoOF:
         Notes
         -----
         The batch pipelines pass the flow initialization as the keyword
-        ``uv``, which this wrapper does not read; a warm start is only used
-        when supplied via ``w``.
+        ``uv``; it is forwarded to ``cv2.DISOpticalFlow.calc`` as the
+        initial flow. A warm start whose spatial size does not match the
+        images is silently skipped (mirroring OpenCV's own size check).
         """
         self._ensure()
 
@@ -374,15 +382,21 @@ class DisoOF:
         # Normalize to [0,255] uint8
         A, B = self._normalize(a, b)
 
-        # Prepare initial flow if provided
+        # Prepare initial flow if provided. Precedence: explicit ``w`` wins,
+        # otherwise fall back to the pipeline keyword ``uv`` (used by the
+        # executors, FlowRegLive and compensate_recording).
         init = None
+        init_src = w if w is not None else kwargs.get("uv")
         if (
-            w is not None
-            and isinstance(w, np.ndarray)
-            and w.ndim == 3
-            and w.shape[2] == 2
+            isinstance(init_src, np.ndarray)
+            and init_src.ndim == 3
+            and init_src.shape[2] == 2
+            and init_src.shape[:2] == A.shape[:2]
         ):
-            init = w.astype(np.float32, copy=False)
+            # Copy: cv2.DISOpticalFlow.calc treats the init flow as an
+            # InputOutputArray and writes the result into it in place; cv2
+            # also requires contiguous float32 (CV_32FC2) of image size.
+            init = np.array(init_src, dtype=np.float32, order="C", copy=True)
 
         # Compute optical flow
         flow = self._dis.calc(A, B, init)

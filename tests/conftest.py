@@ -109,19 +109,21 @@ def fast_of_options(temp_dir):
 @pytest.fixture(scope="function")
 def sequential_config():
     """Create configuration for sequential executor."""
-    return RegistrationConfig(n_jobs=1, verbose=True, parallelization="sequential")
+    return RegistrationConfig(n_jobs=1, verbose=False, parallelization="sequential")
 
 
 @pytest.fixture(scope="function")
 def threading_config():
     """Create configuration for threading executor."""
-    return RegistrationConfig(n_jobs=2, verbose=True, parallelization="threading")
+    return RegistrationConfig(n_jobs=2, verbose=False, parallelization="threading")
 
 
 @pytest.fixture(scope="function")
 def multiprocessing_config():
     """Create configuration for multiprocessing executor."""
-    return RegistrationConfig(n_jobs=2, verbose=True, parallelization="multiprocessing")
+    return RegistrationConfig(
+        n_jobs=2, verbose=False, parallelization="multiprocessing"
+    )
 
 
 @pytest.fixture(scope="function")
@@ -130,7 +132,7 @@ def auto_config():
     return RegistrationConfig(
         n_jobs=2,
         batch_size=10,
-        verbose=True,
+        verbose=False,
         parallelization=None,  # Auto-select
     )
 
@@ -139,7 +141,7 @@ def auto_config():
 def executor_config(request):
     """Parametrized fixture to test all executor types."""
     return RegistrationConfig(
-        n_jobs=2, batch_size=5, verbose=True, parallelization=request.param
+        n_jobs=2, batch_size=5, verbose=False, parallelization=request.param
     )
 
 

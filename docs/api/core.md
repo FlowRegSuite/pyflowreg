@@ -178,11 +178,10 @@ at registration, all executors are assumed to be supported.
 
 {func}`~pyflowreg.core.backend_registry.register_backend`,
 {func}`~pyflowreg.core.backend_registry.get_backend`,
-{func}`~pyflowreg.core.backend_registry.list_backends`, and
-{func}`~pyflowreg.core.backend_registry.is_backend_available` are re-exported
-from `pyflowreg.core`;
-{func}`~pyflowreg.core.backend_registry.get_backend_executors` is available
-from `pyflowreg.core.backend_registry`.
+{func}`~pyflowreg.core.backend_registry.list_backends`,
+{func}`~pyflowreg.core.backend_registry.is_backend_available`, and
+{func}`~pyflowreg.core.backend_registry.get_backend_executors` are
+re-exported from `pyflowreg.core`.
 
 ```{eval-rst}
 .. automodule:: pyflowreg.core.backend_registry
@@ -216,8 +215,10 @@ flow (`cv2.DISOpticalFlow`) behind the same callable interface as
 {func}`~pyflowreg.core.optical_flow.get_displacement`. It is registered only
 when OpenCV (`cv2`) is importable. {class}`~pyflowreg.core.diso_optical_flow.DisoOF`
 reduces multi-channel input to grayscale using the channel weights, accepts
-an optional initial flow field for warm starts, and initializes the OpenCV
-DIS object lazily so instances remain picklable.
+an optional initial flow field for warm starts (both as its native `w`
+keyword and as the `uv` keyword the batch pipelines and `FlowRegLive` pass,
+with `w` taking precedence), and initializes the OpenCV DIS object lazily so
+instances remain picklable.
 
 Compared to the variational `flowreg` backend, `diso` has the following
 restrictions (enforced when the backend is resolved through `OFOptions`):

@@ -112,6 +112,68 @@ class TestFlowRegLiveBasics:
         assert flow_reg.reference_raw.shape == (H, W, C)
         assert flow_reg.reference_proc.shape == (H, W, C)
 
+    def test_set_reference_from_grayscale_stack(self):
+        """A 3D (T,H,W) array with last dim > 4 is a stack, not one frame."""
+        flow_reg = FlowRegLive()
+
+        T, H, W = 8, 24, 32
+        frames = np.random.rand(T, H, W).astype(np.float32)
+
+        flow_reg.set_reference(frames)
+
+        # Preregistered and averaged to a single-channel (H,W,1) reference,
+        # not misread as one (T,H,W)="(H,W,C)" frame with W channels.
+        assert flow_reg.reference_raw.shape == (H, W, 1)
+        assert flow_reg.reference_proc.shape == (H, W, 1)
+
+    def test_set_reference_norm_bounds_from_raw_reference(self):
+        """Normalization bounds come from the RAW reference's range."""
+        flow_reg = FlowRegLive()
+
+        H, W, C = 24, 24, 1
+        # Raw-scale (uint16-like) reference with a known range
+        reference = (np.random.rand(H, W, C) * 40000 + 1000).astype(np.uint16)
+        flow_reg.set_reference(reference)
+
+        assert flow_reg.norm_min == reference.min()
+        assert flow_reg.norm_max == reference.max()
+
+    def test_call_handles_raw_scale_uint16_frames(self):
+        """Raw uint16 frames are normalized consistently with the reference."""
+        flow_reg = FlowRegLive()
+
+        H, W = 32, 32
+        rng = np.random.default_rng(0)
+        base = (rng.random((H, W, 1)) * 40000 + 1000).astype(np.uint16)
+        flow_reg.set_reference(base)
+
+        registered, flow = flow_reg(base.copy())
+
+        assert np.all(np.isfinite(registered))
+        assert np.all(np.isfinite(flow))
+        # Identical raw-scale frame vs reference: displacements stay small
+        # (with the old filtered-reference bounds the frame reached the
+        # solver at ~4e4 scale against a [0,1] reference).
+        assert np.abs(flow).max() < 2.0
+
+    def test_per_channel_sigmas_are_kept(self):
+        """Per-channel sigma rows are not collapsed to channel 0's."""
+        options = OFOptions(sigma=[[1.0, 2.0, 0.5], [3.0, 4.0, 1.0]])
+        flow_reg = FlowRegLive(options=options)
+
+        assert flow_reg.sigma_2d.shape == (2, 2)
+        assert np.allclose(flow_reg.sigma_2d, [[1.0, 2.0], [3.0, 4.0]])
+        assert flow_reg.sigma_t == 1.0
+
+    def test_call_takes_only_the_frame(self):
+        """__call__ no longer accepts the removed dead normalize kwarg."""
+        flow_reg = FlowRegLive()
+        frame = np.random.rand(16, 16, 1).astype(np.float32)
+        flow_reg.set_reference(frame)
+
+        with pytest.raises(TypeError):
+            flow_reg(frame, True)
+
     def test_set_reference_from_buffer(self):
         """Test setting reference from internal buffer."""
         flow_reg = FlowRegLive(reference_buffer_size=5)
