@@ -136,6 +136,66 @@ class TestEstimateRigidXcorr2D:
         assert np.abs(estimated_shift[0] - true_dx_dy[0]) <= 1.0
         assert np.abs(estimated_shift[1] - true_dx_dy[1]) <= 1.0
 
+    @staticmethod
+    def _multichannel_pair(true_dx_dy):
+        """Structured 2-channel ref/mov pair shifted by true_dx_dy."""
+        H, W, C = 64, 64, 2
+        rng = np.random.default_rng(0)
+        ref = np.zeros((H, W, C), dtype=np.float32)
+        y, x = np.ogrid[:H, :W]
+        ref[..., 0] = np.exp(-((y - 20) ** 2 + (x - 30) ** 2) / 50)
+        ref[..., 1] = np.exp(-((y - 40) ** 2 + (x - 35) ** 2) / 40)
+        ref[15:25, 40:50, 0] = 1.0
+        ref[35:45, 10:20, 1] = 0.8
+        ref += rng.standard_normal((H, W, C)).astype(np.float32) * 0.05
+
+        mov = np.zeros_like(ref)
+        for c in range(C):
+            mov[..., c] = ndi_shift(
+                ref[..., c],
+                shift=(true_dx_dy[1], true_dx_dy[0]),
+                order=1,
+                mode="constant",
+            )
+        return ref, mov
+
+    def test_estimate_rigid_xcorr_2d_spatial_weight_runs(self):
+        """Spatial (H, W, C) weights (preregistration shape) are accepted."""
+        true_dx_dy = np.array([3.0, -2.0], dtype=np.float32)
+        ref, mov = self._multichannel_pair(true_dx_dy)
+        H, W, C = ref.shape
+
+        # Per-channel weights broadcast to the spatial (H, W, C) layout
+        # that get_reference_frame builds for preregistration options.
+        weight_spatial = np.zeros((H, W, C), dtype=np.float32)
+        weight_spatial[..., 0] = 0.7
+        weight_spatial[..., 1] = 0.3
+
+        estimated_shift = estimate_rigid_xcorr_2d(
+            ref, mov, weight=weight_spatial, target_hw=(64, 64), up=1
+        )
+
+        assert np.abs(estimated_shift[0] - true_dx_dy[0]) <= 1.0
+        assert np.abs(estimated_shift[1] - true_dx_dy[1]) <= 1.0
+
+    def test_estimate_rigid_xcorr_2d_spatial_weight_matches_channel_weight(self):
+        """Spatially constant (H, W, C) weights equal the (C,) weight path."""
+        true_dx_dy = np.array([3.0, -2.0], dtype=np.float32)
+        ref, mov = self._multichannel_pair(true_dx_dy)
+        H, W, C = ref.shape
+
+        weight_channel = np.array([0.7, 0.3], dtype=np.float32)
+        weight_spatial = np.broadcast_to(weight_channel, (H, W, C)).copy()
+
+        shift_channel = estimate_rigid_xcorr_2d(
+            ref, mov, weight=weight_channel, target_hw=(64, 64), up=10
+        )
+        shift_spatial = estimate_rigid_xcorr_2d(
+            ref, mov, weight=weight_spatial, target_hw=(64, 64), up=10
+        )
+
+        np.testing.assert_allclose(shift_spatial, shift_channel, atol=1e-4)
+
 
 class TestCCPrealignmentIntegration:
     """Test CC prealignment integration with motion compensation."""

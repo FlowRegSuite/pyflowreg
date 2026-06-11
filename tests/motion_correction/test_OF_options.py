@@ -126,8 +126,17 @@ class TestGetReferenceFrameIndexHandling:
 
     @staticmethod
     def _patch_compensate_arr(captured):
+        import importlib
         from unittest.mock import patch
-        import pyflowreg.motion_correction.compensate_arr as compensate_arr_module
+
+        # The pyflowreg.motion_correction package re-exports the
+        # compensate_arr *function*, shadowing the submodule attribute, so
+        # ``import ... as`` would bind the function. import_module returns
+        # the real submodule, which get_reference_frame imports from at
+        # call time.
+        compensate_arr_module = importlib.import_module(
+            "pyflowreg.motion_correction.compensate_arr"
+        )
 
         def fake_compensate_arr(frames, reference, options=None, **kwargs):
             captured["frames_shape"] = frames.shape

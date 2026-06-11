@@ -105,7 +105,12 @@ class TestMultiSessionPipeline:
         output_folders = ns["output_folders"]
         assert len(output_folders) == 3
         for folder in output_folders:
-            assert (folder / "compensated.hdf5").exists()
+            # Stage 1 writes "compensated.HDF5"; the session module itself
+            # accepts both spellings (see stage1_compensate), and only
+            # case-insensitive filesystems collapse them.
+            assert (folder / "compensated.HDF5").exists() or (
+                folder / "compensated.hdf5"
+            ).exists()
             assert (folder / "temporal_average.npy").exists()
             assert (folder / "idx.hdf").exists()
 
